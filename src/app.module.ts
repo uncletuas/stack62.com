@@ -26,7 +26,10 @@ import { TasksModule } from './modules/tasks/tasks.module';
 import { UsersModule } from './modules/users/users.module';
 import { WorkflowsModule } from './modules/workflows/workflows.module';
 import { WorkspacesModule } from './modules/workspaces/workspaces.module';
+import { DocumentExtractionModule } from './modules/document-extraction/document-extraction.module';
 import { FilesModule } from './modules/files/files.module';
+import { FoldersModule } from './modules/folders/folders.module';
+import { SemanticSearchModule } from './modules/semantic-search/semantic-search.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { RunnerModule } from './modules/runner/runner.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
@@ -110,6 +113,9 @@ import { BillingModule } from './modules/billing/billing.module';
     TasksModule,
     SchedulesModule,
     FilesModule,
+    FoldersModule,
+    DocumentExtractionModule,
+    SemanticSearchModule,
     DocumentsModule,
     ReportsModule,
     SearchModule,

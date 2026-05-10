@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -15,6 +16,8 @@ import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
 import PptxGenJS from 'pptxgenjs';
 import { AccessControlService } from '../../shared/access-control/access-control.service';
+import { STORAGE_BACKEND } from '../../shared/storage';
+import type { StorageBackend } from '../../shared/storage';
 import { ContentIndexService } from '../search/content-index.service';
 import { UploadFileDto } from './dto/upload-file.dto';
 import { FileEntity, FileScope } from './entities/file.entity';
@@ -46,12 +49,27 @@ export class FilesService {
     private readonly accessControlService: AccessControlService,
     private readonly configService: ConfigService,
     private readonly contentIndexService: ContentIndexService,
+    @Inject(STORAGE_BACKEND)
+    private readonly storage: StorageBackend,
   ) {
     const configured = this.configService.get<string>('FILE_STORAGE_ROOT', '');
     this.storageRoot = configured
       ? path.resolve(configured)
       : path.resolve(process.cwd(), 'storage', 'files');
-    this.ensureDir(this.storageRoot);
+    // Local-disk only — kept for legacy register() compatibility. The
+    // StorageBackend is the canonical read/write path for everything else.
+    if (this.storage.name === 'local-disk') {
+      this.ensureDir(this.storageRoot);
+    }
+  }
+
+  /**
+   * Read raw bytes via the storage backend. Replaces the previous
+   * direct `fs.readFile(getAbsolutePath(file))` usage so the same code
+   * path works for local and S3.
+   */
+  async getBuffer(file: FileEntity): Promise<Buffer> {
+    return this.storage.getObjectBuffer(file.storagePath);
   }
 
   async upload(
@@ -71,18 +89,19 @@ export class FilesService {
     const id = crypto.randomUUID();
     const ext = path.extname(file.originalName) || '';
     const safeName = `${id}${ext}`;
-
-    const relDir = path.join(dto.organizationId, scope);
-    const absDir = path.join(this.storageRoot, relDir);
-    this.ensureDir(absDir);
-
-    const absPath = path.join(absDir, safeName);
-    await fs.promises.writeFile(absPath, file.buffer);
+    const storageKey = `${dto.organizationId}/${scope}/${safeName}`;
 
     const checksum = crypto
       .createHash('sha256')
       .update(file.buffer)
       .digest('hex');
+
+    await this.storage.putObject({
+      key: storageKey,
+      body: file.buffer,
+      contentType: file.mimeType,
+      checksum,
+    });
 
     const entity = this.filesRepository.create({
       id,
@@ -93,13 +112,14 @@ export class FilesService {
       filename: file.originalName,
       mimeType: file.mimeType,
       size: String(file.size),
-      storagePath: path.join(relDir, safeName).replace(/\\/g, '/'),
+      storagePath: storageKey,
       checksum,
       ownerKind: dto.ownerKind ?? null,
       ownerId: dto.ownerId ?? null,
       metadata: null,
       uploadedByUserId: actorUserId,
       status: 'active',
+      folderId: (dto as { folderId?: string }).folderId ?? null,
     });
 
     const saved = await this.filesRepository.save(entity);
@@ -125,12 +145,28 @@ export class FilesService {
     uploadedByUserId?: string | null;
     metadata?: Record<string, unknown> | null;
   }): Promise<FileEntity> {
-    const rel = path
-      .relative(this.storageRoot, params.absolutePath)
-      .replace(/\\/g, '/');
-
     const buffer = await fs.promises.readFile(params.absolutePath);
     const checksum = crypto.createHash('sha256').update(buffer).digest('hex');
+
+    // For non-local backends, copy the on-disk file into object storage
+    // so the registered key resolves correctly later. The DocumentsService
+    // writes to a local temp dir; we re-key it under the canonical layout.
+    let storageKey: string;
+    if (this.storage.name === 'local-disk') {
+      storageKey = path
+        .relative(this.storageRoot, params.absolutePath)
+        .replace(/\\/g, '/');
+    } else {
+      storageKey = `${params.organizationId}/${params.scope}/${path.basename(
+        params.absolutePath,
+      )}`;
+      await this.storage.putObject({
+        key: storageKey,
+        body: buffer,
+        contentType: params.mimeType,
+        checksum,
+      });
+    }
 
     const entity = this.filesRepository.create({
       organizationId: params.organizationId,
@@ -140,7 +176,7 @@ export class FilesService {
       filename: params.filename,
       mimeType: params.mimeType,
       size: String(params.size),
-      storagePath: rel,
+      storagePath: storageKey,
       checksum,
       ownerKind: params.ownerKind ?? null,
       ownerId: params.ownerId ?? null,
@@ -217,14 +253,23 @@ export class FilesService {
     return file;
   }
 
+  /**
+   * @deprecated Local-disk only. New code should use `getBuffer(file)`
+   * which goes through the StorageBackend abstraction. Kept until the
+   * generated-runner module is fully migrated.
+   */
   getAbsolutePath(file: FileEntity): string {
+    if (this.storage.name !== 'local-disk') {
+      throw new Error(
+        'getAbsolutePath is unavailable when STORAGE_BACKEND is not local-disk. Use getBuffer(file) instead.',
+      );
+    }
     return path.join(this.storageRoot, file.storagePath);
   }
 
   async read(fileId: string, actorUserId: string) {
     const file = await this.findOne(fileId, actorUserId);
-    const abs = this.getAbsolutePath(file);
-    const buffer = await fs.promises.readFile(abs);
+    const buffer = await this.storage.getObjectBuffer(file.storagePath);
     return { file, buffer };
   }
 
@@ -286,11 +331,14 @@ export class FilesService {
             ? await this.renderPptxFromText(text)
         : Buffer.from(text ?? '', 'utf8');
 
-    const abs = this.getAbsolutePath(file);
-    await fs.promises.writeFile(abs, buffer);
-
-    file.size = String(buffer.length);
     file.checksum = crypto.createHash('sha256').update(buffer).digest('hex');
+    await this.storage.putObject({
+      key: file.storagePath,
+      body: buffer,
+      contentType: file.mimeType,
+      checksum: file.checksum,
+    });
+    file.size = String(buffer.length);
     file.metadata = {
       ...(file.metadata ?? {}),
       editableText: true,

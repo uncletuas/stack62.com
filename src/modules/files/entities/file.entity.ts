@@ -54,4 +54,26 @@ export class FileEntity extends AppBaseEntity {
 
   @Column({ type: 'varchar', length: 30, default: 'active' })
   status!: string;
+
+  /**
+   * Folder this file lives in. NULL = the implicit org root. The user
+   * sees these as if they were in the root.
+   */
+  @Column({ name: 'folder_id', type: 'uuid', nullable: true })
+  folderId!: string | null;
+
+  /**
+   * Versioning: incremented every time the content is overwritten.
+   * `previousVersionFileId` chains back to prior versions so we can
+   * show a history without joining a separate table.
+   */
+  @Column({ type: 'int', default: 1 })
+  version!: number;
+
+  @Column({
+    name: 'previous_version_file_id',
+    type: 'uuid',
+    nullable: true,
+  })
+  previousVersionFileId!: string | null;
 }
