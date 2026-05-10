@@ -1,0 +1,163 @@
+{
+  "name": "SME Operations Hub",
+  "purpose": "A practical first Stack62 vertical for general SMEs: CRM, approvals, documents, notifications, procurement, inventory, and payment tracking.",
+  "description": "This is the recommended v1 killer workflow because it touches daily revenue and operations without requiring regulated finance or health compliance on day one.",
+  "teamSize": 25,
+  "industryType": "general_sme_operations",
+  "governanceMode": "standard",
+  "visibility": "private",
+  "modules": [
+    {
+      "name": "CRM",
+      "key": "crm",
+      "kind": "custom",
+      "description": "Leads, customers, opportunities, and follow-ups.",
+      "config": {},
+      "entities": [
+        {
+          "name": "Leads",
+          "key": "leads",
+          "description": "Potential customers and inbound enquiries.",
+          "config": {},
+          "fields": [
+            { "name": "Company Name", "key": "company_name", "dataType": "text", "required": true, "config": null },
+            { "name": "Contact Name", "key": "contact_name", "dataType": "text", "required": true, "config": null },
+            { "name": "Email", "key": "email", "dataType": "email", "required": false, "config": null },
+            { "name": "Phone", "key": "phone", "dataType": "phone", "required": false, "config": null },
+            { "name": "Stage", "key": "stage", "dataType": "select", "required": true, "config": { "options": ["new", "contacted", "qualified", "proposal", "won", "lost"] } },
+            { "name": "Expected Value", "key": "expected_value", "dataType": "number", "required": false, "config": null },
+            { "name": "Next Follow-up", "key": "next_follow_up", "dataType": "date", "required": false, "config": null }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Approvals",
+      "key": "approvals",
+      "kind": "custom",
+      "description": "Leave, purchase, and payment requests routed to managers.",
+      "config": {},
+      "entities": [
+        {
+          "name": "Requests",
+          "key": "requests",
+          "description": "Approval requests across HR, procurement, and finance.",
+          "config": {},
+          "fields": [
+            { "name": "Request Type", "key": "request_type", "dataType": "select", "required": true, "config": { "options": ["leave", "purchase", "payment", "document"] } },
+            { "name": "Requester", "key": "requester", "dataType": "text", "required": true, "config": null },
+            { "name": "Amount", "key": "amount", "dataType": "number", "required": false, "config": null },
+            { "name": "Status", "key": "status", "dataType": "select", "required": true, "config": { "options": ["draft", "submitted", "approved", "rejected", "paid", "closed"] } },
+            { "name": "Reason", "key": "reason", "dataType": "textarea", "required": false, "config": null },
+            { "name": "Due Date", "key": "due_date", "dataType": "date", "required": false, "config": null }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Inventory",
+      "key": "inventory",
+      "kind": "custom",
+      "description": "Stock items, reorder levels, and supplier procurement.",
+      "config": {},
+      "entities": [
+        {
+          "name": "Stock Items",
+          "key": "stock_items",
+          "description": "Products and materials tracked by quantity.",
+          "config": {},
+          "fields": [
+            { "name": "Item Name", "key": "item_name", "dataType": "text", "required": true, "config": null },
+            { "name": "SKU", "key": "sku", "dataType": "text", "required": false, "config": null },
+            { "name": "Quantity", "key": "quantity", "dataType": "number", "required": true, "config": null },
+            { "name": "Reorder Level", "key": "reorder_level", "dataType": "number", "required": false, "config": null },
+            { "name": "Supplier", "key": "supplier", "dataType": "text", "required": false, "config": null }
+          ]
+        }
+      ]
+    }
+  ],
+  "views": [
+    { "name": "Lead Pipeline", "type": "kanban", "entityKey": "leads", "config": { "groupBy": "stage" } },
+    { "name": "Approval Queue", "type": "table", "entityKey": "requests", "config": { "defaultFilter": { "status": "submitted" } } },
+    { "name": "Low Stock", "type": "table", "entityKey": "stock_items", "config": { "highlightWhen": "quantity <= reorder_level" } }
+  ],
+  "dashboards": [
+    {
+      "name": "Operations Command Center",
+      "scope": "system",
+      "widgets": [
+        { "type": "metric", "title": "Open Leads", "entityKey": "leads", "filter": { "stage": ["new", "contacted", "qualified", "proposal"] } },
+        { "type": "metric", "title": "Pending Approvals", "entityKey": "requests", "filter": { "status": "submitted" } },
+        { "type": "metric", "title": "Low Stock Items", "entityKey": "stock_items", "filter": { "quantity_lte_field": "reorder_level" } }
+      ]
+    }
+  ],
+  "workflows": [
+    {
+      "name": "Request Approval With Notifications",
+      "key": "request_approval_notifications",
+      "triggerType": "record_created",
+      "moduleKey": "approvals",
+      "definition": {
+        "startStepKey": "notify_manager",
+        "steps": [
+          {
+            "key": "notify_manager",
+            "name": "Notify manager",
+            "type": "notification",
+            "config": {
+              "channel": "email",
+              "subject": "New approval request",
+              "message": "A request is waiting for approval."
+            },
+            "retry": { "maxRetries": 3, "retryDelaySeconds": 60 },
+            "next": "manager_approval"
+          },
+          {
+            "key": "manager_approval",
+            "name": "Manager approval",
+            "type": "approval",
+            "escalation": {
+              "afterSeconds": 86400,
+              "notifyRole": "admin",
+              "message": "Approval request is overdue."
+            },
+            "onApprove": "notify_requester",
+            "onReject": "notify_requester"
+          },
+          {
+            "key": "notify_requester",
+            "name": "Notify requester",
+            "type": "notification",
+            "config": {
+              "channel": "whatsapp",
+              "message": "Your request has been updated in Stack62."
+            },
+            "next": null
+          }
+        ]
+      }
+    }
+  ],
+  "permissionPolicies": [
+    {
+      "name": "Business administrators can manage generated apps",
+      "scope": "organization",
+      "role": "admin",
+      "resourceType": "system",
+      "actions": ["read", "create", "update", "publish"],
+      "fieldRestrictions": null,
+      "conditions": null
+    },
+    {
+      "name": "Staff can create and read operational records",
+      "scope": "workspace",
+      "role": "staff",
+      "resourceType": "record",
+      "actions": ["read", "create", "update_own"],
+      "fieldRestrictions": null,
+      "conditions": null
+    }
+  ]
+}

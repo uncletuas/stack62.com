@@ -1,0 +1,56 @@
+# ── Dependencies ───────────────────────────────────────────────────────
+node_modules/
+**/node_modules/
+
+# ── Build output ───────────────────────────────────────────────────────
+dist/
+**/dist/
+build/
+.cache/
+
+# ── Logs (we keep these local-only) ────────────────────────────────────
+*.log
+backend.log
+backend.err.log
+backend.smoke.log
+backend.smoke.err.log
+worker.log
+worker.err.log
+local-api.log
+local-api.err.log
+local-worker.log
+local-worker.err.log
+oauth-api.log
+oauth-api.err.log
+vite.log
+vite.err.log
+vite.dev.log
+vite.dev.err.log
+vite.local.log
+vite.local.err.log
+vite.studio.log
+vite.studio.err.log
+server.log
+
+# ── Environment / secrets ──────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+.npmrc
+
+# ── Local storage / generated artifacts ────────────────────────────────
+storage/
+generated/
+
+# ── Editor / OS noise ──────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+
+# ── Test / coverage ────────────────────────────────────────────────────
+coverage/
+.nyc_output/
