@@ -71,11 +71,25 @@ export class PlanEntity extends AppBaseEntity {
   @Column({ name: 'support_level', length: 40, default: 'community' })
   supportLevel!: string;
 
-  /** Stripe IDs. Operator fills after creating prices in Stripe. */
-  @Column({ name: 'stripe_monthly_price_id', length: 120, nullable: true })
+  /**
+   * Stripe IDs. Operator fills after creating prices in Stripe.
+   * Explicit `type: 'varchar'` is required because TypeORM cannot infer
+   * the column type from a `string | null` reflection alone.
+   */
+  @Column({
+    name: 'stripe_monthly_price_id',
+    type: 'varchar',
+    length: 120,
+    nullable: true,
+  })
   stripeMonthlyPriceId!: string | null;
 
-  @Column({ name: 'stripe_yearly_price_id', length: 120, nullable: true })
+  @Column({
+    name: 'stripe_yearly_price_id',
+    type: 'varchar',
+    length: 120,
+    nullable: true,
+  })
   stripeYearlyPriceId!: string | null;
 
   @Column({ name: 'is_published', default: true })

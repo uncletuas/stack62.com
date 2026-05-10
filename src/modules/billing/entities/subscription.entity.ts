@@ -46,11 +46,25 @@ export class SubscriptionEntity extends AppBaseEntity {
   @Column({ name: 'cancel_at_period_end', default: false })
   cancelAtPeriodEnd!: boolean;
 
-  /** Stripe IDs — null on the free plan. */
-  @Column({ name: 'stripe_customer_id', length: 120, nullable: true })
+  /**
+   * Stripe IDs — null on the free plan. Explicit `type: 'varchar'` is
+   * required: TypeORM cannot infer the column type from `string | null`
+   * design-time reflection alone.
+   */
+  @Column({
+    name: 'stripe_customer_id',
+    type: 'varchar',
+    length: 120,
+    nullable: true,
+  })
   stripeCustomerId!: string | null;
 
-  @Column({ name: 'stripe_subscription_id', length: 120, nullable: true })
+  @Column({
+    name: 'stripe_subscription_id',
+    type: 'varchar',
+    length: 120,
+    nullable: true,
+  })
   stripeSubscriptionId!: string | null;
 
   @Column({ type: 'jsonb', nullable: true })
