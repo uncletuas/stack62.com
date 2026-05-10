@@ -41,8 +41,10 @@ server.log
 .npmrc
 
 # ── Local storage / generated artifacts ────────────────────────────────
-storage/
-generated/
+# Anchored with a leading slash so we only ignore the top-level dirs,
+# not src/shared/storage/ (the storage-backend abstraction lives there).
+/storage/
+/generated/
 
 # ── Editor / OS noise ──────────────────────────────────────────────────
 .DS_Store
