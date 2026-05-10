@@ -1,0 +1,194 @@
+# Stack62 — Render Blueprint
+# ───────────────────────────────────────────────────────────────────────
+# Defines five resources:
+#   • Postgres database
+#   • Key-Value (Redis) store
+#   • API web service (NestJS)
+#   • Worker background service (BullMQ)
+#   • Static site (Vite/React frontend)
+#
+# How to deploy:
+#   1. Push this repo to GitHub (already done).
+#   2. In Render, click "New → Blueprint", point it at this repo.
+#   3. Render reads this file, provisions everything, and links env vars
+#      between services automatically.
+#
+# After first deploy, set OPENROUTER_API_KEY (or ANTHROPIC_API_KEY) in the
+# `stack62-api` and `stack62-worker` services so the Coworker can think.
+# ───────────────────────────────────────────────────────────────────────
+
+databases:
+  - name: stack62-postgres
+    plan: free
+    databaseName: stack62
+    user: stack62
+    postgresMajorVersion: "16"
+
+services:
+  # ── Redis (BullMQ + workflow queues) ─────────────────────────────────
+  - type: keyvalue
+    name: stack62-redis
+    plan: free
+    ipAllowList: []     # private network only
+
+  # ── API (NestJS) ─────────────────────────────────────────────────────
+  - type: web
+    name: stack62-api
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerCommand: node dist/main.js
+    autoDeploy: true
+    healthCheckPath: /v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_NAME
+        value: Stack62 API
+      - key: API_PREFIX
+        value: v1
+      # PORT is provided by Render automatically; src/main.ts reads it.
+      # JWT
+      - key: JWT_SECRET
+        generateValue: true   # Render generates a strong random value on first deploy
+      - key: JWT_EXPIRES_IN
+        value: 1d
+      # Database (URL form — parsed by src/config/connection-urls.ts)
+      - key: DATABASE_URL
+        fromDatabase:
+          name: stack62-postgres
+          property: connectionString
+      - key: DATABASE_SYNC
+        value: "true"         # bootstrap schema on first deploy; flip to "false" after migrations
+      - key: DATABASE_SSL
+        value: "true"         # Render Postgres requires TLS
+      - key: DATABASE_LOGGING
+        value: "false"
+      # Redis
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: stack62-redis
+          property: connectionString
+      - key: REDIS_SKIP_VERSION_CHECK
+        value: "true"
+      # CORS — set to the static-site URL after first deploy if you want to lock it down.
+      - key: CORS_ORIGIN
+        value: "*"
+      # AI providers — set these after first deploy in the Render dashboard
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OPENROUTER_BASE_URL
+        value: https://openrouter.ai/api/v1
+      - key: OPENROUTER_MODEL
+        value: openai/gpt-4o-mini
+      - key: AI_DEFAULT_MODEL
+        value: claude-code:sonnet
+      - key: AI_REQUIRE_APPROVAL
+        value: "true"
+      # Tier-1 router (optional). Leave OLLAMA_BASE_URL blank if you don't run Ollama.
+      - key: OLLAMA_BASE_URL
+        sync: false
+      - key: OLLAMA_MODEL
+        value: llama3.1
+      # Workflow / runner
+      - key: WORKFLOW_AUTOMATION_ENABLED
+        value: "true"
+      - key: RUNNER_SANDBOX_MODE
+        value: process
+      # Storage — Render filesystems are ephemeral; for production attach a
+      # persistent disk or swap to S3-backed file storage.
+      - key: FILE_STORAGE_ROOT
+        value: /var/data/files
+      - key: DOCUMENTS_STORAGE_ROOT
+        value: /var/data/documents
+      - key: GENERATED_SYSTEMS_ROOT
+        value: /var/data/generated/systems
+      - key: GENERATED_LOGS_ROOT
+        value: /var/data/generated/logs
+    disk:
+      name: stack62-api-data
+      mountPath: /var/data
+      sizeGB: 1
+
+  # ── Worker (BullMQ) ──────────────────────────────────────────────────
+  - type: worker
+    name: stack62-worker
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerCommand: node dist/worker.js
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_NAME
+        value: Stack62 Worker
+      - key: JWT_SECRET
+        fromService:
+          type: web
+          name: stack62-api
+          envVarKey: JWT_SECRET
+      - key: DATABASE_URL
+        fromDatabase:
+          name: stack62-postgres
+          property: connectionString
+      - key: DATABASE_SYNC
+        value: "false"        # API already syncs the schema; worker should not race
+      - key: DATABASE_SSL
+        value: "true"
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: stack62-redis
+          property: connectionString
+      - key: REDIS_SKIP_VERSION_CHECK
+        value: "true"
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OPENROUTER_BASE_URL
+        value: https://openrouter.ai/api/v1
+      - key: OPENROUTER_MODEL
+        value: openai/gpt-4o-mini
+      - key: AI_DEFAULT_MODEL
+        value: claude-code:sonnet
+      - key: WORKFLOW_AUTOMATION_ENABLED
+        value: "true"
+      - key: FILE_STORAGE_ROOT
+        value: /var/data/files
+      - key: DOCUMENTS_STORAGE_ROOT
+        value: /var/data/documents
+      - key: GENERATED_SYSTEMS_ROOT
+        value: /var/data/generated/systems
+      - key: GENERATED_LOGS_ROOT
+        value: /var/data/generated/logs
+
+  # ── Static frontend (Vite/React) ─────────────────────────────────────
+  - type: web
+    name: stack62-web
+    runtime: static
+    buildCommand: cd Stack62_design && npm install && npm run build
+    staticPublishPath: ./Stack62_design/dist
+    autoDeploy: true
+    envVars:
+      # After first deploy, paste your API URL here (e.g.
+      # https://stack62-api.onrender.com/v1) and trigger a manual rebuild.
+      # Vite inlines it at build time.
+      - key: VITE_API_BASE_URL
+        sync: false
+    routes:
+      # SPA fallback — client-side routing
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: SAMEORIGIN
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin

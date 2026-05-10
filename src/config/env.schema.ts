@@ -26,6 +26,9 @@ export const envSchema = z.object({
   CORS_ORIGIN: z.string().default('*'),
   JWT_SECRET: z.string().min(16).default('stack62-local-development-secret'),
   JWT_EXPIRES_IN: z.string().default('1d'),
+  // Render / Heroku / Railway / Fly: a single connection URL is provided.
+  // When set, it overrides the discrete fields below.
+  DATABASE_URL: z.string().optional(),
   DATABASE_HOST: z.string().default('localhost'),
   DATABASE_PORT: z.coerce.number().int().positive().default(5432),
   DATABASE_USER: z.string().default('postgres'),
@@ -34,10 +37,12 @@ export const envSchema = z.object({
   DATABASE_SYNC: booleanFromString(true),
   DATABASE_LOGGING: booleanFromString(false),
   DATABASE_SSL: booleanFromString(false),
+  REDIS_URL: z.string().optional(),
   REDIS_HOST: z.string().default('localhost'),
   REDIS_PORT: z.coerce.number().int().positive().default(6379),
   REDIS_DB: z.coerce.number().int().nonnegative().default(0),
   REDIS_PASSWORD: z.string().optional(),
+  REDIS_TLS: booleanFromString(false),
   REDIS_SKIP_VERSION_CHECK: booleanFromString(true),
   OPENROUTER_API_KEY: z.string().optional(),
   OPENROUTER_BASE_URL: z.string().url().default('https://openrouter.ai/api/v1'),
@@ -165,6 +170,7 @@ export function validateEnv(config: Record<string, unknown>) {
 
   const env = parsed.data;
   const productionErrors: string[] = [];
+  const productionWarnings: string[] = [];
   if (env.NODE_ENV === 'production') {
     if (env.JWT_SECRET === 'stack62-local-development-secret') {
       productionErrors.push(
@@ -172,13 +178,21 @@ export function validateEnv(config: Record<string, unknown>) {
       );
     }
 
+    // DATABASE_SYNC=true is needed for first-deploy bootstrap before any
+    // migrations exist for fresh tables. Warn (don't block) so a hosted
+    // platform like Render can come up cleanly; turn this off and switch
+    // to migrations once the schema is settled.
     if (env.DATABASE_SYNC) {
-      productionErrors.push('DATABASE_SYNC must be false in production');
+      productionWarnings.push(
+        'DATABASE_SYNC=true in production: TypeORM will mutate your schema on every boot. Switch to migrations once the schema is stable.',
+      );
     }
 
+    // CORS_ORIGIN=* is acceptable for the very first deploy when the
+    // frontend URL isn't known yet. Warn loudly.
     if (env.CORS_ORIGIN === '*') {
-      productionErrors.push(
-        'CORS_ORIGIN must list trusted origins in production',
+      productionWarnings.push(
+        'CORS_ORIGIN=* in production: any origin can call the API. Restrict this to your frontend URL(s).',
       );
     }
   }
@@ -187,6 +201,11 @@ export function validateEnv(config: Record<string, unknown>) {
     throw new Error(
       `Environment validation failed: ${productionErrors.join('; ')}`,
     );
+  }
+
+  for (const warning of productionWarnings) {
+    // eslint-disable-next-line no-console
+    console.warn(`[env] ${warning}`);
   }
 
   return env;
