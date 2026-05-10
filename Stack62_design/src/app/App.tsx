@@ -1,40 +1,20 @@
 import { RouterProvider } from "react-router";
 import { router } from "./routes";
 import { Toaster } from "./components/ui/sonner";
-import { AppProvider, useAppContext } from "./context/app-context";
+import { AppProvider } from "./context/app-context";
 import { ThemeProvider } from "./context/theme-context";
-import { AuthScreen } from "./components/AuthScreen";
-import { LoadingScreen } from "./components/LoadingScreen";
-import { OnboardingScreen } from "./components/OnboardingScreen";
 
-function AppContent() {
-  const {
-    isBootstrapping,
-    isAuthenticated,
-    needsOrganization,
-    needsWorkspace,
-  } = useAppContext();
-
-  if (isBootstrapping) {
-    return <LoadingScreen />;
-  }
-
-  if (!isAuthenticated) {
-    return <AuthScreen />;
-  }
-
-  if (needsOrganization || needsWorkspace) {
-    return <OnboardingScreen />;
-  }
-
-  return <RouterProvider router={router} />;
-}
-
+/**
+ * The router owns gating now. Public routes (/, /sign-in, /sign-up,
+ * /pricing, /invite/:token) render without auth; the /app/* tree goes
+ * through AppGate which redirects to /sign-in if not authed and into
+ * onboarding if the user has no org yet.
+ */
 export default function App() {
   return (
     <ThemeProvider>
       <AppProvider>
-        <AppContent />
+        <RouterProvider router={router} />
         <Toaster />
       </AppProvider>
     </ThemeProvider>

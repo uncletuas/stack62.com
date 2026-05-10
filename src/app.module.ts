@@ -32,6 +32,7 @@ import { RunnerModule } from './modules/runner/runner.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SearchModule } from './modules/search/search.module';
+import { BillingModule } from './modules/billing/billing.module';
 
 @Module({
   imports: [
@@ -116,6 +117,7 @@ import { SearchModule } from './modules/search/search.module';
     IntegrationsModule,
     EngineModule,
     CoworkerModule,
+    BillingModule,
   ],
 })
 export class AppModule {}

@@ -9,6 +9,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Public } from '../../shared/decorators/public.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtUser } from '../auth/interfaces/jwt-user.interface';
 import { RequireAccess } from '../../shared/access-control/access-control.decorator';
@@ -39,6 +40,18 @@ export class MembershipsController {
   @Post('invite')
   invite(@Body() payload: InviteMemberDto, @CurrentUser() user: JwtUser) {
     return this.membershipsService.inviteMember(payload, user.userId);
+  }
+
+  /**
+   * Public-readable invite preview. The token is opaque and unguessable
+   * (32 random bytes), so exposing the org name to whoever holds the
+   * token is fine — they need that copy to decide whether to accept.
+   * Returns 404 for expired/used tokens so we don't leak past invites.
+   */
+  @Public()
+  @Get('invites/lookup/:token')
+  lookupInvite(@Param('token') token: string) {
+    return this.membershipsService.lookupInvite(token);
   }
 
   @Post('accept-invite')

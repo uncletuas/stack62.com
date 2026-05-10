@@ -73,6 +73,14 @@ interface AppContextValue {
     password: string;
     firstName: string;
     lastName: string;
+    accountType?: 'individual' | 'organization';
+    organizationName?: string;
+    organizationRole?: string;
+    organizationTeamSize?: number;
+    inviteToken?: string;
+  }) => Promise<void>;
+  applyExternalSession: (input: {
+    accessToken: string;
   }) => Promise<void>;
   logout: () => void;
   refreshContext: () => Promise<void>;
@@ -261,12 +269,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
       password: string;
       firstName: string;
       lastName: string;
+      accountType?: 'individual' | 'organization';
+      organizationName?: string;
+      organizationRole?: string;
+      organizationTeamSize?: number;
+      inviteToken?: string;
     }) => {
       const response = await apiRequest<AuthResponse>('/auth/register', {
         method: 'POST',
         body: input,
         token: null,
       });
+      await finishAuth(response);
+    },
+    [finishAuth],
+  );
+
+  /**
+   * Drop in a JWT obtained outside the password flow (Google OAuth
+   * callback hands us one via the URL fragment). We re-use the same
+   * post-auth bootstrap so the user lands in the same place.
+   */
+  const applyExternalSession = useCallback(
+    async (input: { accessToken: string }) => {
+      const me = await apiRequest<AuthUser>('/users/me', {
+        token: input.accessToken,
+      }).catch(() => null);
+      const response: AuthResponse = {
+        accessToken: input.accessToken,
+        user: me ?? ({} as AuthUser),
+      };
       await finishAuth(response);
     },
     [finishAuth],
@@ -334,6 +366,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         Boolean(token) && organizations.length > 0 && workspaces.length === 0,
       login,
       register,
+      applyExternalSession,
       logout,
       refreshContext,
       createOrganization,
@@ -354,6 +387,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       organizations,
       refreshContext,
       register,
+      applyExternalSession,
       setActiveOrganizationId,
       setActiveWorkspaceId,
       token,

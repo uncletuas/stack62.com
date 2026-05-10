@@ -253,6 +253,37 @@ export class MembershipsService {
     return queryBuilder.orderBy('membership.createdAt', 'DESC').getMany();
   }
 
+  /**
+   * Public preview of an invite by token — used by the /invite/:token
+   * page so the recipient sees who invited them, the org, and the role
+   * before signing in or signing up.
+   */
+  async lookupInvite(token: string) {
+    const invite = await this.invitesRepository.findOne({
+      where: { token, status: 'pending' },
+    });
+    if (!invite) {
+      throw new NotFoundException('Invite not found or already used.');
+    }
+    if (invite.expiresAt < new Date()) {
+      throw new BadRequestException('Invite has expired.');
+    }
+    const inviter = await this.usersService.findById(invite.invitedByUserId);
+    return {
+      email: invite.email,
+      role: invite.role,
+      organizationId: invite.organizationId,
+      workspaceId: invite.workspaceId,
+      expiresAt: invite.expiresAt,
+      invitedBy: inviter
+        ? {
+            firstName: inviter.firstName,
+            lastName: inviter.lastName,
+          }
+        : null,
+    };
+  }
+
   async findPendingInvites(organizationId: string, actorUserId: string) {
     await this.accessControlService.assertResolvedAccess(actorUserId, {
       resource: 'membership',
