@@ -6,6 +6,7 @@ import {
   FolderPlus,
   HardDrive,
   Info,
+  Loader2,
   Search,
   Share2,
   Sparkles,
@@ -273,38 +274,68 @@ function BrowseView({
   onShowDetails: (id: string) => void;
   selectedFileId: string | null;
 }) {
+  const [filter, setFilter] = useState<
+    "all" | "documents" | "spreadsheets" | "images" | "pdfs"
+  >("all");
+
   if (loading && folders.length === 0 && files.length === 0) {
-    return <div className="text-sm text-app-faint">Loading…</div>;
-  }
-  if (folders.length === 0 && files.length === 0) {
     return (
-      <div className="grid h-full place-items-center text-sm text-app-faint">
-        <div className="text-center">
-          <p>This folder is empty.</p>
-          <p className="mt-1 text-xs">
-            Upload a file or create a sub-folder to get started.
-          </p>
+      <div className="grid h-full place-items-center">
+        <div className="flex items-center gap-2 text-sm text-app-muted">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading files…
         </div>
       </div>
     );
   }
+  if (folders.length === 0 && files.length === 0) {
+    return (
+      <div className="grid h-full place-items-center">
+        <EmptyState
+          icon={Upload}
+          title="This folder is empty"
+          description="Drop a file here, click Upload, or ask Coworker to fetch something for you."
+        />
+      </div>
+    );
+  }
+
+  const filteredFiles = files.filter((f) => {
+    if (filter === "all") return true;
+    const ext = (f.filename.split(".").pop() || "").toLowerCase();
+    const mt = f.mimeType.toLowerCase();
+    if (filter === "documents") {
+      return /docx?|rtf|txt|md|odt/.test(ext) || mt.includes("word") || mt.includes("text/");
+    }
+    if (filter === "spreadsheets") {
+      return /xlsx?|csv|tsv|ods/.test(ext) || mt.includes("spreadsheet") || mt.includes("excel");
+    }
+    if (filter === "images") {
+      return mt.startsWith("image/") || /png|jpe?g|gif|webp|svg|heic/.test(ext);
+    }
+    if (filter === "pdfs") {
+      return mt === "application/pdf" || ext === "pdf";
+    }
+    return true;
+  });
+
   return (
     <div className="space-y-6">
       {folders.length > 0 && (
         <section>
-          <h3 className="mb-2 text-xs font-semibold uppercase text-app-faint">
+          <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-app-faint">
             Folders
           </h3>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
             {folders.map((f) => (
               <button
                 key={f.id}
                 onClick={() => onOpenFolder(f)}
-                className="flex items-center gap-2 rounded-md border border-app bg-app-surface px-3 py-2.5 text-left text-sm hover:bg-app-hover"
+                className="group flex items-center gap-2 rounded-lg border border-app bg-app-elevated px-3 py-3 text-left text-sm transition hover:border-accent hover:shadow-sm"
               >
                 <FolderIcon />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate">{f.name}</div>
+                  <div className="truncate text-sm font-medium">{f.name}</div>
                 </div>
               </button>
             ))}
@@ -313,59 +344,187 @@ function BrowseView({
       )}
       {files.length > 0 && (
         <section>
-          <h3 className="mb-2 text-xs font-semibold uppercase text-app-faint">
-            Files
-          </h3>
-          <div className="overflow-hidden rounded-md border border-app">
-            <table className="w-full text-sm">
-              <thead className="bg-app-surface text-xs uppercase text-app-faint">
-                <tr>
-                  <th className="px-3 py-2 text-left">Name</th>
-                  <th className="px-3 py-2 text-left">Type</th>
-                  <th className="px-3 py-2 text-right">Size</th>
-                  <th className="px-3 py-2 text-left">Uploaded</th>
-                  <th className="w-10 px-3 py-2" />
-                </tr>
-              </thead>
-              <tbody>
-                {files.map((file) => (
-                  <tr
-                    key={file.id}
-                    onClick={() => onOpenFile(file.id, file.filename)}
-                    className={`cursor-pointer border-t border-app hover:bg-app-hover ${
-                      selectedFileId === file.id ? "bg-app-hover" : ""
-                    }`}
-                    title="Open file in a new tab"
-                  >
-                    <td className="px-3 py-2 font-medium">{file.filename}</td>
-                    <td className="px-3 py-2 text-app-faint">
-                      {file.mimeType.split("/")[1] || "file"}
-                    </td>
-                    <td className="px-3 py-2 text-right text-app-faint">
-                      {humanBytes(Number(file.size))}
-                    </td>
-                    <td className="px-3 py-2 text-app-faint">
-                      {new Date(file.createdAt).toLocaleDateString()}
-                    </td>
-                    <td className="px-3 py-1 text-right">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onShowDetails(file.id);
-                        }}
-                        className="rounded p-1 text-app-faint hover:bg-app-hover hover:text-app"
-                        title="Show details"
-                      >
-                        <Info className="size-3.5" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {/* Filter chips — Slack-style */}
+          <div className="mb-3 flex flex-wrap items-center gap-1.5">
+            <h3 className="mr-2 text-[11px] font-semibold uppercase tracking-wider text-app-faint">
+              Files
+            </h3>
+            {(
+              [
+                { id: "all", label: "All" },
+                { id: "documents", label: "Documents" },
+                { id: "spreadsheets", label: "Spreadsheets" },
+                { id: "images", label: "Images" },
+                { id: "pdfs", label: "PDFs" },
+              ] as const
+            ).map((chip) => (
+              <button
+                key={chip.id}
+                type="button"
+                onClick={() => setFilter(chip.id)}
+                className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition ${
+                  filter === chip.id
+                    ? "bg-accent text-accent-fg"
+                    : "border border-app text-app-muted hover:bg-app-hover hover:text-app"
+                }`}
+              >
+                {chip.label}
+              </button>
+            ))}
           </div>
+
+          {filteredFiles.length === 0 ? (
+            <p className="rounded-md border border-app bg-app-surface p-6 text-center text-sm text-app-faint">
+              No {filter === "all" ? "files" : filter} match. Try a different filter.
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+              {filteredFiles.map((file) => (
+                <FileTile
+                  key={file.id}
+                  file={file}
+                  active={selectedFileId === file.id}
+                  onOpen={() => onOpenFile(file.id, file.filename)}
+                  onShowDetails={() => onShowDetails(file.id)}
+                />
+              ))}
+            </div>
+          )}
+
         </section>
+      )}
+    </div>
+  );
+}
+
+/**
+ * File tile — Slack-style: type-coded icon at top, filename below,
+ * meta line at bottom. Whole tile is clickable to open the file; a
+ * small ⋯ button on hover opens the details panel.
+ */
+function FileTile({
+  file,
+  active,
+  onOpen,
+  onShowDetails,
+}: {
+  file: FileRow;
+  active: boolean;
+  onOpen: () => void;
+  onShowDetails: () => void;
+}) {
+  const ext = (file.filename.split(".").pop() || "").toLowerCase();
+  const mt = file.mimeType.toLowerCase();
+
+  // Pick a visual treatment based on type. Background tint + icon
+  // color matches Slack's color-coded file thumbs.
+  const visual = (() => {
+    if (mt.startsWith("image/") || /png|jpe?g|gif|webp|svg/.test(ext))
+      return {
+        bg: "bg-rose-100",
+        text: "text-rose-600",
+        label: ext.toUpperCase() || "IMG",
+      };
+    if (mt === "application/pdf" || ext === "pdf")
+      return { bg: "bg-amber-100", text: "text-amber-700", label: "PDF" };
+    if (/docx?|rtf|txt|md|odt/.test(ext) || mt.includes("word"))
+      return { bg: "bg-sky-100", text: "text-sky-700", label: "DOC" };
+    if (
+      /xlsx?|csv|tsv|ods/.test(ext) ||
+      mt.includes("spreadsheet") ||
+      mt.includes("excel")
+    )
+      return {
+        bg: "bg-emerald-100",
+        text: "text-emerald-700",
+        label: "XLS",
+      };
+    if (/pptx?/.test(ext) || mt.includes("presentation"))
+      return {
+        bg: "bg-orange-100",
+        text: "text-orange-700",
+        label: "PPT",
+      };
+    return { bg: "bg-app-hover", text: "text-app-muted", label: ext.toUpperCase() || "FILE" };
+  })();
+
+  return (
+    <div
+      className={`group relative flex flex-col overflow-hidden rounded-lg border bg-app-elevated transition ${
+        active
+          ? "border-accent shadow-md"
+          : "border-app hover:border-accent hover:shadow-sm"
+      }`}
+    >
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex flex-1 flex-col items-stretch p-0 text-left"
+        title="Open file"
+      >
+        <div className={`flex aspect-[5/3] items-center justify-center ${visual.bg}`}>
+          <span className={`text-2xl font-bold tracking-tight ${visual.text}`}>
+            {visual.label}
+          </span>
+        </div>
+        <div className="border-t border-app px-3 py-2">
+          <p className="line-clamp-1 text-sm font-medium text-app">
+            {file.filename}
+          </p>
+          <p className="mt-0.5 text-[11px] text-app-faint">
+            {humanBytes(Number(file.size))} · {new Date(file.createdAt).toLocaleDateString()}
+          </p>
+        </div>
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onShowDetails();
+        }}
+        className="absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-md bg-app-elevated/90 text-app-muted opacity-0 shadow-sm backdrop-blur transition hover:text-app group-hover:opacity-100"
+        title="Show details"
+      >
+        <Info className="size-3.5" />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Reusable empty state used across the workspace. One illustration
+ * icon, a bold title line, supporting copy, and an optional CTA
+ * button. Replaces the dozens of dim "No X yet" placeholders we
+ * sprinkled across panels.
+ */
+function EmptyState({
+  icon: Icon,
+  title,
+  description,
+  actionLabel,
+  onAction,
+}: {
+  icon: typeof Upload;
+  title: string;
+  description: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <div className="mx-auto max-w-sm text-center">
+      <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-accent-soft text-accent">
+        <Icon className="h-5 w-5" />
+      </div>
+      <h3 className="mt-3 text-base font-semibold text-app">{title}</h3>
+      <p className="mt-1 text-sm text-app-muted">{description}</p>
+      {actionLabel && onAction && (
+        <button
+          type="button"
+          onClick={onAction}
+          className="mt-4 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-accent-hover"
+        >
+          {actionLabel}
+        </button>
       )}
     </div>
   );

@@ -1,8 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActivityBar } from "./ActivityBar";
 import { CommandPalette } from "./CommandPalette";
 import { CoworkerRail } from "./CoworkerRail";
 import { EditorSurface } from "./editors";
+import { EmailComposer } from "./EmailComposer";
 import { RunPanel } from "./RunPanel";
 import { Sidebar } from "./Sidebar";
 import { StatusBar } from "./StatusBar";
@@ -49,6 +50,7 @@ function useDocumentFocusMode() {
 function Inner() {
   useGlobalShortcuts();
   useDocumentFocusMode();
+  const composer = useEmailComposer();
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-app text-app">
       <TitleBar />
@@ -66,8 +68,48 @@ function Inner() {
       </div>
       <StatusBar />
       <CommandPalette />
+      <EmailComposer
+        open={composer.open}
+        onClose={composer.close}
+        initialTo={composer.initial.to}
+        initialSubject={composer.initial.subject}
+        initialBody={composer.initial.body}
+      />
     </div>
   );
+}
+
+/**
+ * Global email-composer state. The window-level `stack62:open-email`
+ * custom event lets any component — Coworker tools, top-bar menu,
+ * file share buttons — open the composer with prefilled values
+ * without needing a context.
+ */
+function useEmailComposer() {
+  const [open, setOpen] = useState(false);
+  const [initial, setInitial] = useState({
+    to: "",
+    subject: "",
+    body: "",
+  });
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        to?: string;
+        subject?: string;
+        body?: string;
+      }>).detail ?? {};
+      setInitial({
+        to: detail.to ?? "",
+        subject: detail.subject ?? "",
+        body: detail.body ?? "",
+      });
+      setOpen(true);
+    };
+    window.addEventListener("stack62:open-email", handler);
+    return () => window.removeEventListener("stack62:open-email", handler);
+  }, []);
+  return { open, initial, close: () => setOpen(false) };
 }
 
 function SidebarColumn() {

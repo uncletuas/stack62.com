@@ -41,7 +41,7 @@ export function ActivityBar() {
   };
 
   return (
-    <aside className="flex w-14 shrink-0 flex-col items-center border-r border-app bg-app-surface py-2">
+    <aside className="flex w-12 shrink-0 flex-col items-center border-r border-app bg-app-surface py-2 sm:w-14">
       {TOP.map(({ key, label, icon: Icon }) => {
         const active = activity === key;
         return (
@@ -49,28 +49,29 @@ export function ActivityBar() {
             key={key}
             title={label}
             onClick={() => click(key)}
-            className={`relative mb-0.5 flex h-12 w-12 flex-col items-center justify-center gap-0.5 rounded-md text-[10px] font-medium transition ${
+            className={`relative mb-0.5 flex h-11 w-11 flex-col items-center justify-center gap-0.5 rounded-md text-[10px] font-medium transition sm:h-12 sm:w-12 ${
               active
                 ? "bg-accent-soft text-accent"
                 : "text-app-subtle hover:bg-app-hover hover:text-app"
             }`}
           >
             <Icon className="h-4 w-4" />
-            <span className="leading-none">{label}</span>
+            {/* Labels hidden on very small screens to keep the rail compact. */}
+            <span className="hidden leading-none sm:inline">{label}</span>
           </button>
         );
       })}
       <button
         title="Settings"
         onClick={() => click("settings")}
-        className={`mt-auto flex h-12 w-12 flex-col items-center justify-center gap-0.5 rounded-md text-[10px] font-medium transition ${
+        className={`mt-auto flex h-11 w-11 flex-col items-center justify-center gap-0.5 rounded-md text-[10px] font-medium transition sm:h-12 sm:w-12 ${
           activity === "settings"
             ? "bg-accent-soft text-accent"
             : "text-app-subtle hover:bg-app-hover hover:text-app"
         }`}
       >
         <Settings className="h-4 w-4" />
-        <span className="leading-none">Settings</span>
+        <span className="hidden leading-none sm:inline">Settings</span>
       </button>
     </aside>
   );

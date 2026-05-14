@@ -16,6 +16,7 @@ import {
   HelpCircle,
   Layers,
   LogOut,
+  Mail,
   PanelLeft,
   Plus,
   Printer,
@@ -122,8 +123,15 @@ export function TitleBar() {
 
   const fileItems: MenuItem[] = [
     {
+      label: "New email",
+      icon: Mail,
+      onSelect: () =>
+        window.dispatchEvent(new CustomEvent("stack62:open-email")),
+    },
+    {
       label: "Import files",
       icon: Upload,
+      separatorAbove: true,
       onSelect: () => fileInputRef.current?.click(),
     },
     {
@@ -292,8 +300,8 @@ export function TitleBar() {
         </button>
       </div>
 
-      {/* Centered search */}
-      <div className="mx-auto flex w-full max-w-2xl items-center px-4">
+      {/* Centered search — collapses to icon-only below sm. */}
+      <div className="mx-auto hidden w-full max-w-2xl items-center px-4 sm:flex">
         <button
           onClick={() => setPaletteOpen(true)}
           className="flex w-full items-center gap-2 rounded-md border border-app bg-app px-3 py-1.5 text-sm text-app-faint hover:border-app-strong hover:text-app-muted"
@@ -305,6 +313,13 @@ export function TitleBar() {
           </kbd>
         </button>
       </div>
+      <button
+        onClick={() => setPaletteOpen(true)}
+        className="ml-auto grid h-8 w-8 place-items-center rounded-md text-app-subtle hover:bg-app-hover hover:text-app sm:hidden"
+        title="Search"
+      >
+        <Search className="h-4 w-4" />
+      </button>
 
       {/* Right side: bell + profile */}
       <div className="flex items-center gap-1">

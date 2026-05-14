@@ -1964,14 +1964,37 @@ function PdfSurface({ filename, url }: { filename: string; url: string }) {
     );
   }
 
+  const print = () => {
+    const w = window.open(url, "_blank");
+    w?.addEventListener("load", () => w.print());
+  };
+
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b border-app px-4 py-1.5 text-[11px] text-app-faint">
-        {pageCount > 0 ? `${pageCount} page${pageCount === 1 ? "" : "s"}` : "Loading PDF…"}
+      <div className="flex items-center gap-2 border-b border-app px-4 py-1.5 text-[11px] text-app-faint">
+        <span className="flex-1">
+          {pageCount > 0 ? `${pageCount} page${pageCount === 1 ? "" : "s"}` : "Loading PDF…"}
+        </span>
+        <a
+          href={url}
+          download={filename}
+          className="rounded border border-app bg-app-surface px-2 py-0.5 text-[11px] text-app hover:bg-app-hover"
+          title="Download the original PDF"
+        >
+          Download
+        </a>
+        <button
+          type="button"
+          onClick={print}
+          className="rounded border border-app bg-app-surface px-2 py-0.5 text-[11px] text-app hover:bg-app-hover"
+          title="Open print dialog"
+        >
+          Print
+        </button>
       </div>
       <div
         ref={containerRef}
-        className="min-h-0 flex-1 overflow-auto bg-slate-200/40 p-4 dark:bg-slate-900/40"
+        className="min-h-0 flex-1 overflow-auto bg-app-hover p-4"
       />
     </div>
   );
