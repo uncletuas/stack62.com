@@ -1,6 +1,7 @@
 import { useWorkspace } from "../workspace-context";
 import { BriefingEditor } from "./BriefingEditor";
 import { FileEditor } from "./FileEditor";
+import { FilesExplorerEditor } from "./FilesExplorerEditor";
 import { HistoryEditor } from "./HistoryEditor";
 import { InboxEditor } from "./InboxEditor";
 import { JobEditor } from "./JobEditor";
@@ -9,7 +10,9 @@ import { PlanEditor } from "./PlanEditor";
 import { PreviewEditor } from "./PreviewEditor";
 import { RecordEditor } from "./RecordEditor";
 import { ReportEditor } from "./ReportEditor";
+import { RoomEditor } from "./RoomEditor";
 import { ScheduleEditor } from "./ScheduleEditor";
+import { StreamingDocEditor } from "./StreamingDocEditor";
 import { SettingsEditor } from "./SettingsEditor";
 import { ShareEditor } from "./ShareEditor";
 import { SystemEditor } from "./SystemEditor";
@@ -67,6 +70,12 @@ export function EditorSurface() {
       return <BriefingEditor />;
     case "templates":
       return <TemplatesEditor />;
+    case "files-explorer":
+      return <FilesExplorerEditor />;
+    case "room":
+      return <RoomEditor />;
+    case "streaming-doc":
+      return <StreamingDocEditor />;
     case "settings":
       return <SettingsEditor key={activeTab.id} tab={activeTab} />;
     default:

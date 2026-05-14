@@ -39,6 +39,9 @@ export type EditorKind =
   | "templates"
   | "tools"
   | "teams"
+  | "files-explorer"
+  | "room"
+  | "streaming-doc"
   | "settings";
 
 /**

@@ -3,8 +3,10 @@ import {
   ClipboardList,
   Database,
   Files,
+  FolderTree,
   Layers,
   LineChart,
+  MessageSquare,
   Settings,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -13,6 +15,8 @@ import { useWorkspace, type ActivityKey } from "./workspace-context";
 const TOP: Array<{ key: ActivityKey; label: string; icon: LucideIcon }> = [
   { key: "systems", label: "Systems", icon: Layers },
   { key: "explorer", label: "Explorer", icon: Files },
+  { key: "files", label: "Files", icon: FolderTree },
+  { key: "coworker", label: "Rooms", icon: MessageSquare },
   { key: "records", label: "Records", icon: Database },
   { key: "tasks", label: "Tasks", icon: ClipboardList },
   { key: "schedules", label: "Schedules", icon: CalendarDays },
@@ -20,13 +24,20 @@ const TOP: Array<{ key: ActivityKey; label: string; icon: LucideIcon }> = [
 ];
 
 export function ActivityBar() {
-  const { activity, setActivity, sidebarOpen, setSidebarOpen } = useWorkspace();
+  const { activity, setActivity, sidebarOpen, setSidebarOpen, navigate } =
+    useWorkspace();
 
   const click = (key: ActivityKey) => {
     if (activity === key) setSidebarOpen(!sidebarOpen);
     else {
       setActivity(key);
       setSidebarOpen(true);
+    }
+    // Activities with a dedicated full-pane editor open it as a tab.
+    if (key === "files") {
+      navigate({ kind: "files-explorer", title: "Files" });
+    } else if (key === "coworker") {
+      navigate({ kind: "room", title: "Rooms" });
     }
   };
 
