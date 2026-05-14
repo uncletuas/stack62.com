@@ -55,6 +55,7 @@ import {
 import { useWorkspace, type EditorTab } from "./workspace-context";
 import { roomsApi, type RoomDto } from "../lib/dms-resources";
 import { CoworkerFace } from "./CoworkerFace";
+import { CoworkerCallView } from "./CoworkerCallView";
 
 const ROLE_BADGE: Record<CoworkerRole, string> = {
   admin: "border-rose-500/40 bg-rose-500/10 text-rose-200",
@@ -304,6 +305,16 @@ export function CoworkerRail() {
   const voiceConversationRef = useRef(false);
   voiceConversationRef.current = voiceConversation;
 
+  /**
+   * Always-current reference to `send`. The voice loop captures this
+   * ref instead of the function directly, so it never invokes a stale
+   * closure (which had the bug of bailing out because `draft` was
+   * empty at the time the loop captured `send`).
+   */
+  const sendRef = useRef<(text?: string) => Promise<void>>(
+    async () => undefined,
+  );
+
   const stopVoiceConversation = useCallback(() => {
     setVoiceConversation(false);
     voiceConversationRef.current = false;
@@ -389,12 +400,11 @@ export function CoworkerRail() {
           });
           if (cancelled || !voiceConversationRef.current) break;
           if (!transcript) continue;
-          // Push as if the user typed and hit send. We reuse send()
-          // by setting the draft + invoking it; send() will speak the
-          // reply through speakReply() which sets `speaking`.
-          setDraft(transcript);
-          await new Promise((r) => setTimeout(r, 30));
-          await send();
+          // Pass the transcript directly into send() instead of
+          // routing through React state — otherwise send() would
+          // capture the stale (empty) draft from this render and
+          // bail out with the "no text, no attachments" early-return.
+          await sendRef.current(transcript);
         } catch {
           // Silent — recognition can error on permission denies; we
           // just exit the loop so the user isn't trapped.
@@ -417,22 +427,32 @@ export function CoworkerRail() {
   }, [voiceConversation]);
 
   // ── Live multimodal (webcam) mode ──────────────────────────────────────
-  // Periodically snapshot the webcam and ship the frame to the Coworker
-  // so it can react to what it sees. Not true streaming — that needs a
-  // realtime multimodal endpoint — but feels conversational.
-  const liveStreamRef = useRef<MediaStream | null>(null);
+  // Real video-call surface: webcam stream is displayed full-screen,
+  // voice conversation auto-starts so the user can talk + hear replies
+  // in real time, and frame snapshots are queued every 6s so vision
+  // tools can react to what's in front of the camera.
+  //
+  // True realtime streaming (Gemini Live / OpenAI Realtime) requires a
+  // different provider API than OpenRouter; this is the best we can do
+  // through chat-completions today and it feels close to a real call.
+  const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
+  const [micOn, setMicOn] = useState(true);
   const liveTimerRef = useRef<number | null>(null);
 
   const stopLive = useCallback(() => {
     setLiveMode(false);
+    setMicOn(true);
+    // Also exit voice conversation, since it was auto-started by live.
+    setVoiceConversation(false);
+    voiceConversationRef.current = false;
     if (liveTimerRef.current) {
       window.clearInterval(liveTimerRef.current);
       liveTimerRef.current = null;
     }
-    if (liveStreamRef.current) {
-      liveStreamRef.current.getTracks().forEach((t) => t.stop());
-      liveStreamRef.current = null;
-    }
+    setLiveStream((cur) => {
+      cur?.getTracks().forEach((t) => t.stop());
+      return null;
+    });
   }, []);
 
   const toggleLiveMode = useCallback(async () => {
@@ -448,11 +468,15 @@ export function CoworkerRail() {
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 360 },
+        video: { width: 1280, height: 720 },
         audio: false,
       });
-      liveStreamRef.current = stream;
+      setLiveStream(stream);
       setLiveMode(true);
+      // Auto-start the voice conversation loop so the user can speak
+      // and hear responses without separately tapping the mic.
+      setVoiceConversation(true);
+      voiceConversationRef.current = true;
       // Capture one snapshot every 6 seconds. The Coworker receives a
       // text prompt like "[live frame] describe what you see briefly."
       // The frame itself flows in as an attachment via the existing
@@ -794,9 +818,19 @@ export function CoworkerRail() {
     setAttachments((cur) => cur.filter((a) => a.id !== id));
 
   // ── Send message ────────────────────────────────────────────────────────
-  const send = async () => {
+  /**
+   * Send a chat message. When called with `forcedText`, that string
+   * wins over the React `draft` state — the voice-conversation loop
+   * sets the transcript directly without waiting for React to flush,
+   * which was the cause of the "Coworker keeps listening but never
+   * responds" bug.
+   *
+   * Also stashed in `sendRef` (below) so the voice loop always sees
+   * the latest closure, not a stale one.
+   */
+  const send: (forcedText?: string) => Promise<void> = async (forcedText) => {
     if (!orgId || !workspaceId) return;
-    const prompt = draft.trim();
+    const prompt = (forcedText ?? draft).trim();
     const ready = attachments.filter((a) => a.uploaded && !a.error);
     if ((!prompt && ready.length === 0) || sending) return;
     if (attachments.some((a) => a.uploading)) return;
@@ -893,6 +927,10 @@ export function CoworkerRail() {
       setSending(false);
     }
   };
+
+  // Keep the voice-conversation loop pointed at the latest send closure
+  // so it always sees the current draft / org / messages state.
+  sendRef.current = send;
 
   // ── Open via flash click → also focus chat tab ─────────────────────────
   const openFromFlash = () => {
@@ -1021,8 +1059,41 @@ export function CoworkerRail() {
         />
       )}
 
+      {/* Full-screen call view when live mode is on */}
+      {liveMode && (
+        <CoworkerCallView
+          stream={liveStream}
+          speaking={speaking}
+          listening={voiceConversation && !speaking && !sending}
+          thinking={sending}
+          micOn={micOn}
+          onToggleMic={() => {
+            setMicOn((cur) => {
+              const next = !cur;
+              // Pausing the mic = pausing voice conversation; resuming = resume.
+              if (next) {
+                if (!voiceConversation) {
+                  setVoiceConversation(true);
+                  voiceConversationRef.current = true;
+                }
+              } else {
+                setVoiceConversation(false);
+                voiceConversationRef.current = false;
+                try {
+                  recognitionRef.current?.stop();
+                } catch {
+                  /* ignore */
+                }
+              }
+              return next;
+            });
+          }}
+          onEndCall={() => stopLive()}
+        />
+      )}
+
       {/* Genie Panel */}
-      {open && (
+      {open && !liveMode && (
         <GeniePanel
           position={position}
           name={name}

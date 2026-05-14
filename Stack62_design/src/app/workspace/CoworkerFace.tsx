@@ -3,14 +3,18 @@ import { useEffect, useState } from "react";
 /**
  * Animated Coworker face — replaces the static Bot icon.
  *
- * Mouth opens/closes at a quick rhythm while `speaking` is true,
- * giving the illusion of the bot vocalising. Eyes blink on a longer
- * cadence so the face never looks completely still even when idle.
+ * Mouth open/close while `speaking` is driven by React state instead
+ * of CSS keyframes on SVG `ry` (which has spotty browser support).
+ * The mouth toggles between "closed" and "open" every ~140ms, giving
+ * a clear talking effect even on Firefox.
+ *
+ * Eyes blink on a longer cadence so the face never looks completely
+ * still. `thinking` swaps the mouth for three pulsing dots.
  *
  * This is the foundation for the "talking, lively robot face" the
- * user is asking for. When we add live audio + multimodal vision,
- * the same component will receive a `level` prop and modulate mouth
- * height by audio amplitude.
+ * user is asking for. When we wire real audio amplitude in (Web
+ * Audio API on the speech synth output), the same component will
+ * receive a `level` prop and modulate the mouth height by volume.
  */
 export function CoworkerFace({
   speaking = false,
@@ -24,9 +28,11 @@ export function CoworkerFace({
   /** "neutral" | "happy" | "listening" — different mouth curve. */
   mood?: "neutral" | "happy" | "listening";
 }) {
-  // Mouth animation: when speaking, the mouth height oscillates so it
-  // visually "talks". Pure CSS animation; no requestAnimationFrame.
   const [blink, setBlink] = useState(false);
+  // 0 = closed (line), 1 = small open, 2 = wide open. Cycles while speaking.
+  const [mouthFrame, setMouthFrame] = useState(0);
+
+  // Blink loop
   useEffect(() => {
     const id = window.setInterval(() => {
       setBlink(true);
@@ -35,8 +41,30 @@ export function CoworkerFace({
     return () => window.clearInterval(id);
   }, []);
 
-  // Mouth curve y2 — bigger value = more open.
-  const mouthCurve =
+  // Mouth talk loop — React-state driven so we don't rely on CSS attr animation.
+  useEffect(() => {
+    if (!speaking) {
+      setMouthFrame(0);
+      return;
+    }
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled) return;
+      setMouthFrame((f) => {
+        // Cycle 0 → 2 → 1 → 2 → 0 → 1 … irregular enough to feel alive
+        const next = (f + 1) % 3;
+        return next;
+      });
+    };
+    const id = window.setInterval(tick, 140);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [speaking]);
+
+  // Resting (not speaking, not thinking) curve depends on mood
+  const restingCurve =
     mood === "happy"
       ? "M 8 18 Q 14 22 20 18"
       : mood === "listening"
@@ -51,74 +79,51 @@ export function CoworkerFace({
       className="select-none"
       aria-hidden
     >
-      {/* Head */}
-      <circle cx="14" cy="14" r="13" fill="currentColor" opacity="0.0" />
       {/* Eyes */}
-      <g>
-        <ellipse
-          cx="10"
-          cy="12"
-          rx="1.6"
-          ry={blink ? "0.2" : "1.8"}
-          fill="white"
-          style={{ transition: "ry 0.12s ease" }}
-        />
-        <ellipse
-          cx="18"
-          cy="12"
-          rx="1.6"
-          ry={blink ? "0.2" : "1.8"}
-          fill="white"
-          style={{ transition: "ry 0.12s ease" }}
-        />
-      </g>
-      {/* Mouth — speaking mode pulses an open mouth */}
-      {speaking ? (
+      <ellipse
+        cx="10"
+        cy="12"
+        rx="1.6"
+        ry={blink ? 0.2 : 1.8}
+        fill="white"
+        style={{ transition: "ry 0.1s ease" }}
+      />
+      <ellipse
+        cx="18"
+        cy="12"
+        rx="1.6"
+        ry={blink ? 0.2 : 1.8}
+        fill="white"
+        style={{ transition: "ry 0.1s ease" }}
+      />
+
+      {/* Mouth */}
+      {thinking ? (
+        <g>
+          {[11, 14, 17].map((cx, i) => (
+            <circle key={cx} cx={cx} cy="19" r="0.9" fill="white">
+              <animate
+                attributeName="opacity"
+                values="0.3;1;0.3"
+                dur="1.2s"
+                repeatCount="indefinite"
+                begin={`${i * 0.2}s`}
+              />
+            </circle>
+          ))}
+        </g>
+      ) : speaking ? (
         <ellipse
           cx="14"
           cy="19"
-          rx="3.4"
-          ry="2.6"
+          rx={mouthFrame === 0 ? 2.4 : mouthFrame === 1 ? 3.2 : 4.0}
+          ry={mouthFrame === 0 ? 0.6 : mouthFrame === 1 ? 1.6 : 2.6}
           fill="white"
-          style={{
-            animation:
-              "stack62-mouth-talk 0.32s ease-in-out infinite alternate",
-            transformOrigin: "14px 19px",
-          }}
+          style={{ transition: "rx 0.08s ease, ry 0.08s ease" }}
         />
-      ) : thinking ? (
-        <g>
-          <circle cx="11" cy="19" r="0.9" fill="white">
-            <animate
-              attributeName="opacity"
-              values="0.3;1;0.3"
-              dur="1.2s"
-              repeatCount="indefinite"
-              begin="0s"
-            />
-          </circle>
-          <circle cx="14" cy="19" r="0.9" fill="white">
-            <animate
-              attributeName="opacity"
-              values="0.3;1;0.3"
-              dur="1.2s"
-              repeatCount="indefinite"
-              begin="0.2s"
-            />
-          </circle>
-          <circle cx="17" cy="19" r="0.9" fill="white">
-            <animate
-              attributeName="opacity"
-              values="0.3;1;0.3"
-              dur="1.2s"
-              repeatCount="indefinite"
-              begin="0.4s"
-            />
-          </circle>
-        </g>
       ) : (
         <path
-          d={mouthCurve}
+          d={restingCurve}
           stroke="white"
           strokeWidth="1.6"
           fill="none"
@@ -126,17 +131,6 @@ export function CoworkerFace({
           style={{ transition: "d 0.2s ease" }}
         />
       )}
-
-      <style>
-        {`@keyframes stack62-mouth-talk {
-            0%   { ry: 1; }
-            100% { ry: 2.8; }
-          }
-          @keyframes stack62-mouth-talk-fallback {
-            0%   { transform: scaleY(0.4); }
-            100% { transform: scaleY(1); }
-          }`}
-      </style>
     </svg>
   );
 }
