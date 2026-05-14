@@ -6,6 +6,7 @@ import { FilesModule } from '../files/files.module';
 import { FoldersModule } from '../folders/folders.module';
 import { UsersModule } from '../users/users.module';
 import { EmailSenderService } from './email-sender.service';
+import { EmailsController } from './emails.controller';
 import { FileSharingController } from './file-sharing.controller';
 import { FileSharingService } from './file-sharing.service';
 
@@ -17,7 +18,7 @@ import { FileSharingService } from './file-sharing.service';
     UsersModule,
     ActivityModule,
   ],
-  controllers: [FileSharingController],
+  controllers: [FileSharingController, EmailsController],
   providers: [FileSharingService, EmailSenderService],
   exports: [FileSharingService, EmailSenderService],
 })

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { ActivityBar } from "./ActivityBar";
 import { CommandPalette } from "./CommandPalette";
 import { CoworkerRail } from "./CoworkerRail";
@@ -18,8 +19,36 @@ export function Workspace() {
   );
 }
 
+/**
+ * Focus-mode: when the user opens a file or document tab, collapse
+ * the left sidebar so they get the full canvas. We trigger this
+ * exactly once per *transition into* a document tab — if the user
+ * re-opens the sidebar manually we leave them alone.
+ */
+function useDocumentFocusMode() {
+  const { activeTab, sidebarOpen, setSidebarOpen } = useWorkspace();
+  const lastTabId = useRef<string | null>(null);
+  useEffect(() => {
+    const id = activeTab?.id ?? null;
+    if (id !== lastTabId.current) {
+      lastTabId.current = id;
+      const kind = activeTab?.kind;
+      if (
+        sidebarOpen &&
+        (kind === "file" ||
+          kind === "document" ||
+          kind === "report" ||
+          kind === "preview")
+      ) {
+        setSidebarOpen(false);
+      }
+    }
+  }, [activeTab, sidebarOpen, setSidebarOpen]);
+}
+
 function Inner() {
   useGlobalShortcuts();
+  useDocumentFocusMode();
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-app text-app">
       <TitleBar />

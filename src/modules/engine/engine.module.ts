@@ -6,8 +6,10 @@ import { AiModule } from '../ai/ai.module';
 import { CoworkerModule } from '../coworker/coworker.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { DocumentExtractionModule } from '../document-extraction/document-extraction.module';
+import { FileSharingModule } from '../file-sharing/file-sharing.module';
 import { FilesModule } from '../files/files.module';
 import { FoldersModule } from '../folders/folders.module';
+import { RoomsModule } from '../rooms/rooms.module';
 import { IntegrationsModule } from '../integrations/integrations.module';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { RecordsModule } from '../records/records.module';
@@ -26,6 +28,7 @@ import { IntentClassifierService } from './intent-classifier.service';
 import { OllamaClient } from './ollama.client';
 import { AutomationTools } from './tools/automation.tools';
 import { CommandTools } from './tools/command.tools';
+import { CommunicationsTools } from './tools/communications.tools';
 import { DataTools } from './tools/data.tools';
 import { DocumentsTools } from './tools/documents.tools';
 import { FileTools } from './tools/file.tools';
@@ -50,6 +53,8 @@ import { CoworkerRuntimeService } from './coworker-runtime.service';
     FoldersModule,
     DocumentsModule,
     DocumentExtractionModule,
+    FileSharingModule,
+    RoomsModule,
     SemanticSearchModule,
     IntegrationsModule,
     RunnerModule,
@@ -67,6 +72,7 @@ import { CoworkerRuntimeService } from './coworker-runtime.service';
     WorkspaceTools,
     DataTools,
     AutomationTools,
+    CommunicationsTools,
     IntegrationTools,
     FileTools,
     DocumentsTools,

@@ -1,5 +1,7 @@
 import {
+  useEffect,
   useRef,
+  useState,
   type ChangeEvent,
   type InputHTMLAttributes,
 } from "react";
@@ -24,7 +26,13 @@ import {
   Upload,
 } from "lucide-react";
 import { useAppContext } from "../context/app-context";
-import { auditExportCsvUrl, fetchRecords, uploadFile } from "../lib/resources";
+import {
+  auditExportCsvUrl,
+  fetchAiRequests,
+  fetchRecords,
+  fetchWorkflowRuns,
+  uploadFile,
+} from "../lib/resources";
 import { Menu, type MenuItem } from "./Menu";
 import { useWorkspace } from "./workspace-context";
 
@@ -54,15 +62,7 @@ export function TitleBar() {
     setSidebarOpen(true);
   };
 
-  const openNotifications = () => {
-    setActivity("settings");
-    setSidebarOpen(true);
-    navigate({
-      kind: "settings",
-      title: "Settings - Notifications",
-      refId: "notifications",
-    });
-  };
+  const [notifOpen, setNotifOpen] = useState(false);
 
   const importFiles = async (list: FileList | null) => {
     if (!list?.length) return;
@@ -100,7 +100,9 @@ export function TitleBar() {
     }
 
     if (firstUploadedId) {
-      navigate({
+      // Open imported file in a new tab — preserves whatever the user
+      // was previously looking at.
+      openTab({
         kind: "file",
         title: firstUploadedName,
         refId: firstUploadedId,
@@ -355,14 +357,10 @@ export function TitleBar() {
           Ctrl K
         </kbd>
       </button>
-      <button
-        type="button"
-        onClick={openNotifications}
-        className="grid h-7 w-7 place-items-center rounded text-app-subtle hover:bg-white/10 hover:text-white"
-        title="Notifications"
-      >
-        <Bell className="h-4 w-4" />
-      </button>
+      <NotificationsBell
+        open={notifOpen}
+        setOpen={setNotifOpen}
+      />
 
       <input
         ref={fileInputRef}
@@ -419,6 +417,165 @@ function recordsToCsv(
     );
   }
   return lines.join("\n");
+}
+
+/**
+ * Top-bar notification bell. Pulls recent AI requests, workflow runs
+ * waiting on approval, and any room mentions of the current user from
+ * the existing endpoints. The Notifications "settings page" is gone
+ * — this is the single place notifications live now.
+ */
+function NotificationsBell({
+  open,
+  setOpen,
+}: {
+  open: boolean;
+  setOpen: (next: boolean) => void;
+}) {
+  const { currentOrganization, currentWorkspace } = useAppContext();
+  const { navigate } = useWorkspace();
+  const [items, setItems] = useState<
+    Array<{
+      id: string;
+      kind: "plan" | "approval" | "system";
+      title: string;
+      detail: string;
+      createdAt: string;
+      open?: () => void;
+    }>
+  >([]);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open || !currentOrganization) return;
+    let live = true;
+    (async () => {
+      try {
+        const [plans, runs] = await Promise.all([
+          fetchAiRequests({
+            organizationId: currentOrganization.id,
+            workspaceId: currentWorkspace?.id,
+            status: "pending",
+          }),
+          fetchWorkflowRuns({
+            organizationId: currentOrganization.id,
+            workspaceId: currentWorkspace?.id,
+            status: "active",
+          }),
+        ]);
+        if (!live) return;
+        const planItems = plans.map((p) => ({
+          id: `plan-${p.id}`,
+          kind: "plan" as const,
+          title: p.title || "Plan awaiting review",
+          detail: p.summary?.slice(0, 120) ?? "Review and approve.",
+          createdAt: p.createdAt,
+          open: () => {
+            navigate({
+              kind: "plan",
+              title: p.title || "Plan",
+              refId: p.id,
+            });
+            setOpen(false);
+          },
+        }));
+        const approvalItems = runs
+          .filter((r) => r.status === "active" && !r.nextRunAt)
+          .map((r) => ({
+            id: `run-${r.id}`,
+            kind: "approval" as const,
+            title: "Workflow waiting on approval",
+            detail: r.workflow?.name ?? "Workflow run",
+            createdAt: r.createdAt,
+            open: () => {
+              navigate({
+                kind: "workflow",
+                title: r.workflow?.name ?? "Workflow",
+                refId: r.workflowId,
+              });
+              setOpen(false);
+            },
+          }));
+        setItems(
+          [...planItems, ...approvalItems].sort((a, b) =>
+            (b.createdAt || "").localeCompare(a.createdAt || ""),
+          ),
+        );
+      } catch {
+        if (live) setItems([]);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [open, currentOrganization, currentWorkspace, navigate, setOpen]);
+
+  // Close on outside-click.
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (event: MouseEvent) => {
+      if (!wrapperRef.current) return;
+      if (!wrapperRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", onDocClick);
+    return () => window.removeEventListener("mousedown", onDocClick);
+  }, [open, setOpen]);
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="relative grid h-7 w-7 place-items-center rounded text-app-subtle hover:bg-white/10 hover:text-white"
+        title="Notifications"
+      >
+        <Bell className="h-4 w-4" />
+        {items.length > 0 && (
+          <span className="absolute right-1 top-1 grid h-3 min-w-3 place-items-center rounded-full bg-cyan-400 px-0.5 text-[9px] font-semibold text-slate-950">
+            {items.length > 9 ? "9+" : items.length}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-40 mt-1 w-80 rounded-md border border-app bg-app-surface shadow-xl">
+          <div className="flex items-center justify-between border-b border-app px-3 py-2">
+            <p className="text-xs font-semibold">Notifications</p>
+            <span className="text-[10px] text-app-faint">
+              {items.length === 0
+                ? "All caught up"
+                : `${items.length} pending`}
+            </span>
+          </div>
+          <div className="max-h-96 overflow-auto">
+            {items.length === 0 ? (
+              <p className="px-3 py-6 text-center text-xs text-app-faint">
+                No new notifications.
+              </p>
+            ) : (
+              <ul className="py-1">
+                {items.map((item) => (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      onClick={item.open}
+                      className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-app-hover"
+                    >
+                      <span className="text-xs font-medium">{item.title}</span>
+                      <span className="line-clamp-2 text-[11px] text-app-faint">
+                        {item.detail}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function downloadFile(name: string, content: string, mime: string) {

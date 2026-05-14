@@ -4,12 +4,15 @@ import {
   Clock,
   Copy,
   FolderPlus,
+  HardDrive,
+  Info,
   Search,
   Share2,
   Sparkles,
   Upload,
   X,
 } from "lucide-react";
+import { localFolder } from "../../lib/local-folder";
 import {
   extractionApi,
   fileSharingApi,
@@ -24,6 +27,7 @@ import {
 } from "../../lib/dms-resources";
 import { apiRequest } from "../../lib/api";
 import { useAppContext } from "../../context/app-context";
+import { useWorkspace } from "../workspace-context";
 
 /**
  * The Files surface — folder navigation + drag-and-drop upload + search.
@@ -33,7 +37,20 @@ import { useAppContext } from "../../context/app-context";
  */
 export function FilesExplorerEditor() {
   const { currentOrganization } = useAppContext();
+  const { openTab } = useWorkspace();
   const orgId = currentOrganization?.id ?? "";
+
+  /**
+   * Open a file by id in a new editor tab. Distinct from the right-side
+   * details panel — clicking a row opens the file, double-clicks the
+   * "Details" icon to open the panel.
+   */
+  const openInTab = useCallback(
+    (fileId: string, filename: string) => {
+      openTab({ kind: "file", title: filename, refId: fileId });
+    },
+    [openTab],
+  );
 
   const [breadcrumb, setBreadcrumb] = useState<FolderDto[]>([]);
   const [parentId, setParentId] = useState<string | null>(null);
@@ -160,6 +177,7 @@ export function FilesExplorerEditor() {
               onChange={(e) => onUpload(e.target.files)}
             />
           </label>
+          <LocalFolderButton />
         </div>
 
         {/* Body */}
@@ -168,7 +186,7 @@ export function FilesExplorerEditor() {
             <SearchResultsView
               hits={searchResults}
               onClose={() => setSearchResults(null)}
-              onOpen={(fileId) => setSelectedFileId(fileId)}
+              onOpen={(fileId, filename) => openInTab(fileId, filename)}
             />
           ) : (
             <BrowseView
@@ -176,7 +194,8 @@ export function FilesExplorerEditor() {
               files={files}
               loading={loading}
               onOpenFolder={openFolder}
-              onSelectFile={setSelectedFileId}
+              onOpenFile={openInTab}
+              onShowDetails={setSelectedFileId}
               selectedFileId={selectedFileId}
             />
           )}
@@ -242,14 +261,16 @@ function BrowseView({
   files,
   loading,
   onOpenFolder,
-  onSelectFile,
+  onOpenFile,
+  onShowDetails,
   selectedFileId,
 }: {
   folders: FolderDto[];
   files: FileRow[];
   loading: boolean;
   onOpenFolder: (f: FolderDto) => void;
-  onSelectFile: (id: string) => void;
+  onOpenFile: (id: string, filename: string) => void;
+  onShowDetails: (id: string) => void;
   selectedFileId: string | null;
 }) {
   if (loading && folders.length === 0 && files.length === 0) {
@@ -303,16 +324,18 @@ function BrowseView({
                   <th className="px-3 py-2 text-left">Type</th>
                   <th className="px-3 py-2 text-right">Size</th>
                   <th className="px-3 py-2 text-left">Uploaded</th>
+                  <th className="w-10 px-3 py-2" />
                 </tr>
               </thead>
               <tbody>
                 {files.map((file) => (
                   <tr
                     key={file.id}
-                    onClick={() => onSelectFile(file.id)}
+                    onClick={() => onOpenFile(file.id, file.filename)}
                     className={`cursor-pointer border-t border-app hover:bg-app-hover ${
                       selectedFileId === file.id ? "bg-app-hover" : ""
                     }`}
+                    title="Open file in a new tab"
                   >
                     <td className="px-3 py-2 font-medium">{file.filename}</td>
                     <td className="px-3 py-2 text-app-faint">
@@ -323,6 +346,19 @@ function BrowseView({
                     </td>
                     <td className="px-3 py-2 text-app-faint">
                       {new Date(file.createdAt).toLocaleDateString()}
+                    </td>
+                    <td className="px-3 py-1 text-right">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onShowDetails(file.id);
+                        }}
+                        className="rounded p-1 text-app-faint hover:bg-app-hover hover:text-app"
+                        title="Show details"
+                      >
+                        <Info className="size-3.5" />
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -342,7 +378,7 @@ function SearchResultsView({
 }: {
   hits: SemanticHitDto[];
   onClose: () => void;
-  onOpen: (fileId: string) => void;
+  onOpen: (fileId: string, filename: string) => void;
 }) {
   return (
     <div className="space-y-3">
@@ -364,7 +400,7 @@ function SearchResultsView({
         hits.map((h) => (
           <button
             key={`${h.fileId}-${h.ordinal}`}
-            onClick={() => onOpen(h.fileId)}
+            onClick={() => onOpen(h.fileId, h.filename || h.fileId)}
             className="block w-full rounded-md border border-app bg-app-surface p-3 text-left hover:bg-app-hover"
           >
             <div className="flex items-center justify-between text-sm">
@@ -708,6 +744,101 @@ function ShareModal({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * "Connect a folder on your computer" — uses the browser's File System
+ * Access API to read files from a local directory. The handle is
+ * persisted in IndexedDB so we can re-prompt on next session rather
+ * than starting from scratch.
+ */
+function LocalFolderButton() {
+  const [supported, setSupported] = useState<boolean | null>(null);
+  const [connected, setConnected] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [entryCount, setEntryCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    setSupported(localFolder.isSupported());
+    void localFolder.getStoredHandle().then((handle) => {
+      setConnected(!!handle);
+    });
+  }, []);
+
+  if (supported === null) return null;
+
+  if (!supported) {
+    return (
+      <button
+        type="button"
+        disabled
+        title="Local folder access isn't supported in this browser. Use Chrome or Edge — or install Stack62 as a desktop app for full disk access."
+        className="flex items-center gap-1.5 rounded-md border border-app px-3 py-1.5 text-sm text-app-faint"
+      >
+        <HardDrive className="size-4" /> Connect folder
+      </button>
+    );
+  }
+
+  const onClick = async () => {
+    setBusy(true);
+    try {
+      let handle = await localFolder.getStoredHandle();
+      if (!handle) {
+        handle = await localFolder.connect();
+      }
+      if (!handle) return;
+      setConnected(true);
+      const entries = await localFolder.list(handle, 4, 5000);
+      setEntryCount(entries.length);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("Local folder access failed", err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDisconnect = async () => {
+    await localFolder.disconnect();
+    setConnected(false);
+    setEntryCount(null);
+  };
+
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={busy}
+        className="flex items-center gap-1.5 rounded-md border border-app px-3 py-1.5 text-sm hover:bg-app-hover"
+        title={
+          connected
+            ? "Folder already connected — click to re-scan."
+            : "Connect a folder on your computer so the Coworker can read files from it directly."
+        }
+      >
+        <HardDrive className="size-4" />
+        {busy
+          ? "Scanning…"
+          : connected
+            ? entryCount != null
+              ? `Local · ${entryCount} files`
+              : "Local · connected"
+            : "Connect folder"}
+      </button>
+      {connected && (
+        <button
+          type="button"
+          onClick={onDisconnect}
+          title="Disconnect the local folder"
+          className="rounded-md border border-app px-2 py-1.5 text-app-faint hover:bg-app-hover"
+        >
+          <X className="size-3" />
+        </button>
+      )}
     </div>
   );
 }

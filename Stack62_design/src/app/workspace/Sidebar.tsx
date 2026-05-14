@@ -182,7 +182,7 @@ function Row({
 
 function ExplorerPanel() {
   const { currentOrganization, currentWorkspace } = useAppContext();
-  const { navigate, activeTab } = useWorkspace();
+  const { openTab, activeTab } = useWorkspace();
   const [files, setFiles] = useState<StoredFile[]>([]);
   const [documents, setDocuments] = useState<WorkspaceDocument[]>([]);
   const [openType, setOpenType] = useState("documents");
@@ -242,7 +242,10 @@ function ExplorerPanel() {
                     meta={item.meta}
                     indent={1}
                     active={activeTab?.refId === item.id}
-                    onClick={() => navigate(item.route)}
+                    // Always open files / documents in a new tab so a
+                    // user can switch between two open files without
+                    // losing what they were just on.
+                    onClick={() => openTab(item.route)}
                   />
                 ))
               ))}
@@ -719,12 +722,12 @@ function SettingsPanel() {
   const { navigate } = useWorkspace();
   // Aligned with the new consolidated SettingsEditor: clicking any of
   // these reuses the same Settings tab and jumps to the section.
+  // Notifications moved to the top-bar bell — no longer a settings page.
   const sections = [
     { id: "account", label: "Account" },
     { id: "organization", label: "Organization" },
     { id: "coworker", label: "Coworker" },
     { id: "integrations", label: "Integrations" },
-    { id: "notifications", label: "Notifications" },
     { id: "security", label: "Security" },
     { id: "billing", label: "Billing" },
   ];

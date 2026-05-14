@@ -16,6 +16,8 @@ import {
   History,
   Loader2,
   MessageSquare,
+  Mic,
+  MicOff,
   Paperclip,
   Plus,
   Send,
@@ -919,22 +921,16 @@ function GeniePanel({
           )}
 
           {tab === "team" && (
-            <RoomsListPanel
+            <RoomsPanel
               filter="channel"
               organizationId={orgId}
-              onOpenRoom={(roomId, name) =>
-                navigate({ kind: "room", title: name || "Room", refId: roomId })
-              }
             />
           )}
 
           {tab === "rooms" && (
-            <RoomsListPanel
+            <RoomsPanel
               filter="private"
               organizationId={orgId}
-              onOpenRoom={(roomId, name) =>
-                navigate({ kind: "room", title: name || "Room", refId: roomId })
-              }
             />
           )}
         </div>
@@ -993,6 +989,11 @@ function GeniePanel({
               >
                 <Paperclip className="h-4 w-4" />
               </button>
+              <VoiceInputButton
+                onTranscript={(text) =>
+                  setDraft((prev) => (prev ? `${prev} ${text}` : text))
+                }
+              />
               <textarea
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
@@ -1626,58 +1627,154 @@ function timeAgo(iso: string) {
 }
 
 /**
- * Compact rooms list for the Team / Rooms tabs. Lives inside the
- * Coworker rail rather than a separate ActivityBar entry, which
- * keeps the chat surface a single destination with internal tabs.
+ * Voice-to-text composer button. Uses the Web Speech API
+ * (SpeechRecognition) which is available in Chromium-family browsers.
+ * Falls back to disabled state otherwise. While listening, the button
+ * pulses and shows interim transcripts via the onTranscript callback.
  *
- * `filter="channel"` is the Team tab (public channels).
- * `filter="private"` is the Rooms tab (groups + DMs).
- * Click opens the full thread as a tab in the main editor area.
+ * Privacy note: the recognition runs in the user's browser — no audio
+ * leaves the device until they hit Send.
  */
-function RoomsListPanel({
+function VoiceInputButton({
+  onTranscript,
+}: {
+  onTranscript: (text: string) => void;
+}) {
+  type SpeechWindow = Window & {
+    SpeechRecognition?: typeof window.SpeechRecognition;
+    webkitSpeechRecognition?: typeof window.SpeechRecognition;
+  };
+  const Recognition =
+    (window as SpeechWindow).SpeechRecognition ??
+    (window as SpeechWindow).webkitSpeechRecognition ??
+    null;
+  const supported = !!Recognition;
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef<InstanceType<NonNullable<typeof Recognition>> | null>(null);
+
+  const stop = useCallback(() => {
+    recognitionRef.current?.stop();
+    setListening(false);
+  }, []);
+
+  const start = useCallback(() => {
+    if (!Recognition) return;
+    const r = new Recognition();
+    r.continuous = false;
+    r.interimResults = false;
+    r.lang = navigator.language || "en-US";
+    r.onresult = (event: SpeechRecognitionEvent) => {
+      const last = event.results[event.results.length - 1];
+      if (!last) return;
+      const text = last[0]?.transcript?.trim();
+      if (text) onTranscript(text);
+    };
+    r.onend = () => setListening(false);
+    r.onerror = () => setListening(false);
+    recognitionRef.current = r;
+    setListening(true);
+    try {
+      r.start();
+    } catch {
+      setListening(false);
+    }
+  }, [Recognition, onTranscript]);
+
+  // Cleanup on unmount.
+  useEffect(() => () => recognitionRef.current?.abort(), []);
+
+  if (!supported) {
+    return (
+      <button
+        type="button"
+        disabled
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/5 bg-slate-950/70 text-app-muted/40"
+        title="Voice input not supported in this browser"
+      >
+        <MicOff className="h-4 w-4" />
+      </button>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => (listening ? stop() : start())}
+      className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl border transition ${
+        listening
+          ? "border-rose-400/50 bg-rose-500/10 text-rose-200 animate-pulse"
+          : "border-white/5 bg-slate-950/70 text-app-muted hover:border-cyan-400/40 hover:text-cyan-200"
+      }`}
+      title={listening ? "Stop listening" : "Voice input"}
+    >
+      <Mic className="h-4 w-4" />
+    </button>
+  );
+}
+
+/**
+ * Team / Rooms panel for the CoworkerRail. Two states:
+ *  1. List view — every room of the chosen kind. Click a row to open
+ *     its thread *inside the rail*, not in a separate editor tab.
+ *  2. Thread view — message history + composer for the selected room.
+ *     Back button returns to the list.
+ *
+ * This replaces the previous implementation that navigated away to a
+ * separate full-screen RoomEditor — that was the "nav inside a nav"
+ * complaint. Keeping the chat surface single-destination here.
+ *
+ * `filter="channel"` → public team channels (the Team tab).
+ * `filter="private"` → groups + DMs (the Rooms tab).
+ */
+function RoomsPanel({
   filter,
   organizationId,
-  onOpenRoom,
 }: {
   filter: "channel" | "private";
   organizationId: string | null;
-  onOpenRoom: (roomId: string, label: string) => void;
 }) {
   const [rooms, setRooms] = useState<RoomDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [openRoomId, setOpenRoomId] = useState<string | null>(null);
 
-  useEffect(() => {
+  const reloadRooms = useCallback(async () => {
     if (!organizationId) {
       setRooms([]);
       setLoading(false);
       return;
     }
-    let live = true;
     setLoading(true);
     setError(null);
-    roomsApi
-      .list(organizationId)
-      .then((list) => {
-        if (!live) return;
-        setRooms(list);
-      })
-      .catch((err) => {
-        if (live)
-          setError(err instanceof Error ? err.message : "Failed to load rooms.");
-      })
-      .finally(() => {
-        if (live) setLoading(false);
-      });
-    return () => {
-      live = false;
-    };
-  }, [organizationId, filter]);
+    try {
+      const list = await roomsApi.list(organizationId);
+      setRooms(list);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load rooms.");
+    } finally {
+      setLoading(false);
+    }
+  }, [organizationId]);
+
+  useEffect(() => {
+    void reloadRooms();
+  }, [reloadRooms, filter]);
 
   const filtered = rooms.filter((r) => {
     if (filter === "channel") return r.kind === "channel";
     return r.kind === "group" || r.kind === "dm";
   });
+
+  const openRoom = filtered.find((r) => r.id === openRoomId) ?? null;
+
+  if (openRoom) {
+    return (
+      <RoomThreadView
+        room={openRoom}
+        onBack={() => setOpenRoomId(null)}
+      />
+    );
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -1701,7 +1798,7 @@ function RoomsListPanel({
               name: name.trim(),
             });
             setRooms((prev) => [room, ...prev]);
-            onOpenRoom(room.id, room.name ?? "Room");
+            setOpenRoomId(room.id);
           }}
           className="rounded-full p-1 text-app-muted hover:bg-white/5"
           title={filter === "channel" ? "New channel" : "New room"}
@@ -1726,7 +1823,7 @@ function RoomsListPanel({
               <li key={room.id}>
                 <button
                   type="button"
-                  onClick={() => onOpenRoom(room.id, room.name ?? "Room")}
+                  onClick={() => setOpenRoomId(room.id)}
                   className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-white/5"
                 >
                   {filter === "channel" ? (
@@ -1742,6 +1839,196 @@ function RoomsListPanel({
             ))}
           </ul>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Inline thread renderer for a single room. Lives inside the rail.
+ * Reuses the existing Coworker chat patterns (message bubble + composer).
+ */
+function RoomThreadView({
+  room,
+  onBack,
+}: {
+  room: RoomDto;
+  onBack: () => void;
+}) {
+  const [messages, setMessages] = useState<
+    Array<{
+      id: string;
+      authorKind: "user" | "coworker" | "system";
+      authorUserId: string | null;
+      body: string;
+      createdAt: string;
+    }>
+  >([]);
+  const [draft, setDraft] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const msgs = await roomsApi.messages(room.id);
+      setMessages(
+        msgs.map((m) => ({
+          id: m.id,
+          authorKind: m.authorKind,
+          authorUserId: m.authorUserId,
+          body: m.body,
+          createdAt: m.createdAt,
+        })),
+      );
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo({
+          top: scrollRef.current.scrollHeight,
+        });
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [room.id]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const send = async () => {
+    if (!draft.trim()) return;
+    setPosting(true);
+    try {
+      const message = await roomsApi.post(room.id, { body: draft.trim() });
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: message.id,
+          authorKind: message.authorKind,
+          authorUserId: message.authorUserId,
+          body: message.body,
+          createdAt: message.createdAt,
+        },
+      ]);
+      setDraft("");
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo({
+          top: scrollRef.current.scrollHeight,
+          behavior: "smooth",
+        });
+      });
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* Thread header */}
+      <div className="flex items-center gap-2 border-b border-white/5 px-3 py-2">
+        <button
+          type="button"
+          onClick={onBack}
+          className="rounded p-1 text-app-muted hover:bg-white/5"
+          title="Back to list"
+        >
+          <ChevronLeft className="h-3 w-3" />
+        </button>
+        {room.kind === "channel" ? (
+          <Hash className="h-3 w-3 text-app-subtle" />
+        ) : (
+          <Sparkles className="h-3 w-3 text-app-subtle" />
+        )}
+        <p className="min-w-0 flex-1 truncate text-[11px] font-medium">
+          {room.name || "Untitled room"}
+        </p>
+      </div>
+
+      {/* Messages */}
+      <div
+        ref={scrollRef}
+        className="min-h-0 flex-1 overflow-auto p-3 text-xs"
+      >
+        {loading ? (
+          <p className="text-app-subtle">Loading…</p>
+        ) : messages.length === 0 ? (
+          <p className="text-app-subtle">
+            No messages yet. Be the first to say something.
+            <br />
+            Use <code>@stack62</code> to summon the Coworker.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {messages.map((msg) => (
+              <li key={msg.id} className="flex gap-2">
+                <div
+                  className={`mt-0.5 grid size-5 shrink-0 place-items-center rounded-full text-[9px] font-semibold ${
+                    msg.authorKind === "coworker"
+                      ? "bg-cyan-500/15 text-cyan-300"
+                      : msg.authorKind === "system"
+                        ? "bg-slate-500/15 text-app-subtle"
+                        : "bg-violet-500/15 text-violet-300"
+                  }`}
+                >
+                  {msg.authorKind === "coworker"
+                    ? "AI"
+                    : msg.authorKind === "system"
+                      ? "·"
+                      : "U"}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-[11px] font-medium">
+                      {msg.authorKind === "coworker"
+                        ? "Coworker"
+                        : msg.authorKind === "system"
+                          ? "System"
+                          : "Teammate"}
+                    </span>
+                    <span className="text-[10px] text-app-subtle">
+                      {new Date(msg.createdAt).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                  </div>
+                  <div className="whitespace-pre-wrap break-words text-[11px] text-app">
+                    {msg.body}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Composer */}
+      <div className="border-t border-white/5 p-2">
+        <div className="flex gap-1.5">
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void send();
+              }
+            }}
+            placeholder="Message…"
+            rows={2}
+            className="min-h-0 flex-1 resize-none rounded-md border border-app bg-app px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400/40"
+          />
+          <button
+            type="button"
+            onClick={send}
+            disabled={posting || !draft.trim()}
+            className="rounded-md bg-gradient-to-br from-cyan-400 to-violet-500 px-2 text-slate-950 hover:opacity-90 disabled:opacity-40"
+            title="Send"
+          >
+            <Send className="size-3" />
+          </button>
+        </div>
       </div>
     </div>
   );

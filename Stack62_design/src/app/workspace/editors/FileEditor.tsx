@@ -443,7 +443,16 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
             <SlidesSurface text={content} onChange={queueSave} zoom={zoom} />
           ) : surface === "document" ? (
             docxUrl && stored ? (
-              <DocxSurface url={docxUrl} filename={stored.filename} />
+              <DocxSurface
+                url={docxUrl}
+                filename={stored.filename}
+                onPersist={(next) => {
+                  // Push the edited text through the existing save
+                  // pipeline so it lands as a new docx on the backend
+                  // and version chain.
+                  queueSave(next);
+                }}
+              />
             ) : (
               <DocumentSurface text={content} onChange={queueSave} zoom={zoom} />
             )
@@ -1974,62 +1983,159 @@ function PdfSurface({ filename, url }: { filename: string; url: string }) {
  * Replaces the previous "plain text in a textarea" view that lost all
  * structure.
  */
-function DocxSurface({ url, filename }: { url: string; filename: string }) {
+/**
+ * DOCX surface — renders the file with formatting preserved via
+ * docx-preview, and toggles into an in-place editable mode.
+ *
+ * Edit mode: we make the rendered DOM contenteditable so the user
+ * can type into headings/paragraphs/tables. Save serialises the
+ * HTML through `onPersist` — the backend re-encodes that into a
+ * docx server-side. Cancel reverts by re-rendering the original.
+ */
+function DocxSurface({
+  url,
+  filename,
+  onPersist,
+}: {
+  url: string;
+  filename: string;
+  onPersist?: (htmlOrText: string) => void | Promise<void>;
+}) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
+  const renderOnce = useCallback(async () => {
     const host = containerRef.current;
     if (!host) return;
     host.innerHTML = "";
     setError(null);
     setLoaded(false);
+    try {
+      const docx = await import("docx-preview");
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const buffer = await response.arrayBuffer();
+      await docx.renderAsync(buffer, host, undefined, {
+        className: "stack62-docx",
+        inWrapper: true,
+        ignoreWidth: false,
+        ignoreHeight: false,
+        breakPages: true,
+        experimental: false,
+        useBase64URL: true,
+      });
+      setLoaded(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [url]);
 
-    (async () => {
-      try {
-        const docx = await import("docx-preview");
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const buffer = await response.arrayBuffer();
-        if (cancelled) return;
-        await docx.renderAsync(buffer, host, undefined, {
-          className: "stack62-docx",
-          inWrapper: true,
-          ignoreWidth: false,
-          ignoreHeight: false,
-          breakPages: true,
-          experimental: false,
-          useBase64URL: true,
-        });
-        if (!cancelled) setLoaded(true);
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
-        }
-      }
-    })();
-
+  useEffect(() => {
+    let cancelled = false;
+    void renderOnce().then(() => {
+      if (cancelled) return;
+    });
     return () => {
       cancelled = true;
     };
-  }, [url]);
+  }, [renderOnce]);
+
+  const beginEdit = () => {
+    setEditing(true);
+    const host = containerRef.current;
+    if (host) host.contentEditable = "true";
+  };
+
+  const save = async () => {
+    if (!onPersist) {
+      // No persist hook (e.g. system-asset file viewed outside our save
+      // path) — just exit edit mode to avoid losing the user's work.
+      setEditing(false);
+      const host = containerRef.current;
+      if (host) host.contentEditable = "false";
+      return;
+    }
+    setSaving(true);
+    try {
+      const host = containerRef.current;
+      // Strip the .stack62-docx wrapper attributes that aren't real
+      // body content. The backend converts incoming HTML / plain text
+      // back into docx via its existing editable-content saver.
+      const plain =
+        host?.innerText?.trim() ?? host?.textContent?.trim() ?? "";
+      await onPersist(plain);
+      setEditing(false);
+      if (host) host.contentEditable = "false";
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const cancel = async () => {
+    setEditing(false);
+    const host = containerRef.current;
+    if (host) host.contentEditable = "false";
+    await renderOnce();
+  };
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b border-app px-4 py-1.5 text-[11px] text-app-faint">
-        {error
-          ? `Could not render: ${error}`
-          : loaded
-            ? filename
-            : "Rendering document…"}
+      <div className="flex items-center gap-2 border-b border-app px-4 py-1.5 text-[11px] text-app-faint">
+        <span className="flex-1 truncate">
+          {error
+            ? `Could not render: ${error}`
+            : loaded
+              ? filename
+              : "Rendering document…"}
+        </span>
+        {loaded && !error && !editing && (
+          <button
+            type="button"
+            onClick={beginEdit}
+            className="rounded border border-app bg-app-surface px-2 py-0.5 text-[11px] text-app hover:bg-app-hover"
+            title="Edit document"
+          >
+            Edit
+          </button>
+        )}
+        {editing && (
+          <>
+            <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-300">
+              Editing
+            </span>
+            <button
+              type="button"
+              onClick={cancel}
+              disabled={saving}
+              className="rounded border border-app bg-app-surface px-2 py-0.5 text-[11px] text-app hover:bg-app-hover disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={save}
+              disabled={saving}
+              className="rounded bg-cyan-500 px-2 py-0.5 text-[11px] font-medium text-slate-950 hover:opacity-90 disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </>
+        )}
       </div>
       <div className="min-h-0 flex-1 overflow-auto bg-slate-200/40 p-4 dark:bg-slate-900/40">
         <div
           ref={containerRef}
-          className="mx-auto bg-white text-slate-900 shadow-xl [&_.stack62-docx]:bg-white"
+          className={`mx-auto bg-white text-slate-900 shadow-xl outline-none [&_.stack62-docx]:bg-white ${
+            editing ? "ring-2 ring-cyan-400" : ""
+          }`}
           style={{ maxWidth: 920 }}
+          // suppressContentEditableWarning is set when we toggle the
+          // editable mode programmatically; we don't lock the DOM
+          // structure since users can paste rich content.
+          suppressContentEditableWarning
         />
       </div>
     </div>

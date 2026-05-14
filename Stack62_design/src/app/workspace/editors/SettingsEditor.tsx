@@ -38,7 +38,6 @@ type SettingsSection =
   | "organization"
   | "coworker"
   | "integrations"
-  | "notifications"
   | "security"
   | "billing";
 
@@ -52,7 +51,6 @@ const SECTIONS: Array<{
   { key: "organization", label: "Organization", description: "Org and workspace settings", icon: Building2 },
   { key: "coworker", label: "Coworker", description: "AI behaviour and tools", icon: Bot },
   { key: "integrations", label: "Integrations", description: "Connect Slack, Google, etc.", icon: Plug },
-  { key: "notifications", label: "Notifications", description: "What we email and surface", icon: Bell },
   { key: "security", label: "Security", description: "Sessions, MFA, audit", icon: ShieldCheck },
   { key: "billing", label: "Billing", description: "Plan, seats, invoices", icon: Landmark },
 ];
@@ -68,10 +66,13 @@ function normalizeSection(raw: string | undefined): SettingsSection {
       return "organization";
     case "coworker":
     case "integrations":
-    case "notifications":
     case "security":
     case "billing":
       return raw;
+    case "notifications":
+      // Notifications has moved to the top-bar bell; route stragglers
+      // back to Account so this isn't a dead deep-link.
+      return "account";
     default:
       return "account";
   }
@@ -141,7 +142,6 @@ export function SettingsEditor({ tab }: { tab: EditorTab }) {
           )}
           {section === "coworker" && <CoworkerSection />}
           {section === "integrations" && <IntegrationsSection />}
-          {section === "notifications" && <NotificationsSection />}
           {section === "security" && <SecuritySection />}
           {section === "billing" && <BillingSection />}
         </div>
