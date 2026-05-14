@@ -25,7 +25,6 @@ export type EditorKind =
   | "document"
   | "system"
   | "module"
-  | "record"
   | "workflow"
   | "plan"
   | "preview"

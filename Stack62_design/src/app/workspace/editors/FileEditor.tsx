@@ -61,6 +61,7 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
   const [content, setContent] = useState("");
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [docxUrl, setDocxUrl] = useState<string | null>(null);
   /** Real workbook data when the file is an .xlsx/.xls — parsed client-side
    *  with SheetJS so the user sees the actual rows, not the lossy CSV
    *  conversion. Saving still goes back as CSV; the backend re-encodes. */
@@ -86,6 +87,7 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
       setContent("");
       setImageUrl(null);
       setPdfUrl(null);
+      setDocxUrl(null);
       return;
     }
 
@@ -96,6 +98,7 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
     setEditableContent(null);
     setImageUrl(null);
     setPdfUrl(null);
+    setDocxUrl(null);
     setContent("");
     setWorkbook(null);
     setActiveSheetIndex(0);
@@ -137,6 +140,15 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
           revoked = url;
           if (live && url) setPdfUrl(url);
           return;
+        }
+
+        // DOCX: fetch the original .docx binary so docx-preview can render
+        // it with formatting preserved. We still load the extracted-text
+        // version below for fallback / AI-assist features.
+        if (/\.docx$/i.test(file.filename)) {
+          const url = await fetchFileBlobUrl(file.id).catch(() => null);
+          revoked = url;
+          if (live && url) setDocxUrl(url);
         }
 
         // Real spreadsheet path: parse xlsx/xls binaries client-side with
@@ -430,7 +442,11 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
           ) : surface === "slides" ? (
             <SlidesSurface text={content} onChange={queueSave} zoom={zoom} />
           ) : surface === "document" ? (
-            <DocumentSurface text={content} onChange={queueSave} zoom={zoom} />
+            docxUrl && stored ? (
+              <DocxSurface url={docxUrl} filename={stored.filename} />
+            ) : (
+              <DocumentSurface text={content} onChange={queueSave} zoom={zoom} />
+            )
           ) : surface === "text" ? (
             <TextSurface text={content} onChange={queueSave} />
           ) : (
@@ -1161,7 +1177,24 @@ function SheetSurface({
   const [formats, setFormats] = useState<Record<string, CellFormat>>(
     initial.formats,
   );
-  const [selected, setSelected] = useState<{ r: number; c: number }>({ r: 0, c: 0 });
+  /**
+   * Range selection. `anchor` is where the user clicked first;
+   * `active` is where the selection currently ends. For a single-cell
+   * click anchor === active. Row/column header clicks set the range
+   * to span the whole row or column.
+   */
+  const [selection, setSelection] = useState<{
+    anchorR: number;
+    anchorC: number;
+    activeR: number;
+    activeC: number;
+  }>({ anchorR: 0, anchorC: 0, activeR: 0, activeC: 0 });
+  const [dragging, setDragging] = useState(false);
+
+  const selected = useMemo(
+    () => ({ r: selection.anchorR, c: selection.anchorC }),
+    [selection.anchorR, selection.anchorC],
+  );
 
   // Re-hydrate when external content changes.
   useEffect(() => {
@@ -1170,8 +1203,59 @@ function SheetSurface({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text]);
 
+  // Drag selection should end even if the mouse leaves the grid area.
+  useEffect(() => {
+    if (!dragging) return;
+    const onUp = () => setDragging(false);
+    window.addEventListener("mouseup", onUp);
+    return () => window.removeEventListener("mouseup", onUp);
+  }, [dragging]);
+
   const columnCount = Math.max(10, ...data.map((row) => row.length));
   const rowCount = Math.max(20, data.length);
+
+  const inSelection = (r: number, c: number) => {
+    const r0 = Math.min(selection.anchorR, selection.activeR);
+    const r1 = Math.max(selection.anchorR, selection.activeR);
+    const c0 = Math.min(selection.anchorC, selection.activeC);
+    const c1 = Math.max(selection.anchorC, selection.activeC);
+    return r >= r0 && r <= r1 && c >= c0 && c <= c1;
+  };
+  const selectCell = (r: number, c: number, extend = false) => {
+    if (extend) {
+      setSelection((prev) => ({ ...prev, activeR: r, activeC: c }));
+    } else {
+      setSelection({ anchorR: r, anchorC: c, activeR: r, activeC: c });
+    }
+  };
+  const selectRow = (r: number) => {
+    setSelection({
+      anchorR: r,
+      anchorC: 0,
+      activeR: r,
+      activeC: Math.max(0, columnCount - 1),
+    });
+  };
+  const selectColumn = (c: number) => {
+    setSelection({
+      anchorR: 0,
+      anchorC: c,
+      activeR: Math.max(0, rowCount - 1),
+      activeC: c,
+    });
+  };
+  const selectAll = () => {
+    setSelection({
+      anchorR: 0,
+      anchorC: 0,
+      activeR: Math.max(0, rowCount - 1),
+      activeC: Math.max(0, columnCount - 1),
+    });
+  };
+  const selectionRowSpan =
+    Math.abs(selection.activeR - selection.anchorR) + 1;
+  const selectionColSpan =
+    Math.abs(selection.activeC - selection.anchorC) + 1;
 
   const flush = (nextData: string[][], nextFormats: Record<string, CellFormat>) => {
     setData(nextData);
@@ -1209,6 +1293,16 @@ function SheetSurface({
       <div className="flex flex-wrap items-center gap-1 border-b border-app bg-app-elevated px-3 py-1.5 text-[11px] text-app-muted">
         <span className="rounded border border-app bg-app px-2 py-0.5 font-mono text-app">
           {columnName(selected.c)}{selected.r + 1}
+          {(selectionRowSpan > 1 || selectionColSpan > 1) && (
+            <>
+              {":"}
+              {columnName(Math.max(selection.anchorC, selection.activeC))}
+              {Math.max(selection.anchorR, selection.activeR) + 1}
+              <span className="ml-1.5 text-app-faint">
+                ({selectionRowSpan}×{selectionColSpan})
+              </span>
+            </>
+          )}
         </span>
         <ToolbarDivider />
         <DocsButton
@@ -1302,77 +1396,110 @@ function SheetSurface({
               gridTemplateColumns: `42px repeat(${columnCount}, minmax(110px, 1fr))`,
             }}
           >
-            <div className="border-r border-app p-2" />
-            {Array.from({ length: columnCount }).map((_, index) => (
-              <div
-                key={index}
-                className={`border-r border-app p-2 text-center ${
-                  selected.c === index ? "bg-cyan-500/10 text-cyan-300" : ""
-                }`}
-              >
-                {columnName(index)}
-              </div>
-            ))}
+            <button
+              type="button"
+              onClick={selectAll}
+              title="Select all"
+              className="border-r border-app p-2 hover:bg-app-hover"
+            />
+            {Array.from({ length: columnCount }).map((_, index) => {
+              const colInRange =
+                index >= Math.min(selection.anchorC, selection.activeC) &&
+                index <= Math.max(selection.anchorC, selection.activeC);
+              return (
+                <button
+                  type="button"
+                  key={index}
+                  onClick={() => selectColumn(index)}
+                  title={`Select column ${columnName(index)}`}
+                  className={`border-r border-app p-2 text-center hover:bg-cyan-500/10 ${
+                    colInRange ? "bg-cyan-500/15 text-cyan-300" : ""
+                  }`}
+                >
+                  {columnName(index)}
+                </button>
+              );
+            })}
           </div>
-          {Array.from({ length: rowCount }).map((_, rowIndex) => (
-            <div
-              key={rowIndex}
-              className="grid"
-              style={{
-                gridTemplateColumns: `42px repeat(${columnCount}, minmax(110px, 1fr))`,
-              }}
-            >
+          {Array.from({ length: rowCount }).map((_, rowIndex) => {
+            const rowInRange =
+              rowIndex >= Math.min(selection.anchorR, selection.activeR) &&
+              rowIndex <= Math.max(selection.anchorR, selection.activeR);
+            return (
               <div
-                className={`border-b border-r border-app bg-app-elevated p-2 text-center text-[11px] text-app-muted ${
-                  selected.r === rowIndex ? "bg-cyan-500/10 text-cyan-300" : ""
-                }`}
+                key={rowIndex}
+                className="grid"
+                style={{
+                  gridTemplateColumns: `42px repeat(${columnCount}, minmax(110px, 1fr))`,
+                }}
               >
-                {rowIndex + 1}
-              </div>
-              {Array.from({ length: columnCount }).map((_, colIndex) => {
-                const f = formats[cellKey(rowIndex, colIndex)] ?? {};
-                const isSelected =
-                  selected.r === rowIndex && selected.c === colIndex;
-                return (
-                  <input
-                    key={colIndex}
-                    value={valueOf(rowIndex, colIndex)}
-                    onFocus={() => setSelected({ r: rowIndex, c: colIndex })}
-                    onChange={(event) =>
-                      setCell(rowIndex, colIndex, event.target.value)
-                    }
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        setSelected({
-                          r: Math.min(rowCount - 1, rowIndex + 1),
-                          c: colIndex,
-                        });
-                        (
-                          (e.currentTarget.parentElement?.parentElement
-                            ?.children[
-                            rowIndex + 1
-                          ]?.children[colIndex + 1] as HTMLInputElement) ??
-                          null
-                        )?.focus();
-                      } else if (e.key === "Tab") {
-                        // let browser handle native tab cycling
+                <button
+                  type="button"
+                  onClick={() => selectRow(rowIndex)}
+                  title={`Select row ${rowIndex + 1}`}
+                  className={`border-b border-r border-app bg-app-elevated p-2 text-center text-[11px] hover:bg-cyan-500/10 ${
+                    rowInRange ? "bg-cyan-500/15 text-cyan-300" : "text-app-muted"
+                  }`}
+                >
+                  {rowIndex + 1}
+                </button>
+                {Array.from({ length: columnCount }).map((_, colIndex) => {
+                  const f = formats[cellKey(rowIndex, colIndex)] ?? {};
+                  const isAnchor =
+                    selection.anchorR === rowIndex &&
+                    selection.anchorC === colIndex;
+                  const isInRange = inSelection(rowIndex, colIndex);
+                  return (
+                    <input
+                      key={colIndex}
+                      value={valueOf(rowIndex, colIndex)}
+                      onFocus={() => selectCell(rowIndex, colIndex)}
+                      onMouseDown={(e) => {
+                        selectCell(rowIndex, colIndex, e.shiftKey);
+                        setDragging(true);
+                      }}
+                      onMouseEnter={() => {
+                        if (dragging) selectCell(rowIndex, colIndex, true);
+                      }}
+                      onMouseUp={() => setDragging(false)}
+                      onChange={(event) =>
+                        setCell(rowIndex, colIndex, event.target.value)
                       }
-                    }}
-                    style={{
-                      fontWeight: f.bold ? 600 : 400,
-                      fontStyle: f.italic ? "italic" : "normal",
-                      textAlign: f.align ?? "left",
-                      backgroundColor: f.bg ?? undefined,
-                    }}
-                    className={`border-b border-r border-app px-2 py-1.5 text-sm text-app outline-none focus:ring-1 focus:ring-cyan-400 ${
-                      isSelected ? "ring-1 ring-cyan-400/50" : ""
-                    }`}
-                  />
-                );
-              })}
-            </div>
-          ))}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          selectCell(
+                            Math.min(rowCount - 1, rowIndex + 1),
+                            colIndex,
+                          );
+                          (
+                            (e.currentTarget.parentElement?.parentElement
+                              ?.children[
+                              rowIndex + 1
+                            ]?.children[colIndex + 1] as HTMLInputElement) ??
+                            null
+                          )?.focus();
+                        }
+                      }}
+                      style={{
+                        fontWeight: f.bold ? 600 : 400,
+                        fontStyle: f.italic ? "italic" : "normal",
+                        textAlign: f.align ?? "left",
+                        backgroundColor: f.bg ?? undefined,
+                      }}
+                      className={`border-b border-r border-app px-2 py-1.5 text-sm text-app outline-none focus:ring-1 focus:ring-cyan-400 ${
+                        isAnchor
+                          ? "ring-1 ring-cyan-400/50"
+                          : isInRange
+                            ? "bg-cyan-500/10"
+                            : ""
+                      }`}
+                    />
+                  );
+                })}
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -1744,8 +1871,169 @@ function TextSurface({ text, onChange }: { text: string; onChange: (next: string
   );
 }
 
+/**
+ * PDF surface — renders each page to a canvas via pdf.js so the file
+ * looks exactly like its source: real page boundaries, real fonts, real
+ * layout. The old <iframe> behaviour varied by browser and disabled our
+ * own scroll/zoom controls. We host pdf.js's worker via Vite's URL
+ * import so it bundles correctly without runtime path tricks.
+ */
 function PdfSurface({ filename, url }: { filename: string; url: string }) {
-  return <iframe title={filename} src={url} className="h-full min-h-[760px] w-full bg-white" />;
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [pageCount, setPageCount] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let cleanup: (() => void) | null = null;
+    const host = containerRef.current;
+    if (!host) return;
+
+    host.innerHTML = "";
+    setError(null);
+    setPageCount(0);
+
+    (async () => {
+      try {
+        // Vite resolves these to bundled assets at build time.
+        const pdfjs = await import("pdfjs-dist");
+        const workerUrl = (await import(
+          "pdfjs-dist/build/pdf.worker.mjs?url"
+        )) as { default: string };
+        pdfjs.GlobalWorkerOptions.workerSrc = workerUrl.default;
+
+        const doc = await pdfjs.getDocument({ url }).promise;
+        if (cancelled) return;
+        setPageCount(doc.numPages);
+
+        for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {
+          if (cancelled) break;
+          const page = await doc.getPage(pageNum);
+          const viewport = page.getViewport({ scale: 1.3 });
+          const canvas = document.createElement("canvas");
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          canvas.style.display = "block";
+          canvas.style.margin = "0 auto 16px";
+          canvas.style.background = "white";
+          canvas.style.boxShadow = "0 4px 16px rgba(0,0,0,0.18)";
+          host.appendChild(canvas);
+          const ctx = canvas.getContext("2d");
+          if (!ctx) continue;
+          await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+        }
+
+        cleanup = () => {
+          doc.destroy();
+        };
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
+  }, [url]);
+
+  if (error) {
+    // Last-resort fallback: native iframe if pdfjs can't render.
+    return (
+      <div className="flex h-full flex-col">
+        <div className="border-b border-app bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+          PDF.js failed ({error}); falling back to native viewer.
+        </div>
+        <iframe
+          title={filename}
+          src={url}
+          className="h-full min-h-[680px] w-full bg-white"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="border-b border-app px-4 py-1.5 text-[11px] text-app-faint">
+        {pageCount > 0 ? `${pageCount} page${pageCount === 1 ? "" : "s"}` : "Loading PDF…"}
+      </div>
+      <div
+        ref={containerRef}
+        className="min-h-0 flex-1 overflow-auto bg-slate-200/40 p-4 dark:bg-slate-900/40"
+      />
+    </div>
+  );
+}
+
+/**
+ * DOCX surface — renders the original document with formatting
+ * preserved (paragraphs, headings, tables, images) using docx-preview.
+ * Replaces the previous "plain text in a textarea" view that lost all
+ * structure.
+ */
+function DocxSurface({ url, filename }: { url: string; filename: string }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const host = containerRef.current;
+    if (!host) return;
+    host.innerHTML = "";
+    setError(null);
+    setLoaded(false);
+
+    (async () => {
+      try {
+        const docx = await import("docx-preview");
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const buffer = await response.arrayBuffer();
+        if (cancelled) return;
+        await docx.renderAsync(buffer, host, undefined, {
+          className: "stack62-docx",
+          inWrapper: true,
+          ignoreWidth: false,
+          ignoreHeight: false,
+          breakPages: true,
+          experimental: false,
+          useBase64URL: true,
+        });
+        if (!cancelled) setLoaded(true);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="border-b border-app px-4 py-1.5 text-[11px] text-app-faint">
+        {error
+          ? `Could not render: ${error}`
+          : loaded
+            ? filename
+            : "Rendering document…"}
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto bg-slate-200/40 p-4 dark:bg-slate-900/40">
+        <div
+          ref={containerRef}
+          className="mx-auto bg-white text-slate-900 shadow-xl [&_.stack62-docx]:bg-white"
+          style={{ maxWidth: 920 }}
+        />
+      </div>
+    </div>
+  );
 }
 
 function ImageSurface({ filename, url }: { filename: string; url: string }) {

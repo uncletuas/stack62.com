@@ -8,7 +8,6 @@ import { JobEditor } from "./JobEditor";
 import { ModuleEditor } from "./ModuleEditor";
 import { PlanEditor } from "./PlanEditor";
 import { PreviewEditor } from "./PreviewEditor";
-import { RecordEditor } from "./RecordEditor";
 import { ReportEditor } from "./ReportEditor";
 import { RoomEditor } from "./RoomEditor";
 import { ScheduleEditor } from "./ScheduleEditor";
@@ -40,8 +39,6 @@ export function EditorSurface() {
       return <SystemEditor key={activeTab.id} tab={activeTab} />;
     case "module":
       return <ModuleEditor key={activeTab.id} tab={activeTab} />;
-    case "record":
-      return <RecordEditor key={activeTab.id} tab={activeTab} />;
     case "task":
       return <TaskEditor key={activeTab.id} tab={activeTab} />;
     case "report":
@@ -73,7 +70,7 @@ export function EditorSurface() {
     case "files-explorer":
       return <FilesExplorerEditor />;
     case "room":
-      return <RoomEditor />;
+      return <RoomEditor key={activeTab.id} />;
     case "streaming-doc":
       return <StreamingDocEditor />;
     case "settings":

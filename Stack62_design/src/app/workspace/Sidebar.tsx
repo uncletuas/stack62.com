@@ -82,7 +82,7 @@ export function Sidebar() {
       <div className="flex items-center justify-between border-b border-app px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-app-subtle">
         {TITLES[activity]}
       </div>
-      {activity !== "explorer" && (
+      {activity !== "files" && (
         <div className="border-b border-app p-2">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-app-faint" />
@@ -100,7 +100,7 @@ export function Sidebar() {
           <div className="p-3 text-xs text-app-faint">Select a workspace.</div>
         ) : activity === "home" ? (
           <HomePanel />
-        ) : activity === "explorer" || activity === "files" ? (
+        ) : activity === "files" ? (
           <ExplorerPanel />
         ) : activity === "flow" ? (
           <FlowPanel query={query} />
@@ -108,8 +108,6 @@ export function Sidebar() {
           <SystemsPanel query={query} />
         ) : activity === "documents" ? (
           <DocumentsPanel query={query} />
-        ) : activity === "records" ? (
-          <RecordsPanel query={query} />
         ) : activity === "tasks" ? (
           <TasksPanel query={query} />
         ) : activity === "schedules" ? (
@@ -719,15 +717,16 @@ function TeamsPanel() {
 
 function SettingsPanel() {
   const { navigate } = useWorkspace();
+  // Aligned with the new consolidated SettingsEditor: clicking any of
+  // these reuses the same Settings tab and jumps to the section.
   const sections = [
-    { id: "profile", label: "Profile" },
-    { id: "appearance", label: "Appearance" },
+    { id: "account", label: "Account" },
     { id: "organization", label: "Organization" },
-    { id: "workspace", label: "Workspace" },
-    { id: "coworker", label: "Workspace coworker" },
+    { id: "coworker", label: "Coworker" },
     { id: "integrations", label: "Integrations" },
     { id: "notifications", label: "Notifications" },
     { id: "security", label: "Security" },
+    { id: "billing", label: "Billing" },
   ];
   return (
     <div className="py-1">
@@ -739,7 +738,7 @@ function SettingsPanel() {
           onClick={() =>
             navigate({
               kind: "settings",
-              title: `Settings · ${section.label}`,
+              title: "Settings",
               refId: section.id,
             })
           }

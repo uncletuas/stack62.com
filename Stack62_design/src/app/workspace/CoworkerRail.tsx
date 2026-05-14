@@ -7,19 +7,21 @@ import {
 } from "react";
 import {
   Bot,
-  Brain,
   CheckCircle2,
   ChevronLeft,
   Edit3,
   FileText,
   GitBranch,
+  Hash,
   History,
   Loader2,
   MessageSquare,
   Paperclip,
   Plus,
   Send,
+  Sparkles,
   Trash2,
+  Users,
   Workflow,
   X,
 } from "lucide-react";
@@ -48,6 +50,7 @@ import {
   type WorkflowRun,
 } from "../lib/resources";
 import { useWorkspace, type EditorTab } from "./workspace-context";
+import { roomsApi, type RoomDto } from "../lib/dms-resources";
 
 const ROLE_BADGE: Record<CoworkerRole, string> = {
   admin: "border-rose-500/40 bg-rose-500/10 text-rose-200",
@@ -110,7 +113,7 @@ function savePosition(p: Position) {
   }
 }
 
-type PanelTab = "chat" | "memory" | "plans";
+type PanelTab = "coworker" | "team" | "rooms";
 
 export function CoworkerRail() {
   const { currentOrganization, currentWorkspace } = useAppContext();
@@ -132,7 +135,7 @@ export function CoworkerRail() {
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
 
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<PanelTab>("chat");
+  const [tab, setTab] = useState<PanelTab>("coworker");
   const [position, setPosition] = useState<Position>(() => loadPosition());
 
   const [flashMessage, setFlashMessage] = useState<string | null>(null);
@@ -454,19 +457,19 @@ export function CoworkerRail() {
   // ── Open via flash click → also focus chat tab ─────────────────────────
   const openFromFlash = () => {
     setFlashMessage(null);
-    setTab("chat");
+    setTab("coworker");
     setOpen(true);
   };
   const newChat = () => {
     setConversationId(`c-${Date.now().toString(36)}`);
     setMessages([]);
     setShowHistory(false);
-    setTab("chat");
+    setTab("coworker");
   };
   const switchConversation = (id: string) => {
     setConversationId(id);
     setShowHistory(false);
-    setTab("chat");
+    setTab("coworker");
   };
 
   if (!orgId || !workspaceId) return null;
@@ -826,33 +829,33 @@ function GeniePanel({
             </button>
           </div>
 
-          {/* Tabs — Chat first, no Hints */}
+          {/* Tabs — Coworker (1:1 AI) / Team (channels) / Rooms (groups + DMs) */}
           <nav className="mt-2.5 flex gap-1 rounded-full border border-white/5 bg-slate-950/60 p-0.5 text-[11px]">
             <TabButton
-              active={tab === "chat"}
-              onClick={() => setTab("chat")}
-              icon={MessageSquare}
-              label="Chat"
-            />
-            <TabButton
-              active={tab === "plans"}
-              onClick={() => setTab("plans")}
-              icon={GitBranch}
-              label={`Plans${total ? ` · ${total}` : ""}`}
+              active={tab === "coworker"}
+              onClick={() => setTab("coworker")}
+              icon={Bot}
+              label={`Coworker${total ? ` · ${total}` : ""}`}
               accent={total > 0}
             />
             <TabButton
-              active={tab === "memory"}
-              onClick={() => setTab("memory")}
-              icon={Brain}
-              label={`Memory${memories.length ? ` · ${memories.length}` : ""}`}
+              active={tab === "team"}
+              onClick={() => setTab("team")}
+              icon={Users}
+              label="Team"
+            />
+            <TabButton
+              active={tab === "rooms"}
+              onClick={() => setTab("rooms")}
+              icon={MessageSquare}
+              label="Rooms"
             />
           </nav>
         </header>
 
         {/* Body */}
         <div className="flex min-h-0 flex-1 flex-col">
-          {tab === "chat" && (
+          {tab === "coworker" && (
             <>
               {/* Chat history toolbar */}
               <div className="flex shrink-0 items-center gap-1 border-b border-white/5 px-3 py-1.5">
@@ -915,27 +918,29 @@ function GeniePanel({
             </>
           )}
 
-          {tab === "plans" && (
-            <PlansTab
-              pending={pending}
-              waitingRuns={waitingRuns}
-              onOpenPlan={onOpenPlan}
-              onOpenRun={onOpenRun}
+          {tab === "team" && (
+            <RoomsListPanel
+              filter="channel"
+              organizationId={orgId}
+              onOpenRoom={(roomId, name) =>
+                navigate({ kind: "room", title: name || "Room", refId: roomId })
+              }
             />
           )}
 
-          {tab === "memory" && (
-            <MemoryTab
-              memories={memories}
-              orgId={orgId}
-              workspaceId={workspaceId}
-              onChange={onMemoryChange}
+          {tab === "rooms" && (
+            <RoomsListPanel
+              filter="private"
+              organizationId={orgId}
+              onOpenRoom={(roomId, name) =>
+                navigate({ kind: "room", title: name || "Room", refId: roomId })
+              }
             />
           )}
         </div>
 
         {/* Composer (visible on chat tab only) */}
-        {tab === "chat" && !showHistory && (
+        {tab === "coworker" && !showHistory && (
           <footer className="shrink-0 border-t border-white/5 bg-slate-950/40 p-2">
             {attachments.length > 0 && (
               <ul className="mb-1.5 flex flex-wrap gap-1.5">
@@ -1618,4 +1623,126 @@ function timeAgo(iso: string) {
   if (h < 24) return `${h}h`;
   const d = Math.floor(h / 24);
   return `${d}d`;
+}
+
+/**
+ * Compact rooms list for the Team / Rooms tabs. Lives inside the
+ * Coworker rail rather than a separate ActivityBar entry, which
+ * keeps the chat surface a single destination with internal tabs.
+ *
+ * `filter="channel"` is the Team tab (public channels).
+ * `filter="private"` is the Rooms tab (groups + DMs).
+ * Click opens the full thread as a tab in the main editor area.
+ */
+function RoomsListPanel({
+  filter,
+  organizationId,
+  onOpenRoom,
+}: {
+  filter: "channel" | "private";
+  organizationId: string | null;
+  onOpenRoom: (roomId: string, label: string) => void;
+}) {
+  const [rooms, setRooms] = useState<RoomDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!organizationId) {
+      setRooms([]);
+      setLoading(false);
+      return;
+    }
+    let live = true;
+    setLoading(true);
+    setError(null);
+    roomsApi
+      .list(organizationId)
+      .then((list) => {
+        if (!live) return;
+        setRooms(list);
+      })
+      .catch((err) => {
+        if (live)
+          setError(err instanceof Error ? err.message : "Failed to load rooms.");
+      })
+      .finally(() => {
+        if (live) setLoading(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [organizationId, filter]);
+
+  const filtered = rooms.filter((r) => {
+    if (filter === "channel") return r.kind === "channel";
+    return r.kind === "group" || r.kind === "dm";
+  });
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center justify-between border-b border-white/5 px-3 py-2">
+        <p className="text-[11px] uppercase tracking-wider text-app-subtle">
+          {filter === "channel" ? "Team channels" : "Rooms & DMs"}
+        </p>
+        <button
+          type="button"
+          onClick={async () => {
+            if (!organizationId) return;
+            const name = window.prompt(
+              filter === "channel"
+                ? "Name your channel (e.g. design)"
+                : "Name your room",
+            );
+            if (!name?.trim()) return;
+            const room = await roomsApi.create({
+              organizationId,
+              kind: filter === "channel" ? "channel" : "group",
+              name: name.trim(),
+            });
+            setRooms((prev) => [room, ...prev]);
+            onOpenRoom(room.id, room.name ?? "Room");
+          }}
+          className="rounded-full p-1 text-app-muted hover:bg-white/5"
+          title={filter === "channel" ? "New channel" : "New room"}
+        >
+          <Plus className="h-3 w-3" />
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto p-2">
+        {loading ? (
+          <div className="px-2 text-[11px] text-app-subtle">Loading…</div>
+        ) : error ? (
+          <div className="px-2 text-[11px] text-rose-300">{error}</div>
+        ) : filtered.length === 0 ? (
+          <div className="px-2 text-[11px] text-app-subtle">
+            {filter === "channel"
+              ? "No channels yet. Click + to start one for the team."
+              : "No private rooms yet. Click + to create one."}
+          </div>
+        ) : (
+          <ul className="space-y-0.5">
+            {filtered.map((room) => (
+              <li key={room.id}>
+                <button
+                  type="button"
+                  onClick={() => onOpenRoom(room.id, room.name ?? "Room")}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-white/5"
+                >
+                  {filter === "channel" ? (
+                    <Hash className="h-3 w-3 text-app-subtle" />
+                  ) : (
+                    <Sparkles className="h-3 w-3 text-app-subtle" />
+                  )}
+                  <span className="flex-1 truncate">
+                    {room.name || "Untitled room"}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
 }

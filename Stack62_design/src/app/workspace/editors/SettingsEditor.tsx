@@ -22,24 +22,129 @@ import {
 } from "../../lib/resources";
 import { useWorkspace, type EditorTab } from "../workspace-context";
 
+/**
+ * Settings is one editor tab now, with an internal sidenav. Sections
+ * were grouped:
+ *   - Account merges Profile + Appearance (your identity + how it looks)
+ *   - Organization merges Org settings + Workspace settings
+ *   - Coworker, Integrations, Notifications, Security, Billing stay as-is
+ *
+ * If a tab navigates here with refId="billing" we still respect that
+ * as the initial section so deep-links continue to work — but the user
+ * picks subsequent sections via the sidenav without spawning new tabs.
+ */
+type SettingsSection =
+  | "account"
+  | "organization"
+  | "coworker"
+  | "integrations"
+  | "notifications"
+  | "security"
+  | "billing";
+
+const SECTIONS: Array<{
+  key: SettingsSection;
+  label: string;
+  description: string;
+  icon: typeof User;
+}> = [
+  { key: "account", label: "Account", description: "Profile and appearance", icon: User },
+  { key: "organization", label: "Organization", description: "Org and workspace settings", icon: Building2 },
+  { key: "coworker", label: "Coworker", description: "AI behaviour and tools", icon: Bot },
+  { key: "integrations", label: "Integrations", description: "Connect Slack, Google, etc.", icon: Plug },
+  { key: "notifications", label: "Notifications", description: "What we email and surface", icon: Bell },
+  { key: "security", label: "Security", description: "Sessions, MFA, audit", icon: ShieldCheck },
+  { key: "billing", label: "Billing", description: "Plan, seats, invoices", icon: Landmark },
+];
+
+function normalizeSection(raw: string | undefined): SettingsSection {
+  switch (raw) {
+    case "profile":
+    case "appearance":
+    case "account":
+      return "account";
+    case "workspace":
+    case "organization":
+      return "organization";
+    case "coworker":
+    case "integrations":
+    case "notifications":
+    case "security":
+    case "billing":
+      return raw;
+    default:
+      return "account";
+  }
+}
+
 export function SettingsEditor({ tab }: { tab: EditorTab }) {
-  const section = tab.refId ?? "profile";
+  const [section, setSection] = useState<SettingsSection>(() =>
+    normalizeSection(tab.refId),
+  );
+
+  // Stay in sync with outside navigation — e.g. clicking
+  // Settings · Billing in the Sidebar reuses our open Settings tab
+  // and updates `tab.refId`. Re-sync so the right section renders.
+  useEffect(() => {
+    setSection(normalizeSection(tab.refId));
+  }, [tab.refId]);
+
   return (
-    <div className="h-full overflow-y-auto bg-app text-app">
-      <div className="mx-auto max-w-3xl p-6">
-        <header className="mb-4 flex items-center gap-2 border-b border-app pb-3">
-          <ShieldCheck className="h-5 w-5 text-emerald-400" />
-          <h1 className="text-lg font-semibold capitalize">Settings · {section}</h1>
-        </header>
-        {section === "profile" && <ProfileSection />}
-        {section === "appearance" && <AppearanceSection />}
-        {section === "organization" && <OrganizationSection />}
-        {section === "workspace" && <WorkspaceSection />}
-        {section === "coworker" && <CoworkerSection />}
-        {section === "integrations" && <IntegrationsSection />}
-        {section === "notifications" && <NotificationsSection />}
-        {section === "security" && <SecuritySection />}
-        {section === "billing" && <BillingSection />}
+    <div className="flex h-full overflow-hidden bg-app text-app">
+      {/* Left sidenav */}
+      <aside className="flex w-56 shrink-0 flex-col border-r border-app bg-app-surface">
+        <div className="flex items-center gap-2 border-b border-app px-3 py-3">
+          <ShieldCheck className="h-4 w-4 text-emerald-400" />
+          <h2 className="text-sm font-semibold">Settings</h2>
+        </div>
+        <nav className="flex-1 overflow-auto p-2">
+          {SECTIONS.map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setSection(key)}
+              className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition ${
+                section === key
+                  ? "bg-app-hover font-medium"
+                  : "text-app-faint hover:bg-app-hover hover:text-app"
+              }`}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {label}
+            </button>
+          ))}
+        </nav>
+      </aside>
+
+      {/* Section content */}
+      <div className="flex-1 overflow-auto">
+        <div className="mx-auto max-w-3xl p-6">
+          <header className="mb-4 border-b border-app pb-3">
+            <h1 className="text-lg font-semibold">
+              {SECTIONS.find((s) => s.key === section)?.label}
+            </h1>
+            <p className="text-xs text-app-faint">
+              {SECTIONS.find((s) => s.key === section)?.description}
+            </p>
+          </header>
+          {section === "account" && (
+            <div className="space-y-6">
+              <ProfileSection />
+              <AppearanceSection />
+            </div>
+          )}
+          {section === "organization" && (
+            <div className="space-y-6">
+              <OrganizationSection />
+              <WorkspaceSection />
+            </div>
+          )}
+          {section === "coworker" && <CoworkerSection />}
+          {section === "integrations" && <IntegrationsSection />}
+          {section === "notifications" && <NotificationsSection />}
+          {section === "security" && <SecuritySection />}
+          {section === "billing" && <BillingSection />}
+        </div>
       </div>
     </div>
   );

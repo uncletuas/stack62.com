@@ -1,9 +1,7 @@
 import {
   CalendarDays,
   ClipboardList,
-  Database,
   Files,
-  FolderTree,
   Layers,
   LineChart,
   MessageSquare,
@@ -12,12 +10,13 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useWorkspace, type ActivityKey } from "./workspace-context";
 
+// Trimmed: Records and Explorer removed (duplicated Files); the Rooms
+// entry folded into Coworker — chat surface now has Coworker/Team/Rooms
+// tabs internally so it's one click instead of two top-level destinations.
 const TOP: Array<{ key: ActivityKey; label: string; icon: LucideIcon }> = [
   { key: "systems", label: "Systems", icon: Layers },
-  { key: "explorer", label: "Explorer", icon: Files },
-  { key: "files", label: "Files", icon: FolderTree },
-  { key: "coworker", label: "Rooms", icon: MessageSquare },
-  { key: "records", label: "Records", icon: Database },
+  { key: "files", label: "Files", icon: Files },
+  { key: "coworker", label: "Coworker", icon: MessageSquare },
   { key: "tasks", label: "Tasks", icon: ClipboardList },
   { key: "schedules", label: "Schedules", icon: CalendarDays },
   { key: "reports", label: "Reports", icon: LineChart },
@@ -34,10 +33,9 @@ export function ActivityBar() {
       setSidebarOpen(true);
     }
     // Activities with a dedicated full-pane editor open it as a tab.
+    // (Coworker stays in the sidebar / right rail; no editor route.)
     if (key === "files") {
       navigate({ kind: "files-explorer", title: "Files" });
-    } else if (key === "coworker") {
-      navigate({ kind: "room", title: "Rooms" });
     }
   };
 
