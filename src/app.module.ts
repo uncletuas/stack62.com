@@ -29,7 +29,9 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module';
 import { DocumentExtractionModule } from './modules/document-extraction/document-extraction.module';
 import { FilesModule } from './modules/files/files.module';
 import { FoldersModule } from './modules/folders/folders.module';
+import { RoomsModule } from './modules/rooms/rooms.module';
 import { SemanticSearchModule } from './modules/semantic-search/semantic-search.module';
+import { StreamingGenerationModule } from './modules/streaming-generation/streaming-generation.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { RunnerModule } from './modules/runner/runner.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
@@ -116,6 +118,8 @@ import { BillingModule } from './modules/billing/billing.module';
     FoldersModule,
     DocumentExtractionModule,
     SemanticSearchModule,
+    RoomsModule,
+    StreamingGenerationModule,
     DocumentsModule,
     ReportsModule,
     SearchModule,

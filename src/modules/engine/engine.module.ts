@@ -5,12 +5,15 @@ import { ActivityModule } from '../activity/activity.module';
 import { AiModule } from '../ai/ai.module';
 import { CoworkerModule } from '../coworker/coworker.module';
 import { DocumentsModule } from '../documents/documents.module';
+import { DocumentExtractionModule } from '../document-extraction/document-extraction.module';
 import { FilesModule } from '../files/files.module';
+import { FoldersModule } from '../folders/folders.module';
 import { IntegrationsModule } from '../integrations/integrations.module';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { RecordsModule } from '../records/records.module';
 import { SchedulesModule } from '../schedules/schedules.module';
 import { RunnerModule } from '../runner/runner.module';
+import { SemanticSearchModule } from '../semantic-search/semantic-search.module';
 import { SystemsModule } from '../systems/systems.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { WorkflowsModule } from '../workflows/workflows.module';
@@ -24,6 +27,7 @@ import { OllamaClient } from './ollama.client';
 import { AutomationTools } from './tools/automation.tools';
 import { CommandTools } from './tools/command.tools';
 import { DataTools } from './tools/data.tools';
+import { DocumentsTools } from './tools/documents.tools';
 import { FileTools } from './tools/file.tools';
 import { IntegrationTools } from './tools/integration.tools';
 import { JobTools } from './tools/job.tools';
@@ -43,7 +47,10 @@ import { CoworkerRuntimeService } from './coworker-runtime.service';
     WorkflowsModule,
     TasksModule,
     FilesModule,
+    FoldersModule,
     DocumentsModule,
+    DocumentExtractionModule,
+    SemanticSearchModule,
     IntegrationsModule,
     RunnerModule,
     AiModule,
@@ -62,6 +69,7 @@ import { CoworkerRuntimeService } from './coworker-runtime.service';
     AutomationTools,
     IntegrationTools,
     FileTools,
+    DocumentsTools,
     SystemTools,
     PlanTools,
     JobTools,
