@@ -68,12 +68,19 @@ import { BillingModule } from './modules/billing/billing.module';
       useFactory: (configService: ConfigService) => {
         const pg = resolvePostgres();
         // Migration strategy:
-        //   - `migrationsRun: true` applies any pending committed
-        //     migrations on every boot.
-        //   - `synchronize` defaults to true for the first deploy /
-        //     active development phase. Flip DATABASE_SYNC=false in
-        //     production once the schema is settled; from then on,
-        //     schema changes go through migration files.
+        //   - When DATABASE_SYNC=true, TypeORM creates/updates schema
+        //     directly. Migrations are SKIPPED in this mode because
+        //     existing CREATE TABLE migrations would collide with
+        //     the schema synchronize() already produced (Postgres
+        //     42P07 "relation already exists").
+        //   - When DATABASE_SYNC=false, schema changes go through
+        //     migration files and migrationsRun applies them on boot.
+        //   - To transition: once schema is settled in dev/prod via
+        //     synchronize, mark existing migrations as already-run by
+        //     inserting their names into typeorm_migrations, then
+        //     flip DATABASE_SYNC=false so future changes go through
+        //     migrations exclusively.
+        const synchronize = configService.get<boolean>('DATABASE_SYNC', true);
         return {
           type: 'postgres',
           host: pg.host,
@@ -82,9 +89,9 @@ import { BillingModule } from './modules/billing/billing.module';
           password: pg.password,
           database: pg.database,
           autoLoadEntities: true,
-          synchronize: configService.get<boolean>('DATABASE_SYNC', true),
+          synchronize,
           migrations: [__dirname + '/migrations/*.{js,ts}'],
-          migrationsRun: true,
+          migrationsRun: !synchronize,
           migrationsTableName: 'typeorm_migrations',
           logging: configService.get<boolean>('DATABASE_LOGGING', false),
           ssl: pg.ssl ? { rejectUnauthorized: false } : false,
