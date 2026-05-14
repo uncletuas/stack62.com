@@ -247,6 +247,142 @@ export const roomsApi = {
   },
 };
 
+// ── File sharing ──────────────────────────────────────────────────────
+
+export interface FileShareDto {
+  id: string;
+  fileId: string;
+  targetUserId: string | null;
+  targetEmail: string | null;
+  shareToken: string | null;
+  permission: "read" | "comment" | "write" | "share" | "admin";
+  sharedByUserId: string;
+  expiresAt: string | null;
+  optionalMessage: string | null;
+  createdAt: string;
+}
+
+export const fileSharingApi = {
+  create(
+    fileId: string,
+    body: {
+      targetEmail?: string;
+      targetUserId?: string;
+      permission: FileShareDto["permission"];
+      expiresInDays?: number;
+      message?: string;
+      asPublicLink?: boolean;
+    },
+  ) {
+    return apiRequest<{
+      share: FileShareDto;
+      inviteUrl: string | null;
+      emailed: boolean;
+    }>(`/files/${fileId}/shares`, { method: "POST", body });
+  },
+  list(fileId: string) {
+    return apiRequest<FileShareDto[]>(`/files/${fileId}/shares`);
+  },
+  sharedWithMe() {
+    return apiRequest<FileShareDto[]>("/files-shared-with-me");
+  },
+  revoke(shareId: string) {
+    return apiRequest<{ ok: true }>(`/file-shares/${shareId}`, {
+      method: "DELETE",
+    });
+  },
+};
+
+// ── Slack ─────────────────────────────────────────────────────────────
+
+export interface SlackStatusDto {
+  connected: boolean;
+  teamId?: string;
+  teamName?: string;
+  installedAt?: string;
+}
+
+export interface SlackChannelDto {
+  id: string;
+  name: string;
+  isPrivate: boolean;
+}
+
+export interface SlackMappingDto {
+  id: string;
+  organizationId: string;
+  roomId: string;
+  slackChannelId: string;
+  slackChannelName: string | null;
+  direction: "bidirectional" | "slack_to_stack62" | "stack62_to_slack";
+  enabled: boolean;
+  createdAt: string;
+}
+
+export const slackApi = {
+  available() {
+    return apiRequest<{ available: boolean }>("/slack/available");
+  },
+  status(organizationId: string) {
+    return apiRequest<SlackStatusDto>("/slack/status", {
+      query: { organizationId },
+    });
+  },
+  installUrl(organizationId: string) {
+    return apiRequest<{ url: string }>("/slack/install/url", {
+      method: "POST",
+      body: { organizationId },
+    });
+  },
+  channels(organizationId: string) {
+    return apiRequest<SlackChannelDto[]>("/slack/channels", {
+      query: { organizationId },
+    });
+  },
+  mappings(organizationId: string) {
+    return apiRequest<SlackMappingDto[]>("/slack/mappings", {
+      query: { organizationId },
+    });
+  },
+  createMapping(body: {
+    organizationId: string;
+    roomId: string;
+    slackChannelId: string;
+    slackChannelName?: string;
+    direction?: SlackMappingDto["direction"];
+  }) {
+    return apiRequest<SlackMappingDto>("/slack/mappings", {
+      method: "POST",
+      body,
+    });
+  },
+  deleteMapping(id: string) {
+    return apiRequest<{ ok: true }>(`/slack/mappings/${id}`, {
+      method: "DELETE",
+    });
+  },
+};
+
+// ── File versions ─────────────────────────────────────────────────────
+
+export interface FileVersionDto {
+  id: string;
+  version: number;
+  filename: string;
+  size: string;
+  checksum: string | null;
+  mimeType: string;
+  uploadedByUserId: string | null;
+  createdAt: string;
+  isCurrent: boolean;
+}
+
+export const fileVersionsApi = {
+  list(fileId: string) {
+    return apiRequest<FileVersionDto[]>(`/files/${fileId}/versions`);
+  },
+};
+
 // ── Streaming generation (SSE) ─────────────────────────────────────────
 
 export type StreamGenerationEvent =

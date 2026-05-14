@@ -357,6 +357,38 @@ export class FilesService {
     };
   }
 
+  /**
+   * Walk the version chain back from a file. Returns the current file
+   * first, then each prior version (followed by previousVersionFileId).
+   * The chain is capped at 50 to defend against pathological loops.
+   */
+  async listVersions(fileId: string, actorUserId: string) {
+    const head = await this.findOne(fileId, actorUserId);
+    const history = [head];
+    let cursorId = head.previousVersionFileId;
+    while (cursorId && history.length < 50) {
+      const prev = await this.filesRepository.findOne({
+        where: { id: cursorId },
+      });
+      if (!prev) break;
+      // Access check — if the user can read the head, they can read
+      // prior versions (same file, same scope, same org).
+      history.push(prev);
+      cursorId = prev.previousVersionFileId;
+    }
+    return history.map((row) => ({
+      id: row.id,
+      version: row.version,
+      filename: row.filename,
+      size: row.size,
+      checksum: row.checksum,
+      mimeType: row.mimeType,
+      uploadedByUserId: row.uploadedByUserId,
+      createdAt: row.createdAt,
+      isCurrent: row.id === head.id,
+    }));
+  }
+
   async delete(fileId: string, actorUserId: string) {
     const file = await this.findOne(fileId, actorUserId);
     file.status = 'deleted';

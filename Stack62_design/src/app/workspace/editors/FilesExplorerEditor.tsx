@@ -1,17 +1,24 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ChevronRight,
+  Clock,
+  Copy,
   FolderPlus,
   Search,
   Share2,
   Sparkles,
   Upload,
+  X,
 } from "lucide-react";
 import {
   extractionApi,
+  fileSharingApi,
+  fileVersionsApi,
   foldersApi,
   searchApi,
   type DocumentExtractionDto,
+  type FileShareDto,
+  type FileVersionDto,
   type FolderDto,
   type SemanticHitDto,
 } from "../../lib/dms-resources";
@@ -385,9 +392,13 @@ function FileDetailsPanel({
 }) {
   const [extraction, setExtraction] = useState<DocumentExtractionDto | null>(null);
   const [extracting, setExtracting] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [versions, setVersions] = useState<FileVersionDto[]>([]);
+  const [versionsOpen, setVersionsOpen] = useState(false);
 
   useEffect(() => {
     extractionApi.get(fileId).then(setExtraction).catch(() => setExtraction(null));
+    fileVersionsApi.list(fileId).then(setVersions).catch(() => setVersions([]));
   }, [fileId]);
 
   const runExtraction = async () => {
@@ -428,13 +439,51 @@ function FileDetailsPanel({
                 : "Extract fields with AI"}
           </button>
           <button
-            disabled
-            title="Share UI lands with file-sharing UX in batch 3"
-            className="flex items-center justify-center gap-1.5 rounded-md border border-app px-3 py-2 text-app-faint"
+            onClick={() => setShareOpen(true)}
+            className="flex items-center justify-center gap-1.5 rounded-md border border-app px-3 py-2 hover:bg-app-hover"
           >
             <Share2 className="size-4" /> Share
           </button>
+          {versions.length > 1 && (
+            <button
+              onClick={() => setVersionsOpen((v) => !v)}
+              className="flex items-center justify-center gap-1.5 rounded-md border border-app px-3 py-2 text-xs hover:bg-app-hover"
+            >
+              <Clock className="size-3.5" />
+              {versionsOpen
+                ? "Hide history"
+                : `${versions.length} versions`}
+            </button>
+          )}
         </div>
+
+        {versionsOpen && versions.length > 0 && (
+          <section>
+            <h4 className="mb-1.5 text-xs uppercase text-app-faint">History</h4>
+            <ol className="space-y-1.5 rounded-md border border-app bg-app p-2 text-xs">
+              {versions.map((v) => (
+                <li
+                  key={v.id}
+                  className="flex items-center justify-between gap-2"
+                >
+                  <span className={v.isCurrent ? "font-semibold" : ""}>
+                    v{v.version}
+                    {v.isCurrent && (
+                      <span className="ml-1 text-accent">(current)</span>
+                    )}
+                  </span>
+                  <span className="text-app-faint">
+                    {new Date(v.createdAt).toLocaleString()}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
+
+        {shareOpen && (
+          <ShareModal fileId={fileId} onClose={() => setShareOpen(false)} />
+        )}
 
         {extraction?.status === "completed" && extraction.extractedFields && (
           <section>
@@ -471,6 +520,195 @@ function FileDetailsPanel({
         )}
       </div>
     </aside>
+  );
+}
+
+function ShareModal({
+  fileId,
+  onClose,
+}: {
+  fileId: string;
+  onClose: () => void;
+}) {
+  const [email, setEmail] = useState("");
+  const [message, setMessage] = useState("");
+  const [permission, setPermission] = useState<FileShareDto["permission"]>("read");
+  const [submitting, setSubmitting] = useState(false);
+  const [linkUrl, setLinkUrl] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [shares, setShares] = useState<FileShareDto[]>([]);
+
+  useEffect(() => {
+    fileSharingApi.list(fileId).then(setShares).catch(() => setShares([]));
+  }, [fileId]);
+
+  const sendShare = async () => {
+    if (!email.trim()) return;
+    setSubmitting(true);
+    setFeedback(null);
+    try {
+      const result = await fileSharingApi.create(fileId, {
+        targetEmail: email.trim(),
+        permission,
+        message: message.trim() || undefined,
+      });
+      setFeedback(
+        result.emailed
+          ? `Email sent to ${email.trim()}.`
+          : `Shared. (Email service didn't deliver — they'll see it next time they sign in.)`,
+      );
+      setEmail("");
+      setMessage("");
+      const refreshed = await fileSharingApi.list(fileId);
+      setShares(refreshed);
+    } catch (err) {
+      setFeedback(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const createLink = async () => {
+    setSubmitting(true);
+    setFeedback(null);
+    try {
+      const result = await fileSharingApi.create(fileId, {
+        permission,
+        asPublicLink: true,
+      });
+      setLinkUrl(result.inviteUrl);
+      const refreshed = await fileSharingApi.list(fileId);
+      setShares(refreshed);
+    } catch (err) {
+      setFeedback(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const revoke = async (shareId: string) => {
+    await fileSharingApi.revoke(shareId);
+    const refreshed = await fileSharingApi.list(fileId);
+    setShares(refreshed);
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 grid place-items-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-lg border border-app bg-app-surface shadow-xl">
+        <div className="flex items-center justify-between border-b border-app px-4 py-3">
+          <h3 className="text-sm font-semibold">Share file</h3>
+          <button onClick={onClose} className="text-app-faint hover:text-app">
+            <X className="size-4" />
+          </button>
+        </div>
+        <div className="space-y-4 p-4 text-sm">
+          {/* Email share */}
+          <section>
+            <label className="mb-1 block text-xs font-semibold uppercase text-app-faint">
+              Share with a person
+            </label>
+            <input
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="email@example.com"
+              type="email"
+              className="w-full rounded-md border border-app bg-app px-3 py-2 focus:outline-none focus:ring-1 focus:ring-accent"
+            />
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="Optional message…"
+              rows={2}
+              className="mt-2 w-full resize-none rounded-md border border-app bg-app px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent"
+            />
+            <div className="mt-2 flex items-center gap-2">
+              <select
+                value={permission}
+                onChange={(e) =>
+                  setPermission(e.target.value as FileShareDto["permission"])
+                }
+                className="rounded-md border border-app bg-app px-2 py-1 text-xs"
+              >
+                <option value="read">Can view</option>
+                <option value="comment">Can comment</option>
+                <option value="write">Can edit</option>
+              </select>
+              <button
+                onClick={sendShare}
+                disabled={submitting || !email.trim()}
+                className="ml-auto rounded-md bg-accent px-3 py-1.5 text-xs text-accent-fg hover:opacity-90 disabled:opacity-50"
+              >
+                {submitting ? "Sending…" : "Send invite"}
+              </button>
+            </div>
+          </section>
+
+          <div className="border-t border-app" />
+
+          {/* Public link */}
+          <section>
+            <label className="mb-1 block text-xs font-semibold uppercase text-app-faint">
+              Get a public link
+            </label>
+            {linkUrl ? (
+              <div className="flex items-center gap-2 rounded-md border border-app bg-app px-2 py-1.5">
+                <code className="flex-1 truncate text-xs">{linkUrl}</code>
+                <button
+                  onClick={() =>
+                    navigator.clipboard.writeText(linkUrl).then(() => {
+                      setFeedback("Link copied to clipboard.");
+                    })
+                  }
+                  className="rounded p-1 hover:bg-app-hover"
+                >
+                  <Copy className="size-3.5" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={createLink}
+                disabled={submitting}
+                className="w-full rounded-md border border-app px-3 py-1.5 text-xs hover:bg-app-hover disabled:opacity-50"
+              >
+                Generate a link anyone with it can use
+              </button>
+            )}
+          </section>
+
+          {feedback && (
+            <p className="text-xs text-app-faint">{feedback}</p>
+          )}
+
+          {shares.length > 0 && (
+            <section>
+              <h4 className="mb-1.5 text-xs font-semibold uppercase text-app-faint">
+                Active shares ({shares.length})
+              </h4>
+              <ul className="space-y-1.5 rounded-md border border-app bg-app p-2 text-xs">
+                {shares.map((s) => (
+                  <li key={s.id} className="flex items-center justify-between gap-2">
+                    <span className="truncate">
+                      {s.shareToken
+                        ? "Public link"
+                        : s.targetEmail || s.targetUserId || "Unknown"}
+                      <span className="ml-1 text-app-faint">
+                        ({s.permission})
+                      </span>
+                    </span>
+                    <button
+                      onClick={() => revoke(s.id)}
+                      className="text-app-faint hover:text-red-500"
+                    >
+                      Revoke
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 

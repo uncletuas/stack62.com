@@ -1,16 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Hash,
+  Link2,
   MessageSquare,
   Plus,
   Send,
+  Slack,
   Sparkles,
   Users,
 } from "lucide-react";
 import {
   roomsApi,
+  slackApi,
   type RoomDto,
   type RoomMessageDto,
+  type SlackChannelDto,
+  type SlackMappingDto,
+  type SlackStatusDto,
 } from "../../lib/dms-resources";
 import { useAppContext } from "../../context/app-context";
 
@@ -35,6 +41,8 @@ export function RoomEditor() {
   const [draft, setDraft] = useState("");
   const [posting, setPosting] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [slackStatus, setSlackStatus] = useState<SlackStatusDto | null>(null);
+  const [slackPanelOpen, setSlackPanelOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const loadRooms = useCallback(async () => {
@@ -62,6 +70,17 @@ export function RoomEditor() {
   useEffect(() => {
     loadRooms();
   }, [loadRooms]);
+
+  useEffect(() => {
+    if (!orgId) return;
+    slackApi.status(orgId).then(setSlackStatus).catch(() => undefined);
+  }, [orgId]);
+
+  const connectSlack = async () => {
+    if (!orgId) return;
+    const { url } = await slackApi.installUrl(orgId);
+    window.location.href = url;
+  };
 
   useEffect(() => {
     if (activeRoomId) {
@@ -156,7 +175,39 @@ export function RoomEditor() {
             ))
           )}
         </div>
+
+        {/* Slack section */}
+        <div className="border-t border-app px-3 py-3">
+          {slackStatus?.connected ? (
+            <button
+              onClick={() => setSlackPanelOpen(true)}
+              className="flex w-full items-center gap-2 rounded-md border border-app px-2 py-1.5 text-xs text-app-faint hover:bg-app-hover"
+            >
+              <Slack className="size-3.5" />
+              <span className="flex-1 truncate text-left">
+                {slackStatus.teamName || "Slack"} • Bridge…
+              </span>
+            </button>
+          ) : (
+            <button
+              onClick={connectSlack}
+              className="flex w-full items-center gap-2 rounded-md border border-app px-2 py-1.5 text-xs hover:bg-app-hover"
+            >
+              <Slack className="size-3.5" />
+              Add to Slack
+            </button>
+          )}
+        </div>
       </aside>
+
+      {slackPanelOpen && (
+        <SlackBridgePanel
+          orgId={orgId}
+          rooms={rooms}
+          activeRoomId={activeRoomId}
+          onClose={() => setSlackPanelOpen(false)}
+        />
+      )}
 
       {/* Thread */}
       <div className="flex min-w-0 flex-1 flex-col">
@@ -323,6 +374,164 @@ function EmptyState({ room }: { room: RoomDto }) {
           Type a message to start the conversation. Summon the Coworker with{" "}
           <code className="rounded bg-app px-1 py-0.5">@stack62</code>.
         </p>
+      </div>
+    </div>
+  );
+}
+
+function SlackBridgePanel({
+  orgId,
+  rooms,
+  activeRoomId,
+  onClose,
+}: {
+  orgId: string;
+  rooms: RoomDto[];
+  activeRoomId: string | null;
+  onClose: () => void;
+}) {
+  const [channels, setChannels] = useState<SlackChannelDto[]>([]);
+  const [mappings, setMappings] = useState<SlackMappingDto[]>([]);
+  const [selectedRoom, setSelectedRoom] = useState<string>(activeRoomId || "");
+  const [selectedChannel, setSelectedChannel] = useState<string>("");
+  const [submitting, setSubmitting] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    Promise.all([
+      slackApi.channels(orgId).catch(() => []),
+      slackApi.mappings(orgId).catch(() => []),
+    ]).then(([c, m]) => {
+      setChannels(c);
+      setMappings(m);
+    });
+  }, [orgId]);
+
+  const createMapping = async () => {
+    if (!selectedRoom || !selectedChannel) return;
+    setSubmitting(true);
+    setFeedback(null);
+    try {
+      const channel = channels.find((c) => c.id === selectedChannel);
+      await slackApi.createMapping({
+        organizationId: orgId,
+        roomId: selectedRoom,
+        slackChannelId: selectedChannel,
+        slackChannelName: channel?.name,
+      });
+      const refreshed = await slackApi.mappings(orgId);
+      setMappings(refreshed);
+      setFeedback("Bridge created — messages will now sync both ways.");
+    } catch (err) {
+      setFeedback(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const revoke = async (id: string) => {
+    await slackApi.deleteMapping(id);
+    const refreshed = await slackApi.mappings(orgId);
+    setMappings(refreshed);
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 grid place-items-center bg-black/40 p-4">
+      <div className="w-full max-w-lg rounded-lg border border-app bg-app-surface shadow-xl">
+        <div className="flex items-center justify-between border-b border-app px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Link2 className="size-4 text-app-faint" />
+            <h3 className="text-sm font-semibold">Bridge to Slack</h3>
+          </div>
+          <button onClick={onClose} className="text-app-faint hover:text-app">
+            ×
+          </button>
+        </div>
+
+        <div className="space-y-4 p-4 text-sm">
+          <p className="text-xs text-app-faint">
+            Pick a Stack62 room and a Slack channel. Messages flow both ways
+            while the bridge is active.
+          </p>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase text-app-faint">
+                Stack62 room
+              </label>
+              <select
+                value={selectedRoom}
+                onChange={(e) => setSelectedRoom(e.target.value)}
+                className="w-full rounded-md border border-app bg-app px-2 py-1.5 text-sm"
+              >
+                <option value="">Pick a room…</option>
+                {rooms
+                  .filter((r) => r.kind !== "coworker_private")
+                  .map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name || `(${r.kind})`}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase text-app-faint">
+                Slack channel
+              </label>
+              <select
+                value={selectedChannel}
+                onChange={(e) => setSelectedChannel(e.target.value)}
+                className="w-full rounded-md border border-app bg-app px-2 py-1.5 text-sm"
+              >
+                <option value="">Pick a channel…</option>
+                {channels.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    #{c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <button
+            onClick={createMapping}
+            disabled={submitting || !selectedRoom || !selectedChannel}
+            className="rounded-md bg-accent px-3 py-1.5 text-sm text-accent-fg hover:opacity-90 disabled:opacity-50"
+          >
+            {submitting ? "Linking…" : "Create bridge"}
+          </button>
+
+          {feedback && (
+            <p className="text-xs text-app-faint">{feedback}</p>
+          )}
+
+          {mappings.length > 0 && (
+            <section>
+              <h4 className="mb-1.5 text-xs font-semibold uppercase text-app-faint">
+                Active bridges ({mappings.length})
+              </h4>
+              <ul className="space-y-1.5 rounded-md border border-app bg-app p-2 text-xs">
+                {mappings.map((m) => (
+                  <li
+                    key={m.id}
+                    className="flex items-center justify-between gap-2"
+                  >
+                    <span className="truncate">
+                      {rooms.find((r) => r.id === m.roomId)?.name || "Room"}{" "}
+                      ↔ #{m.slackChannelName || m.slackChannelId}
+                    </span>
+                    <button
+                      onClick={() => revoke(m.id)}
+                      className="text-app-faint hover:text-red-500"
+                    >
+                      Unlink
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
       </div>
     </div>
   );

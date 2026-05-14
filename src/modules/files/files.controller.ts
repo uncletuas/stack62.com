@@ -93,6 +93,11 @@ export class FilesController {
     return this.filesService.readEditableContent(fileId, user.userId);
   }
 
+  @Get(':fileId/versions')
+  versions(@Param('fileId') fileId: string, @CurrentUser() user: JwtUser) {
+    return this.filesService.listVersions(fileId, user.userId);
+  }
+
   @Patch(':fileId/content')
   saveContent(
     @Param('fileId') fileId: string,

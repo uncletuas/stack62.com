@@ -5,7 +5,9 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody:true keeps req.rawBody available for webhook signature
+  // verification (Slack /v1/slack/events, Stripe webhook later, etc.)
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   const configService = app.get(ConfigService);
   const apiPrefix = configService.get<string>('API_PREFIX', 'v1');
