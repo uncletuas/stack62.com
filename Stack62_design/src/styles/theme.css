@@ -36,6 +36,18 @@
   --app-emerald:      #059669;
   --app-sky:          #0284c7;
 
+  /* Primary accent — Indigo. One calm accent used for focus rings,
+     active nav rows, primary buttons. Slack uses aubergine; we use
+     indigo to avoid looking like a Slack knockoff while keeping the
+     "one accent" discipline. */
+  --app-accent:        #4f46e5;       /* indigo-600 */
+  --app-accent-hover:  #4338ca;       /* indigo-700 */
+  --app-accent-soft:   rgba(79, 70, 229, 0.10);
+  --app-accent-fg:     #ffffff;
+
+  /* Hover wash — soft gray for any clickable row (sidebar, menus). */
+  --app-hover:         #f0f0f3;
+
   /* Tag tints — very light wash, not background fill */
   --tint-cyan:        rgba(14, 165, 183, 0.08);
   --tint-violet:      rgba(124, 58, 237, 0.08);
@@ -58,12 +70,19 @@
   --app-border:       #1e293b;
   --app-border-soft:  rgba(255,255,255,0.05);
   --app-border-strong:#334155;
+  --app-hover:        rgba(255,255,255,0.05);
 
   --app-text:         #e2e8f0;
   --app-text-muted:   #94a3b8;
   --app-text-subtle:  #64748b;
   --app-text-faint:   #475569;
   --app-text-inverse: #0f172a;
+
+  /* Dark-mode accent — same indigo but slightly lighter for contrast */
+  --app-accent:        #6366f1;       /* indigo-500 */
+  --app-accent-hover:  #818cf8;       /* indigo-400 */
+  --app-accent-soft:   rgba(99, 102, 241, 0.18);
+  --app-accent-fg:     #ffffff;
 
   --tint-cyan:        rgba(6, 182, 212, 0.16);
   --tint-violet:      rgba(139, 92, 246, 0.16);
@@ -81,6 +100,8 @@
   .bg-app-surface   { background-color: var(--app-surface); }
   .bg-app-elevated  { background-color: var(--app-elevated); }
   .bg-app-overlay   { background-color: var(--app-overlay); }
+  .bg-app-hover     { background-color: var(--app-hover); }
+  .hover\:bg-app-hover:hover { background-color: var(--app-hover); }
   .bg-doc-canvas    { background-color: var(--doc-canvas); }
   .bg-doc-paper     { background-color: var(--doc-paper); }
   .border-app       { border-color: var(--app-border); }
@@ -91,9 +112,20 @@
   .text-app-muted   { color: var(--app-text-muted); }
   .text-app-subtle  { color: var(--app-text-subtle); }
   .text-app-faint   { color: var(--app-text-faint); }
+  .text-app-inverse { color: var(--app-text-inverse); }
   .ring-app         { --tw-ring-color: var(--app-border-strong); }
   .shadow-doc       { box-shadow: var(--doc-shadow); }
   .placeholder-app::placeholder { color: var(--app-text-faint); }
+
+  /* Accent — single indigo for primary actions, focus, active nav. */
+  .bg-accent        { background-color: var(--app-accent); }
+  .bg-accent-soft   { background-color: var(--app-accent-soft); }
+  .hover\:bg-accent-hover:hover { background-color: var(--app-accent-hover); }
+  .text-accent      { color: var(--app-accent); }
+  .text-accent-fg   { color: var(--app-accent-fg); }
+  .border-accent    { border-color: var(--app-accent); }
+  .ring-accent      { --tw-ring-color: var(--app-accent); }
+  .focus\:ring-accent:focus { --tw-ring-color: var(--app-accent); }
 }
 
 :root {

@@ -41,31 +41,36 @@ export function ActivityBar() {
   };
 
   return (
-    <aside className="flex w-12 shrink-0 flex-col items-center border-r border-cyan-950/70 bg-app py-2 shadow-[inset_-1px_0_0_rgba(34,211,238,0.06)]">
-      {TOP.map(({ key, label, icon: Icon }) => (
-        <button
-          key={key}
-          title={label}
-          onClick={() => click(key)}
-          className={`group relative mb-1 grid h-10 w-10 place-items-center rounded-xl transition ${
-            activity === key
-              ? "text-white"
-              : "text-app-faint hover:bg-cyan-300/10 hover:text-cyan-100"
-          }`}
-        >
-          <Icon className="h-5 w-5" />
-        </button>
-      ))}
+    <aside className="flex w-14 shrink-0 flex-col items-center border-r border-app bg-app-surface py-2">
+      {TOP.map(({ key, label, icon: Icon }) => {
+        const active = activity === key;
+        return (
+          <button
+            key={key}
+            title={label}
+            onClick={() => click(key)}
+            className={`relative mb-0.5 flex h-12 w-12 flex-col items-center justify-center gap-0.5 rounded-md text-[10px] font-medium transition ${
+              active
+                ? "bg-accent-soft text-accent"
+                : "text-app-subtle hover:bg-app-hover hover:text-app"
+            }`}
+          >
+            <Icon className="h-4 w-4" />
+            <span className="leading-none">{label}</span>
+          </button>
+        );
+      })}
       <button
         title="Settings"
         onClick={() => click("settings")}
-        className={`mt-auto grid h-10 w-10 place-items-center rounded-xl transition ${
+        className={`mt-auto flex h-12 w-12 flex-col items-center justify-center gap-0.5 rounded-md text-[10px] font-medium transition ${
           activity === "settings"
-            ? "text-white"
-            : "text-app-faint hover:bg-cyan-300/10 hover:text-cyan-100"
+            ? "bg-accent-soft text-accent"
+            : "text-app-subtle hover:bg-app-hover hover:text-app"
         }`}
       >
-        <Settings className="h-5 w-5" />
+        <Settings className="h-4 w-4" />
+        <span className="leading-none">Settings</span>
       </button>
     </aside>
   );

@@ -23,19 +23,21 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 const STORAGE_KEY = "stack62.theme";
 
 function readStoredMode(): ThemeMode {
-  if (typeof window === "undefined") return "dark";
+  if (typeof window === "undefined") return "light";
   try {
     const v = localStorage.getItem(STORAGE_KEY);
     if (v === "light" || v === "dark" || v === "system") return v;
   } catch {
     /* ignore */
   }
-  return "dark";
+  // Light by default — cleaner for business teams. Dark stays available
+  // as a toggle in Settings > Account.
+  return "light";
 }
 
 function systemPrefersDark(): boolean {
-  if (typeof window === "undefined") return true;
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true;
+  if (typeof window === "undefined") return false;
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
 }
 
 function resolve(mode: ThemeMode): "light" | "dark" {

@@ -131,10 +131,10 @@ export function TabBar() {
                 setMenu({ x: e.clientX, y: e.clientY, tab });
               }}
               style={{ width, minWidth: MIN_TAB_WIDTH }}
-              className={`group flex h-9 shrink-0 items-center gap-1.5 border-r border-app px-2 text-xs ${
+              className={`group relative flex h-9 shrink-0 items-center gap-1.5 px-3 text-sm ${
                 active
-                  ? "border-t-2 border-t-indigo-400 bg-app text-white"
-                  : "border-t-2 border-t-transparent text-app-subtle hover:bg-slate-800/50 hover:text-app"
+                  ? "bg-app text-app font-medium after:absolute after:inset-x-1 after:bottom-0 after:h-0.5 after:rounded-t-full after:bg-accent"
+                  : "border-r border-app text-app-subtle hover:bg-app-hover hover:text-app"
               }`}
             >
               <button
@@ -144,7 +144,7 @@ export function TabBar() {
               >
                 <Icon className="h-3.5 w-3.5 shrink-0" />
                 {tab.pinned && (
-                  <Pin className="h-2.5 w-2.5 shrink-0 text-indigo-400" />
+                  <Pin className="h-2.5 w-2.5 shrink-0 text-accent" />
                 )}
                 {!compact && !tab.pinned && (
                   <span className="min-w-0 flex-1 truncate text-left">
@@ -159,7 +159,7 @@ export function TabBar() {
                     e.stopPropagation();
                     closeTab(tab.id);
                   }}
-                  className="grid h-4 w-4 shrink-0 place-items-center rounded text-white/70 hover:bg-white/15 hover:text-white"
+                  className="grid h-5 w-5 shrink-0 place-items-center rounded text-app-faint opacity-0 transition hover:bg-app-hover hover:text-app group-hover:opacity-100"
                   aria-label="Close tab"
                 >
                   <X className="h-3 w-3" />
@@ -225,7 +225,7 @@ function MenuItem({
   return (
     <button
       onClick={onClick}
-      className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-white/10"
+      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-app hover:bg-app-hover"
     >
       <Icon className="h-3.5 w-3.5 text-app-faint" />
       {label}

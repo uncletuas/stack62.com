@@ -78,19 +78,21 @@ export function Sidebar() {
   if (activity === "coworker") return <AssistantDock />;
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-app px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-app-subtle">
-        {TITLES[activity]}
+    <div className="flex h-full flex-col bg-app-surface">
+      <div className="flex items-center justify-between px-4 pt-4 pb-2">
+        <h2 className="text-base font-semibold text-app">
+          {TITLES[activity]}
+        </h2>
       </div>
       {activity !== "files" && (
-        <div className="border-b border-app p-2">
+        <div className="px-3 pb-3">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-app-faint" />
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-app-faint" />
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Filter..."
-              className="h-7 border-app bg-app pl-7 text-xs text-app placeholder:text-app-faint"
+              placeholder="Filter…"
+              className="h-8 border-app bg-app pl-8 text-sm text-app placeholder:text-app-faint focus-visible:ring-accent"
             />
           </div>
         </div>
@@ -164,15 +166,21 @@ function Row({
   return (
     <button
       onClick={onClick}
-      className={`flex w-full items-center gap-2 px-2 py-1 text-left text-xs transition ${
-        active ? "bg-white/10 text-white" : "text-app-muted hover:bg-white/5"
+      className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm transition ${
+        active
+          ? "bg-accent text-accent-fg font-medium"
+          : "text-app-muted hover:bg-app-hover hover:text-app"
       }`}
-      style={{ paddingLeft: 8 + indent * 12 }}
+      style={{ paddingLeft: 12 + indent * 12 }}
     >
       <Icon className="h-3.5 w-3.5 shrink-0" />
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {meta && (
-        <span className="shrink-0 text-[10px] uppercase tracking-wide text-app-faint">
+        <span
+          className={`shrink-0 text-[10px] uppercase tracking-wide ${
+            active ? "text-accent-fg/80" : "text-app-faint"
+          }`}
+        >
           {meta}
         </span>
       )}

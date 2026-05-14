@@ -9,7 +9,6 @@ import {
   ArrowLeft,
   ArrowRight,
   Bell,
-  ChevronDown,
   Command,
   Download,
   FileDown,
@@ -24,6 +23,7 @@ import {
   Sparkles,
   Terminal,
   Upload,
+  User as UserIcon,
 } from "lucide-react";
 import { useAppContext } from "../context/app-context";
 import {
@@ -33,7 +33,7 @@ import {
   fetchWorkflowRuns,
   uploadFile,
 } from "../lib/resources";
-import { Menu, type MenuItem } from "./Menu";
+import { type MenuItem } from "./Menu";
 import { useWorkspace } from "./workspace-context";
 
 export function TitleBar() {
@@ -256,52 +256,21 @@ export function TitleBar() {
   ];
 
   return (
-    <header className="flex h-9 shrink-0 items-center gap-2 border-b border-app bg-app px-3 text-xs">
-      <span className="flex items-center gap-1 font-semibold tracking-tight text-white">
-        <Layers className="h-3.5 w-3.5 text-indigo-400" />
+    <header className="flex h-12 shrink-0 items-center gap-2 border-b border-app bg-app-surface px-3 text-sm">
+      {/* Logo */}
+      <span className="flex items-center gap-1.5 font-semibold tracking-tight text-app">
+        <span className="grid h-6 w-6 place-items-center rounded-md bg-accent text-accent-fg">
+          <Layers className="h-3.5 w-3.5" />
+        </span>
         Stack62
       </span>
 
-      <div className="ml-1 flex items-center gap-1">
-        <Menu
-          trigger={
-            <>
-              File <ChevronDown className="h-3 w-3" />
-            </>
-          }
-          items={fileItems}
-        />
-        <Menu
-          trigger={
-            <>
-              Export <ChevronDown className="h-3 w-3" />
-            </>
-          }
-          items={exportItems}
-        />
-        <Menu
-          trigger={
-            <>
-              View <ChevronDown className="h-3 w-3" />
-            </>
-          }
-          items={viewItems}
-        />
-        <Menu
-          trigger={
-            <>
-              Help <ChevronDown className="h-3 w-3" />
-            </>
-          }
-          items={helpItems}
-        />
-      </div>
-
-      <div className="ml-3 flex items-center gap-0.5 border-l border-app pl-3">
+      {/* Back / forward / new tab */}
+      <div className="ml-2 flex items-center gap-0.5">
         <button
           onClick={() => back()}
           disabled={!activeTab?.canGoBack}
-          className="grid h-7 w-7 place-items-center rounded text-app-subtle hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:text-slate-700 disabled:hover:bg-transparent"
+          className="grid h-7 w-7 place-items-center rounded-md text-app-subtle hover:bg-app-hover hover:text-app disabled:cursor-not-allowed disabled:text-app-faint disabled:hover:bg-transparent"
           title="Back"
         >
           <ArrowLeft className="h-4 w-4" />
@@ -309,58 +278,47 @@ export function TitleBar() {
         <button
           onClick={() => forward()}
           disabled={!activeTab?.canGoForward}
-          className="grid h-7 w-7 place-items-center rounded text-app-subtle hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:text-slate-700 disabled:hover:bg-transparent"
+          className="grid h-7 w-7 place-items-center rounded-md text-app-subtle hover:bg-app-hover hover:text-app disabled:cursor-not-allowed disabled:text-app-faint disabled:hover:bg-transparent"
           title="Forward"
         >
           <ArrowRight className="h-4 w-4" />
         </button>
         <button
           onClick={() => openTab({ kind: "welcome", title: "Welcome" })}
-          className="ml-1 grid h-7 w-7 place-items-center rounded text-app-subtle hover:bg-white/10 hover:text-white"
+          className="ml-1 grid h-7 w-7 place-items-center rounded-md text-app-subtle hover:bg-app-hover hover:text-app"
           title="Home"
         >
           <Plus className="h-4 w-4" />
         </button>
       </div>
 
-      <button
-        type="button"
-        onClick={() => setAutopilot(!autopilot)}
-        className={`ml-auto flex h-7 items-center gap-1.5 rounded border px-2 text-[11px] font-medium transition ${
-          autopilot
-            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
-            : "border-app bg-app-surface text-app-subtle hover:border-app-strong hover:text-app"
-        }`}
-        title={autopilot ? "Coworker is active" : "Coworker is off"}
-      >
-        <span
-          className={`relative inline-block h-3 w-6 rounded-full transition ${
-            autopilot ? "bg-emerald-500" : "bg-slate-700"
-          }`}
+      {/* Centered search */}
+      <div className="mx-auto flex w-full max-w-2xl items-center px-4">
+        <button
+          onClick={() => setPaletteOpen(true)}
+          className="flex w-full items-center gap-2 rounded-md border border-app bg-app px-3 py-1.5 text-sm text-app-faint hover:border-app-strong hover:text-app-muted"
         >
-          <span
-            className={`absolute top-0.5 h-2 w-2 rounded-full bg-white transition-all ${
-              autopilot ? "left-3.5" : "left-0.5"
-            }`}
-          />
-        </span>
-        <span>{autopilot ? "Coworker on" : "Coworker off"}</span>
-      </button>
+          <Search className="h-3.5 w-3.5" />
+          <span className="flex-1 text-left">Search Stack62</span>
+          <kbd className="rounded border border-app px-1 text-[10px] text-app-faint">
+            ⌘ K
+          </kbd>
+        </button>
+      </div>
 
-      <button
-        onClick={() => setPaletteOpen(true)}
-        className="flex w-72 items-center gap-2 rounded border border-app bg-app-surface px-2 py-1 text-app-faint hover:border-app-strong hover:text-app-muted"
-      >
-        <Search className="h-3.5 w-3.5" />
-        <span className="text-xs">Search</span>
-        <kbd className="ml-auto rounded border border-app px-1 text-[10px]">
-          Ctrl K
-        </kbd>
-      </button>
-      <NotificationsBell
-        open={notifOpen}
-        setOpen={setNotifOpen}
-      />
+      {/* Right side: bell + profile */}
+      <div className="flex items-center gap-1">
+        <NotificationsBell open={notifOpen} setOpen={setNotifOpen} />
+        <ProfileMenu
+          fileItems={fileItems}
+          exportItems={exportItems}
+          viewItems={viewItems}
+          helpItems={helpItems}
+          autopilot={autopilot}
+          setAutopilot={setAutopilot}
+          onSignOut={logout}
+        />
+      </div>
 
       <input
         ref={fileInputRef}
@@ -572,6 +530,178 @@ function NotificationsBell({
               </ul>
             )}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Profile menu. Collapses the old File/Export/View/Help menu bar plus
+ * the autopilot toggle + sign-out into a single round avatar at the
+ * top-right. Slack does this. Big space-saving win, fewer chrome
+ * elements to scan.
+ */
+function ProfileMenu({
+  fileItems,
+  exportItems,
+  viewItems,
+  helpItems,
+  autopilot,
+  setAutopilot,
+  onSignOut,
+}: {
+  fileItems: MenuItem[];
+  exportItems: MenuItem[];
+  viewItems: MenuItem[];
+  helpItems: MenuItem[];
+  autopilot: boolean;
+  setAutopilot: (next: boolean) => void;
+  onSignOut: () => void;
+}) {
+  const { user } = useAppContext();
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (event: MouseEvent) => {
+      if (
+        wrapperRef.current &&
+        !wrapperRef.current.contains(event.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", handler);
+    return () => window.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const initials = (() => {
+    const f = user?.firstName?.[0] ?? "";
+    const l = user?.lastName?.[0] ?? "";
+    return (f + l).toUpperCase() || "U";
+  })();
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="grid h-8 w-8 place-items-center rounded-full bg-accent text-[12px] font-semibold text-accent-fg shadow-sm hover:bg-accent-hover"
+        title={user ? `${user.firstName} ${user.lastName}` : "Account"}
+      >
+        {initials}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-40 mt-1.5 w-72 rounded-lg border border-app bg-app-elevated shadow-lg">
+          <div className="border-b border-app px-4 py-3">
+            <p className="text-sm font-semibold">
+              {user ? `${user.firstName} ${user.lastName}` : "Account"}
+            </p>
+            {user?.email && (
+              <p className="truncate text-xs text-app-faint">{user.email}</p>
+            )}
+          </div>
+          {/* Autopilot toggle (used to live in the title bar). */}
+          <div className="flex items-center justify-between border-b border-app px-4 py-2.5">
+            <span className="text-sm">
+              Coworker
+              <span className="ml-1 text-xs text-app-faint">
+                {autopilot ? "on" : "off"}
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setAutopilot(!autopilot)}
+              className="relative inline-flex h-5 w-9 items-center rounded-full transition"
+              style={{
+                background: autopilot
+                  ? "var(--app-accent)"
+                  : "var(--app-border-strong)",
+              }}
+              aria-pressed={autopilot}
+            >
+              <span
+                className={`absolute h-4 w-4 rounded-full bg-white shadow transition-all ${
+                  autopilot ? "left-[18px]" : "left-0.5"
+                }`}
+              />
+            </button>
+          </div>
+          {/* Compacted menu groups */}
+          <ProfileSubmenu label="File" items={fileItems} />
+          <ProfileSubmenu label="Export" items={exportItems} />
+          <ProfileSubmenu label="View" items={viewItems} />
+          <ProfileSubmenu label="Help" items={helpItems} />
+          <button
+            type="button"
+            onClick={onSignOut}
+            className="flex w-full items-center gap-2 border-t border-app px-4 py-2.5 text-left text-sm text-rose-600 hover:bg-app-hover"
+          >
+            <LogOut className="h-4 w-4" />
+            Sign out
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One group inside the ProfileMenu — opens a flyout submenu with the
+ * underlying MenuItems. Keeps the top-level menu compact.
+ */
+function ProfileSubmenu({
+  label,
+  items,
+}: {
+  label: string;
+  items: MenuItem[];
+}) {
+  const [hover, setHover] = useState(false);
+  return (
+    <div
+      className="relative"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
+      <button
+        type="button"
+        className="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-app hover:bg-app-hover"
+      >
+        <span>{label}</span>
+        <span className="text-app-faint">›</span>
+      </button>
+      {hover && items.length > 0 && (
+        <div className="absolute right-full top-0 mr-1 w-64 rounded-lg border border-app bg-app-elevated shadow-lg">
+          {items.map((item, idx) => (
+            <button
+              key={`${label}-${idx}`}
+              type="button"
+              onClick={() => {
+                if (!item.disabled) item.onSelect?.();
+              }}
+              disabled={item.disabled}
+              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm ${
+                idx > 0 && item.separatorAbove
+                  ? "border-t border-app"
+                  : ""
+              } ${
+                item.disabled
+                  ? "text-app-faint"
+                  : "text-app hover:bg-app-hover"
+              }`}
+            >
+              {item.icon ? <item.icon className="h-3.5 w-3.5" /> : null}
+              <span className="flex-1">{item.label}</span>
+              {item.shortcut && (
+                <kbd className="rounded border border-app px-1 text-[10px] text-app-faint">
+                  {item.shortcut}
+                </kbd>
+              )}
+            </button>
+          ))}
         </div>
       )}
     </div>

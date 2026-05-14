@@ -24,6 +24,8 @@ import {
   Sparkles,
   Trash2,
   Users,
+  Volume2,
+  VolumeX,
   Workflow,
   X,
 } from "lucide-react";
@@ -115,6 +117,132 @@ function savePosition(p: Position) {
   }
 }
 
+/**
+ * Anchor presets for the floating launcher. Used by the "move to …"
+ * command parser: the user types or speaks "go to the bottom right"
+ * and we snap the launcher there with a transition.
+ */
+type Anchor =
+  | "top-left"
+  | "top-right"
+  | "bottom-left"
+  | "bottom-right"
+  | "center";
+
+function anchorPosition(anchor: Anchor): Position {
+  const margin = 24;
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  switch (anchor) {
+    case "top-left":
+      return { x: margin, y: margin + 48 };
+    case "top-right":
+      return { x: w - 72 - margin, y: margin + 48 };
+    case "bottom-left":
+      return { x: margin, y: h - 72 - margin };
+    case "bottom-right":
+      return { x: w - 72 - margin, y: h - 72 - margin };
+    case "center":
+    default:
+      return { x: w / 2 - 36, y: h / 2 - 36 };
+  }
+}
+
+/**
+ * Parse a free-form command from the chat composer or voice into a
+ * launcher action. Returns null when the prompt isn't a movement
+ * command — caller falls back to the normal LLM round-trip.
+ *
+ * Recognised:
+ *   - "move/go to (the) top/bottom + left/right"
+ *   - "move to the center"
+ *   - "go left/right/up/down"
+ *   - "hide/minimize/close"
+ *   - "show/open"
+ */
+function parseLauncherCommand(
+  raw: string,
+): { kind: "anchor"; anchor: Anchor } | { kind: "close" } | { kind: "open" } | null {
+  const text = raw.trim().toLowerCase();
+  if (!text) return null;
+  // Only match when the *whole* utterance is a command — we don't
+  // want "tell sarah to move the deadline to the right side of the
+  // table" to reposition the rail.
+  const moveRe =
+    /^(?:hey\s+)?(?:stack62|coworker)?[,\s]*\b(?:please\s+)?(?:go|move|jump|fly|hop|teleport|run)\s+(?:to\s+)?(?:the\s+)?(top|upper|bottom|lower)?[\s-]*?(left|right|center|middle)?(?:\s+side|\s+corner)?$/;
+  const m = text.match(moveRe);
+  if (m) {
+    const v = m[1] === "upper" ? "top" : m[1] === "lower" ? "bottom" : m[1];
+    const h = m[2] === "middle" ? "center" : m[2];
+    const anchor: Anchor =
+      h === "center"
+        ? "center"
+        : v && h
+          ? (`${v}-${h}` as Anchor)
+          : v === "top"
+            ? "top-right"
+            : v === "bottom"
+              ? "bottom-right"
+              : h === "left"
+                ? "bottom-left"
+                : "bottom-right";
+    return { kind: "anchor", anchor };
+  }
+  if (/^(?:hide|minimi[sz]e|go\s+away|close\s+(?:yourself|coworker))$/.test(text)) {
+    return { kind: "close" };
+  }
+  if (/^(?:show|open|come\s+(?:back|here))$/.test(text)) {
+    return { kind: "open" };
+  }
+  return null;
+}
+
+/**
+ * Text-to-speech helper. Uses the built-in Web Speech Synthesis API
+ * so the Coworker can actually speak its replies — the start of the
+ * "robot face that talks" vision.
+ *
+ * Quietly no-ops on browsers without speech support (rare).
+ */
+function speak(text: string, opts: { rate?: number; pitch?: number } = {}) {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+  if (!text?.trim()) return;
+  try {
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = opts.rate ?? 1.05;
+    u.pitch = opts.pitch ?? 1.0;
+    u.lang = navigator.language || "en-US";
+    window.speechSynthesis.speak(u);
+  } catch {
+    /* speech engine missing — ignore */
+  }
+}
+
+function stopSpeaking() {
+  try {
+    window.speechSynthesis?.cancel();
+  } catch {
+    /* ignore */
+  }
+}
+
+const VOICE_PREF_KEY = "stack62.coworker.voice";
+function readVoicePreference(): boolean {
+  try {
+    return localStorage.getItem(VOICE_PREF_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+function writeVoicePreference(on: boolean) {
+  try {
+    localStorage.setItem(VOICE_PREF_KEY, on ? "on" : "off");
+  } catch {
+    /* ignore */
+  }
+}
+
 type PanelTab = "coworker" | "team" | "rooms";
 
 export function CoworkerRail() {
@@ -139,6 +267,26 @@ export function CoworkerRail() {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<PanelTab>("coworker");
   const [position, setPosition] = useState<Position>(() => loadPosition());
+  const [voiceOn, setVoiceOn] = useState<boolean>(() => readVoicePreference());
+
+  /**
+   * Snap the floating launcher to one of the four corners / center.
+   * Wired to the "move to the bottom right"-style commands.
+   */
+  const moveToAnchor = useCallback((anchor: Anchor) => {
+    const next = clamp(
+      anchorPosition(anchor).x,
+      anchorPosition(anchor).y,
+    );
+    setPosition(next);
+    savePosition(next);
+  }, []);
+
+  const setVoice = useCallback((next: boolean) => {
+    setVoiceOn(next);
+    writeVoicePreference(next);
+    if (!next) stopSpeaking();
+  }, []);
 
   const [flashMessage, setFlashMessage] = useState<string | null>(null);
   const flashTimerRef = useRef<{ visible: number | null; cycle: number | null }>({
@@ -394,6 +542,25 @@ export function CoworkerRail() {
     const ready = attachments.filter((a) => a.uploaded && !a.error);
     if ((!prompt && ready.length === 0) || sending) return;
     if (attachments.some((a) => a.uploading)) return;
+
+    // Intercept movement / minimize / show commands locally — no
+    // need to round-trip to the LLM for "go to the bottom right".
+    const command = ready.length === 0 ? parseLauncherCommand(prompt) : null;
+    if (command) {
+      setDraft("");
+      if (command.kind === "anchor") {
+        moveToAnchor(command.anchor);
+        if (voiceOn) speak(`Moving to ${command.anchor.replace("-", " ")}.`);
+      } else if (command.kind === "close") {
+        setOpen(false);
+        if (voiceOn) speak("Stepping aside.");
+      } else if (command.kind === "open") {
+        setOpen(true);
+        if (voiceOn) speak("I'm here.");
+      }
+      return;
+    }
+
     setSending(true);
     setDraft("");
     const attachmentLines = ready.map(
@@ -439,6 +606,15 @@ export function CoworkerRail() {
         optimistic,
         result.message,
       ]);
+      // Speak the reply if voice mode is on. Trim down extremely long
+      // responses so the user isn't stuck waiting on a 5-minute monologue.
+      if (voiceOn && result.message.role === "assistant" && result.message.content) {
+        const spoken =
+          result.message.content.length > 600
+            ? result.message.content.slice(0, 600) + "…"
+            : result.message.content;
+        speak(spoken);
+      }
       void refreshConversations();
     } catch (err) {
       setMessages((prev) => [
@@ -526,7 +702,7 @@ export function CoworkerRail() {
           dragRef.current.dragging = false;
           savePosition(position);
         }}
-        className="fixed z-[60] grid h-14 w-14 touch-none select-none place-items-center rounded-full text-cyan-100 outline-none transition"
+        className="fixed z-[60] grid h-14 w-14 touch-none select-none place-items-center rounded-full text-accent-fg outline-none transition"
         style={{ left: position.x, top: position.y }}
         title={`${name} (${role}) — drag to move, tap to open`}
       >
@@ -543,20 +719,20 @@ export function CoworkerRail() {
         />
         <span
           aria-hidden
-          className="pointer-events-none absolute inset-[-4px] rounded-full"
+          className="pointer-events-none absolute inset-[-2px] rounded-full"
           style={{
             boxShadow:
-              "0 0 28px 4px rgba(34,211,238,0.25), 0 0 60px 12px rgba(167,139,250,0.18)",
-            animation: "stack62-pulse 2.6s ease-in-out infinite",
+              "0 12px 32px rgba(79, 70, 229, 0.25), 0 4px 12px rgba(0,0,0,0.08)",
           }}
         />
-        <span className="relative grid h-12 w-12 place-items-center rounded-full border border-cyan-300/40 bg-slate-950/95 backdrop-blur">
+        <span
+          className="relative grid h-12 w-12 place-items-center rounded-full text-white"
+          style={{ backgroundColor: "var(--app-accent)" }}
+        >
           <Bot className="h-5 w-5" />
           <span
-            className={`absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full ring-2 ring-slate-950 ${
-              pendingCount > 0
-                ? "bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.85)]"
-                : "bg-emerald-400 shadow-[0_0_8px_rgba(110,231,183,0.7)]"
+            className={`absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full ring-2 ring-white ${
+              pendingCount > 0 ? "bg-amber-400" : "bg-emerald-500"
             }`}
           />
           {pendingCount > 0 && (
@@ -599,6 +775,8 @@ export function CoworkerRail() {
           setDraft={setDraft}
           sending={sending}
           onClose={() => setOpen(false)}
+          voiceOn={voiceOn}
+          setVoice={setVoice}
           onSend={() => void send()}
           onNewChat={newChat}
           onSwitchConversation={switchConversation}
@@ -669,7 +847,7 @@ function FlashBubble({
     <button
       type="button"
       onClick={onOpen}
-      className="fixed z-[59] max-w-[320px] rounded-2xl border border-cyan-400/30 bg-slate-950/90 px-3 py-2 text-left text-xs text-app shadow-[0_8px_30px_rgba(34,211,238,0.18)] backdrop-blur transition hover:border-cyan-300/60 hover:bg-app-surface"
+      className="fixed z-[59] max-w-[320px] rounded-2xl border border-app bg-app-elevated px-3 py-2 text-left text-xs text-app shadow-[0_8px_30px_rgba(34,211,238,0.18)] backdrop-blur transition hover:border-cyan-300/60 hover:bg-app-surface"
       style={{ ...style, animation: "stack62-pop 220ms ease-out" }}
       title="Open chat"
     >
@@ -714,6 +892,8 @@ interface GeniePanelProps {
   setDraft: (next: string) => void;
   sending: boolean;
   onClose: () => void;
+  voiceOn: boolean;
+  setVoice: (next: boolean) => void;
   onSend: () => void;
   onNewChat: () => void;
   onSwitchConversation: (id: string) => void;
@@ -746,6 +926,8 @@ function GeniePanel({
   setDraft,
   sending,
   onClose,
+  voiceOn,
+  setVoice,
   onSend,
   onNewChat,
   onSwitchConversation,
@@ -778,11 +960,11 @@ function GeniePanel({
   return (
     <>
       <div
-        className="fixed inset-0 z-[58] bg-slate-950/30 backdrop-blur-[1px]"
+        className="fixed inset-0 z-[58] bg-black/10 backdrop-blur-[1px]"
         onClick={onClose}
       />
       <aside
-        className="fixed z-[60] flex flex-col overflow-hidden rounded-2xl border border-cyan-400/20 text-app shadow-[0_24px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl"
+        className="fixed z-[60] flex flex-col overflow-hidden rounded-2xl border border-app bg-app-elevated text-app shadow-[0_24px_80px_rgba(0,0,0,0.18)]"
         style={{
           left,
           top,
@@ -794,7 +976,7 @@ function GeniePanel({
         }}
       >
         {/* Header */}
-        <header className="relative shrink-0 border-b border-white/5 px-3 py-2.5">
+        <header className="relative shrink-0 border-b border-app px-3 py-2.5">
           <div
             aria-hidden
             className="pointer-events-none absolute inset-x-0 top-0 h-px"
@@ -806,9 +988,9 @@ function GeniePanel({
             }}
           />
           <div className="flex items-center gap-2.5">
-            <span className="relative grid h-9 w-9 place-items-center rounded-full border border-cyan-300/40 bg-slate-950/80">
+            <span className="relative grid h-9 w-9 place-items-center rounded-full border border-cyan-300/40 bg-app-elevated">
               <Bot className="h-4 w-4 text-cyan-200" />
-              <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-950" />
+              <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-white" />
             </span>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold tracking-tight">
@@ -823,8 +1005,24 @@ function GeniePanel({
             </div>
             <button
               type="button"
+              onClick={() => setVoice(!voiceOn)}
+              className={`rounded-full p-1 transition ${
+                voiceOn
+                  ? "bg-accent-soft text-accent"
+                  : "text-app-muted hover:bg-app-hover"
+              }`}
+              title={voiceOn ? "Voice on — tap to mute" : "Voice off — tap to enable"}
+            >
+              {voiceOn ? (
+                <Volume2 className="h-4 w-4" />
+              ) : (
+                <VolumeX className="h-4 w-4" />
+              )}
+            </button>
+            <button
+              type="button"
               onClick={onClose}
-              className="rounded-full p-1 text-app-muted hover:bg-white/5"
+              className="rounded-full p-1 text-app-muted hover:bg-app-hover"
               title="Close (Esc)"
             >
               <X className="h-4 w-4" />
@@ -832,7 +1030,7 @@ function GeniePanel({
           </div>
 
           {/* Tabs — Coworker (1:1 AI) / Team (channels) / Rooms (groups + DMs) */}
-          <nav className="mt-2.5 flex gap-1 rounded-full border border-white/5 bg-slate-950/60 p-0.5 text-[11px]">
+          <nav className="mt-2.5 flex gap-1 rounded-full border border-app bg-app p-0.5 text-[11px]">
             <TabButton
               active={tab === "coworker"}
               onClick={() => setTab("coworker")}
@@ -860,11 +1058,11 @@ function GeniePanel({
           {tab === "coworker" && (
             <>
               {/* Chat history toolbar */}
-              <div className="flex shrink-0 items-center gap-1 border-b border-white/5 px-3 py-1.5">
+              <div className="flex shrink-0 items-center gap-1 border-b border-app px-3 py-1.5">
                 <button
                   type="button"
                   onClick={() => setShowHistory(!showHistory)}
-                  className="flex items-center gap-1 rounded-full border border-white/5 bg-slate-950/60 px-2 py-0.5 text-[11px] text-app-muted hover:bg-white/5"
+                  className="flex items-center gap-1 rounded-full border border-app bg-app px-2 py-0.5 text-[11px] text-app-muted hover:bg-app-hover"
                   title="Chat history"
                 >
                   <History className="h-3 w-3" />
@@ -876,7 +1074,7 @@ function GeniePanel({
                 <button
                   type="button"
                   onClick={onNewChat}
-                  className="flex items-center gap-1 rounded-full bg-gradient-to-br from-cyan-400 to-violet-500 px-2 py-0.5 text-[11px] font-semibold text-slate-950"
+                  className="flex items-center gap-1 rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-accent-fg"
                   title="New chat"
                 >
                   <Plus className="h-3 w-3" />
@@ -937,7 +1135,7 @@ function GeniePanel({
 
         {/* Composer (visible on chat tab only) */}
         {tab === "coworker" && !showHistory && (
-          <footer className="shrink-0 border-t border-white/5 bg-slate-950/40 p-2">
+          <footer className="shrink-0 border-t border-app bg-app-hover p-2">
             {attachments.length > 0 && (
               <ul className="mb-1.5 flex flex-wrap gap-1.5">
                 {attachments.map((a) => (
@@ -948,7 +1146,7 @@ function GeniePanel({
                         ? "border-rose-500/40 bg-rose-500/10 text-rose-200"
                         : a.uploading
                         ? "border-slate-500/30 bg-slate-500/10 text-app-muted"
-                        : "border-cyan-400/30 bg-cyan-500/10 text-cyan-100"
+                        : "border-accent bg-accent-soft text-accent"
                     }`}
                     title={a.error ?? `${a.filename} · ${formatBytes(a.size)}`}
                   >
@@ -961,7 +1159,7 @@ function GeniePanel({
                     <button
                       type="button"
                       onClick={() => onRemoveAttachment(a.id)}
-                      className="rounded-full p-0.5 hover:bg-white/10"
+                      className="rounded-full p-0.5 hover:bg-app-hover"
                       title="Remove"
                     >
                       <X className="h-2.5 w-2.5" />
@@ -984,7 +1182,7 @@ function GeniePanel({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/5 bg-slate-950/70 text-app-muted hover:border-cyan-400/40 hover:text-cyan-200"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-app bg-app text-app-muted hover:border-accent hover:text-accent"
                 title="Attach files"
               >
                 <Paperclip className="h-4 w-4" />
@@ -1011,7 +1209,7 @@ function GeniePanel({
                     : `Ask ${name} anything…`
                 }
                 rows={2}
-                className="min-h-[44px] w-full resize-none rounded-xl border border-white/5 bg-slate-950/70 px-2.5 py-1.5 text-xs text-app placeholder:text-app-faint focus:border-cyan-400/40 focus:outline-none"
+                className="min-h-[44px] w-full resize-none rounded-xl border border-app bg-app px-2.5 py-1.5 text-xs text-app placeholder:text-app-faint focus:border-accent focus:outline-none"
                 autoFocus
               />
               <button
@@ -1022,7 +1220,7 @@ function GeniePanel({
                   attachments.some((a) => a.uploading) ||
                   (!draft.trim() && attachments.filter((a) => a.uploaded).length === 0)
                 }
-                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-cyan-400 to-violet-500 text-slate-950 shadow-[0_0_18px_rgba(34,211,238,0.35)] disabled:opacity-40"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-accent text-accent-fg shadow-sm disabled:opacity-40"
                 title="Send"
               >
                 {sending ? (
@@ -1058,10 +1256,10 @@ function TabButton({
       onClick={onClick}
       className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-2 py-1 transition ${
         active
-          ? "bg-gradient-to-br from-cyan-500/30 to-violet-500/30 text-slate-50 shadow-[inset_0_0_0_1px_rgba(34,211,238,0.25)]"
+          ? "bg-accent-soft text-accent"
           : accent
-          ? "text-amber-200 hover:bg-white/5"
-          : "text-app-muted hover:bg-white/5"
+          ? "text-amber-200 hover:bg-app-hover"
+          : "text-app-muted hover:bg-app-hover"
       }`}
     >
       <Icon className="h-3.5 w-3.5" />
@@ -1085,11 +1283,11 @@ function ChatHistory({
 }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="flex items-center gap-1 border-b border-white/5 px-3 py-1.5 text-[11px] text-app-subtle">
+      <div className="flex items-center gap-1 border-b border-app px-3 py-1.5 text-[11px] text-app-subtle">
         <button
           type="button"
           onClick={onClose}
-          className="rounded-full p-0.5 hover:bg-white/5"
+          className="rounded-full p-0.5 hover:bg-app-hover"
           title="Back"
         >
           <ChevronLeft className="h-3.5 w-3.5" />
@@ -1113,7 +1311,7 @@ function ChatHistory({
                 className={`flex w-full items-start gap-2 px-3 py-2 text-left text-xs transition ${
                   c.conversationId === activeId
                     ? "bg-cyan-500/10 text-app"
-                    : "hover:bg-white/5"
+                    : "hover:bg-app-hover"
                 }`}
               >
                 <MessageSquare className="mt-0.5 h-3 w-3 shrink-0 text-cyan-300" />
@@ -1287,7 +1485,7 @@ function MemoryTab({
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Add new */}
-      <div className="shrink-0 space-y-1.5 border-b border-white/5 p-3">
+      <div className="shrink-0 space-y-1.5 border-b border-app p-3">
         <div className="flex gap-1.5">
           {(["fact", "preference", "episode"] as const).map((k) => (
             <button
@@ -1297,7 +1495,7 @@ function MemoryTab({
               className={`flex-1 rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${
                 kind === k
                   ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-200"
-                  : "border-white/5 bg-slate-950/40 text-app-subtle hover:bg-white/5"
+                  : "border-app bg-app-hover text-app-subtle hover:bg-app-hover"
               }`}
             >
               {k}
@@ -1315,13 +1513,13 @@ function MemoryTab({
               }
             }}
             placeholder={`Teach me a ${kind}...`}
-            className="min-w-0 flex-1 rounded-lg border border-white/5 bg-slate-950/60 px-2 py-1 text-[11px] placeholder:text-app-faint focus:border-cyan-400/50 focus:outline-none"
+            className="min-w-0 flex-1 rounded-lg border border-app bg-app px-2 py-1 text-[11px] placeholder:text-app-faint focus:border-accent focus:outline-none"
           />
           <button
             type="button"
             onClick={() => void add()}
             disabled={!draft.trim() || adding}
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-cyan-500/90 text-cyan-950 hover:bg-cyan-400 disabled:opacity-50"
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-accent text-accent-fg hover:bg-accent-hover disabled:opacity-50"
             title="Add"
           >
             <Plus className="h-3.5 w-3.5" />
@@ -1351,7 +1549,7 @@ function MemoryTab({
                     {items.map((m) => (
                       <li
                         key={m.id}
-                        className="group rounded-lg border border-white/5 bg-slate-950/40 p-2"
+                        className="group rounded-lg border border-app bg-app-hover p-2"
                       >
                         {editingId === m.id ? (
                           <div className="space-y-1.5">
@@ -1365,7 +1563,7 @@ function MemoryTab({
                                     className={`flex-1 rounded-full border px-1 py-0.5 text-[9px] uppercase tracking-wide ${
                                       editingKind === k
                                         ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-200"
-                                        : "border-white/5 bg-slate-950/40 text-app-subtle hover:bg-white/5"
+                                        : "border-app bg-app-hover text-app-subtle hover:bg-app-hover"
                                     }`}
                                   >
                                     {k}
@@ -1377,21 +1575,21 @@ function MemoryTab({
                               value={editingText}
                               onChange={(e) => setEditingText(e.target.value)}
                               rows={2}
-                              className="w-full resize-none rounded-lg border border-cyan-500/30 bg-slate-950/60 px-2 py-1 text-[11px] focus:border-cyan-400/60 focus:outline-none"
+                              className="w-full resize-none rounded-lg border border-cyan-500/30 bg-app px-2 py-1 text-[11px] focus:border-accent focus:outline-none"
                               autoFocus
                             />
                             <div className="flex gap-1.5">
                               <button
                                 type="button"
                                 onClick={() => void saveEdit()}
-                                className="rounded-lg bg-cyan-500/90 px-2 py-0.5 text-[10px] font-semibold text-cyan-950 hover:bg-cyan-400"
+                                className="rounded-lg bg-accent px-2 py-0.5 text-[10px] font-semibold text-accent-fg hover:bg-accent-hover"
                               >
                                 Save
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setEditingId(null)}
-                                className="rounded-lg px-2 py-0.5 text-[10px] text-app-subtle hover:bg-white/5"
+                                className="rounded-lg px-2 py-0.5 text-[10px] text-app-subtle hover:bg-app-hover"
                               >
                                 Cancel
                               </button>
@@ -1419,7 +1617,7 @@ function MemoryTab({
                                   type="button"
                                   onClick={() => startEdit(m)}
                                   title="Edit"
-                                  className="rounded p-0.5 hover:bg-white/5"
+                                  className="rounded p-0.5 hover:bg-app-hover"
                                 >
                                   <Edit3 className="h-3 w-3 text-cyan-300" />
                                 </button>
@@ -1427,7 +1625,7 @@ function MemoryTab({
                                   type="button"
                                   onClick={() => void remove(m.id)}
                                   title="Forget"
-                                  className="rounded p-0.5 hover:bg-white/5"
+                                  className="rounded p-0.5 hover:bg-app-hover"
                                 >
                                   <Trash2 className="h-3 w-3 text-rose-400 hover:text-rose-300" />
                                 </button>
@@ -1475,13 +1673,13 @@ function MessageBubble({ msg }: { msg: CoworkerMessage }) {
     <li
       className={`max-w-[88%] rounded-2xl px-2.5 py-1.5 text-xs ${
         isUser
-          ? "ml-auto bg-gradient-to-br from-cyan-500/30 to-violet-500/20 text-cyan-50"
-          : "mr-auto border border-white/5 bg-slate-950/60 text-app"
+          ? "ml-auto bg-accent text-accent-fg"
+          : "mr-auto border border-app bg-app text-app"
       }`}
     >
       <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
       {(!isUser && (tierMeta || tools.length > 0)) && (
-        <div className="mt-1 flex items-center gap-1.5 border-t border-white/5 pt-1 text-[10px] text-app-subtle">
+        <div className="mt-1 flex items-center gap-1.5 border-t border-app pt-1 text-[10px] text-app-subtle">
           {tierMeta && (
             <span
               className={`rounded-full border px-1.5 py-0.5 ${tierMeta.className}`}
@@ -1688,7 +1886,7 @@ function VoiceInputButton({
       <button
         type="button"
         disabled
-        className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/5 bg-slate-950/70 text-app-muted/40"
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-app bg-app text-app-muted/40"
         title="Voice input not supported in this browser"
       >
         <MicOff className="h-4 w-4" />
@@ -1703,7 +1901,7 @@ function VoiceInputButton({
       className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl border transition ${
         listening
           ? "border-rose-400/50 bg-rose-500/10 text-rose-200 animate-pulse"
-          : "border-white/5 bg-slate-950/70 text-app-muted hover:border-cyan-400/40 hover:text-cyan-200"
+          : "border-app bg-app text-app-muted hover:border-accent hover:text-accent"
       }`}
       title={listening ? "Stop listening" : "Voice input"}
     >
@@ -1778,7 +1976,7 @@ function RoomsPanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center justify-between border-b border-white/5 px-3 py-2">
+      <div className="flex items-center justify-between border-b border-app px-3 py-2">
         <p className="text-[11px] uppercase tracking-wider text-app-subtle">
           {filter === "channel" ? "Team channels" : "Rooms & DMs"}
         </p>
@@ -1800,7 +1998,7 @@ function RoomsPanel({
             setRooms((prev) => [room, ...prev]);
             setOpenRoomId(room.id);
           }}
-          className="rounded-full p-1 text-app-muted hover:bg-white/5"
+          className="rounded-full p-1 text-app-muted hover:bg-app-hover"
           title={filter === "channel" ? "New channel" : "New room"}
         >
           <Plus className="h-3 w-3" />
@@ -1824,7 +2022,7 @@ function RoomsPanel({
                 <button
                   type="button"
                   onClick={() => setOpenRoomId(room.id)}
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-white/5"
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-app-hover"
                 >
                   {filter === "channel" ? (
                     <Hash className="h-3 w-3 text-app-subtle" />
@@ -1926,11 +2124,11 @@ function RoomThreadView({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Thread header */}
-      <div className="flex items-center gap-2 border-b border-white/5 px-3 py-2">
+      <div className="flex items-center gap-2 border-b border-app px-3 py-2">
         <button
           type="button"
           onClick={onBack}
-          className="rounded p-1 text-app-muted hover:bg-white/5"
+          className="rounded p-1 text-app-muted hover:bg-app-hover"
           title="Back to list"
         >
           <ChevronLeft className="h-3 w-3" />
@@ -2004,7 +2202,7 @@ function RoomThreadView({
       </div>
 
       {/* Composer */}
-      <div className="border-t border-white/5 p-2">
+      <div className="border-t border-app p-2">
         <div className="flex gap-1.5">
           <textarea
             value={draft}
@@ -2017,13 +2215,13 @@ function RoomThreadView({
             }}
             placeholder="Message…"
             rows={2}
-            className="min-h-0 flex-1 resize-none rounded-md border border-app bg-app px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400/40"
+            className="min-h-0 flex-1 resize-none rounded-md border border-app bg-app px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-accent"
           />
           <button
             type="button"
             onClick={send}
             disabled={posting || !draft.trim()}
-            className="rounded-md bg-gradient-to-br from-cyan-400 to-violet-500 px-2 text-slate-950 hover:opacity-90 disabled:opacity-40"
+            className="rounded-md bg-accent px-2 text-accent-fg hover:opacity-90 disabled:opacity-40"
             title="Send"
           >
             <Send className="size-3" />
