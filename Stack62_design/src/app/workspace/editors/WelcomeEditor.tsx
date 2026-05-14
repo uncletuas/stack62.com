@@ -215,7 +215,7 @@ function Panel({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-app bg-slate-900/40">
+    <div className="rounded-xl border border-app bg-app-hover">
       <div className="flex items-center gap-2 border-b border-app px-3 py-2 text-xs font-semibold text-app-muted">
         <Icon className="h-3.5 w-3.5 text-indigo-400" />
         <span className="flex-1">{title}</span>
@@ -248,7 +248,7 @@ function RowItem({
   return (
     <button
       onClick={onClick}
-      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/5"
+      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-app-hover"
     >
       <Icon className="h-3.5 w-3.5 text-app-subtle" />
       <span className="flex-1 truncate">{label}</span>
@@ -304,8 +304,8 @@ function StarterHero() {
   };
 
   return (
-    <section className="mb-6 rounded-xl border border-cyan-500/20 bg-gradient-to-br from-slate-900 to-slate-950 p-6">
-      <div className="mb-3 flex items-center gap-2 text-cyan-300">
+    <section className="mb-6 rounded-xl border border-app bg-app-elevated p-6">
+      <div className="mb-3 flex items-center gap-2 text-accent">
         <Sparkles className="h-4 w-4" />
         <span className="text-[11px] font-semibold uppercase tracking-wider">
           Let's set up your first system
@@ -338,7 +338,7 @@ function StarterHero() {
           type="button"
           onClick={() => void submit()}
           disabled={submitting || !prompt.trim()}
-          className="flex shrink-0 items-center gap-2 self-start rounded bg-cyan-500/90 px-4 py-2 text-sm font-semibold text-cyan-950 hover:bg-cyan-400 disabled:opacity-50"
+          className="flex shrink-0 items-center gap-2 self-start rounded bg-accent px-4 py-2 text-sm font-semibold text-accent-fg hover:bg-accent-hover disabled:opacity-50"
         >
           {submitting ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -357,7 +357,7 @@ function StarterHero() {
             type="button"
             onClick={() => setPrompt(ex)}
             disabled={submitting}
-            className="rounded-full border border-app-strong bg-app-surface px-3 py-1 text-[11px] text-app-muted hover:border-cyan-500/40 hover:text-cyan-100 disabled:opacity-50"
+            className="rounded-full border border-app-strong bg-app-surface px-3 py-1 text-[11px] text-app-muted hover:border-cyan-500/40 hover:text-accent disabled:opacity-50"
           >
             {ex}
           </button>

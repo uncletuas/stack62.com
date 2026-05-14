@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ActivityService } from '../activity/activity.service';
+import { SecretEncryptionService } from '../../shared/crypto/secret-encryption.service';
 import { UsersService } from '../users/users.service';
 import { RoomMessageEntity } from '../rooms/entities/room-message.entity';
 import { RoomEntity } from '../rooms/entities/room.entity';
@@ -45,7 +46,13 @@ export class SlackBridgeService {
     private readonly roomsService: RoomsService,
     private readonly usersService: UsersService,
     private readonly activityService: ActivityService,
+    private readonly secretEncryption: SecretEncryptionService,
   ) {}
+
+  /** Decrypt the stored bot token before each Slack API call. */
+  private getBotToken(installation: SlackInstallationEntity): string {
+    return this.secretEncryption.decrypt(installation.botAccessToken);
+  }
 
   // ── Mapping management ──────────────────────────────────────────────
 
@@ -119,7 +126,7 @@ export class SlackBridgeService {
     const response = await fetch(
       'https://slack.com/api/conversations.list?exclude_archived=true&limit=200&types=public_channel,private_channel',
       {
-        headers: { Authorization: `Bearer ${installation.botAccessToken}` },
+        headers: { Authorization: `Bearer ${this.getBotToken(installation)}` },
       },
     );
     const json = (await response.json()) as {
@@ -169,7 +176,7 @@ export class SlackBridgeService {
         const response = await fetch('https://slack.com/api/chat.postMessage', {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${installation.botAccessToken}`,
+            Authorization: `Bearer ${this.getBotToken(installation)}`,
             'Content-Type': 'application/json; charset=utf-8',
           },
           body: JSON.stringify({
@@ -244,7 +251,7 @@ export class SlackBridgeService {
     // Try to map the Slack user to a Stack62 user via email; fall back
     // to "external" if we can't (renders as Coworker authorKind for now).
     const stackUser = await this.resolveSlackUser(
-      installation.botAccessToken,
+      this.getBotToken(installation),
       payload.userId,
     );
 

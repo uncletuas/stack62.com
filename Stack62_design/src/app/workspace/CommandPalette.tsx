@@ -7,8 +7,10 @@ import {
   GitBranch,
   Layers,
   ListTodo,
+  Mail,
   Plus,
   Settings,
+  Sparkles,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useAppContext } from "../context/app-context";
@@ -105,6 +107,25 @@ export function CommandPalette() {
         icon: ListTodo,
         run: () => {
           setActivity("flow");
+          setPaletteOpen(false);
+        },
+      },
+      {
+        id: "create:streaming-doc",
+        label: "Generate document with AI",
+        hint: "Watch the Coworker type a doc / spreadsheet / code in real time",
+        group: "Action",
+        icon: Sparkles,
+        run: open("streaming-doc", "Generate document"),
+      },
+      {
+        id: "create:email",
+        label: "New email",
+        hint: "Compose and send via your connected email account",
+        group: "Action",
+        icon: Mail,
+        run: () => {
+          window.dispatchEvent(new CustomEvent("stack62:open-email"));
           setPaletteOpen(false);
         },
       },

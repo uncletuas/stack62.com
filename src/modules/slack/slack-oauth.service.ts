@@ -9,6 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import * as crypto from 'node:crypto';
 import { Repository } from 'typeorm';
 import { ActivityService } from '../activity/activity.service';
+import { SecretEncryptionService } from '../../shared/crypto/secret-encryption.service';
 import { SlackInstallationEntity } from './entities/slack-installation.entity';
 
 /**
@@ -65,6 +66,7 @@ export class SlackOAuthService {
     private readonly installationsRepo: Repository<SlackInstallationEntity>,
     private readonly configService: ConfigService,
     private readonly activityService: ActivityService,
+    private readonly secretEncryption: SecretEncryptionService,
   ) {}
 
   isConfigured(): boolean {
@@ -137,7 +139,9 @@ export class SlackOAuthService {
     });
     if (installation) {
       installation.organizationId = state.organizationId;
-      installation.botAccessToken = json.access_token;
+      installation.botAccessToken = this.secretEncryption.encrypt(
+        json.access_token,
+      );
       installation.botUserId = json.bot_user_id;
       installation.teamName = json.team.name ?? installation.teamName;
       installation.scopes = json.scope ? json.scope.split(',') : null;
@@ -152,7 +156,7 @@ export class SlackOAuthService {
         teamId: json.team.id,
         teamName: json.team.name ?? null,
         botUserId: json.bot_user_id,
-        botAccessToken: json.access_token,
+        botAccessToken: this.secretEncryption.encrypt(json.access_token),
         scopes: json.scope ? json.scope.split(',') : null,
         appId: json.app_id ?? null,
         enterpriseId: json.enterprise?.id ?? null,

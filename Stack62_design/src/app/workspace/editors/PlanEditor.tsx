@@ -272,7 +272,7 @@ export function PlanEditor({ tab }: { tab: EditorTab }) {
         </div>
       </header>
 
-      <section className="grid grid-cols-3 gap-2 border-b border-app bg-slate-900/30 px-4 py-2 md:grid-cols-6">
+      <section className="grid grid-cols-3 gap-2 border-b border-app bg-app-hover px-4 py-2 md:grid-cols-6">
         <Stat
           label="Changes"
           value={totalItems}
@@ -345,27 +345,27 @@ export function PlanEditor({ tab }: { tab: EditorTab }) {
 
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,420px)_1fr]">
         <aside className="min-h-0 overflow-y-auto border-b border-app lg:border-b-0 lg:border-r">
-          <div className="sticky top-0 z-10 flex items-center gap-1 border-b border-app bg-slate-950/95 px-3 py-2 text-[11px] text-app-subtle">
+          <div className="sticky top-0 z-10 flex items-center gap-1 border-b border-app bg-app-elevated px-3 py-2 text-[11px] text-app-subtle">
             <span className="mr-auto uppercase tracking-wide">
               Changes ({totalSelected}/{totalItems})
             </span>
             <button
               onClick={selectAll}
-              className="rounded px-2 py-0.5 hover:bg-white/5"
+              className="rounded px-2 py-0.5 hover:bg-app-hover"
               disabled={decided}
             >
               All
             </button>
             <button
               onClick={selectNone}
-              className="rounded px-2 py-0.5 hover:bg-white/5"
+              className="rounded px-2 py-0.5 hover:bg-app-hover"
               disabled={decided}
             >
               None
             </button>
             <button
               onClick={selectSafeOnly}
-              className="rounded px-2 py-0.5 hover:bg-white/5"
+              className="rounded px-2 py-0.5 hover:bg-app-hover"
               disabled={decided}
               title="Select only additive, low-risk changes"
             >
@@ -394,7 +394,7 @@ export function PlanEditor({ tab }: { tab: EditorTab }) {
           )}
         </aside>
 
-        <section className="min-h-0 overflow-y-auto bg-slate-950/60">
+        <section className="min-h-0 overflow-y-auto bg-app">
           {focused ? (
             <DiffDetail
               item={focused}
@@ -408,7 +408,7 @@ export function PlanEditor({ tab }: { tab: EditorTab }) {
         </section>
       </div>
 
-      <footer className="flex shrink-0 items-center gap-2 border-t border-app bg-slate-900/40 px-4 py-2 text-xs">
+      <footer className="flex shrink-0 items-center gap-2 border-t border-app bg-app-hover px-4 py-2 text-xs">
         <span className="text-app-subtle">
           {decided ? (
             <span>
@@ -430,7 +430,7 @@ export function PlanEditor({ tab }: { tab: EditorTab }) {
         <div className="ml-auto flex gap-2">
           <button
             onClick={() => void reject()}
-            className="rounded border border-app-strong px-3 py-1.5 text-app hover:bg-white/5 disabled:opacity-50"
+            className="rounded border border-app-strong px-3 py-1.5 text-app hover:bg-app-hover disabled:opacity-50"
             disabled={decided || busy}
           >
             <XCircle className="mr-1 inline h-3.5 w-3.5" /> Reject
@@ -593,7 +593,7 @@ function DiffDetail({
 
 function DiffPane({ title, data }: { title: string; data: unknown }) {
   return (
-    <div className="rounded border border-app bg-slate-900/40">
+    <div className="rounded border border-app bg-app-hover">
       <div className="border-b border-app px-2 py-1 text-[10px] uppercase tracking-wide text-app-subtle">
         {title}
       </div>
@@ -620,12 +620,12 @@ function Stat({
     info: "border-sky-500/30 bg-sky-500/10 text-sky-200",
     warn: "border-amber-500/30 bg-amber-500/10 text-amber-200",
     danger: "border-rose-500/30 bg-rose-500/10 text-rose-200",
-    neutral: "border-app bg-slate-900/50 text-app-subtle",
+    neutral: "border-app bg-app-elevated/50 text-app-subtle",
   };
   return (
     <div className={`rounded border p-2 ${styles[tone]}`}>
       <p className="text-[10px] uppercase tracking-wide opacity-80">{label}</p>
-      <p className="mt-1 text-base font-semibold text-white">{value}</p>
+      <p className="mt-1 text-base font-semibold text-app">{value}</p>
     </div>
   );
 }

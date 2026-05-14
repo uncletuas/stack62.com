@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Input } from "../components/ui/input";
+import { EmptyState } from "../components/EmptyState";
 import { useAppContext } from "../context/app-context";
 import {
   fetchAiRequests,
@@ -533,7 +534,12 @@ function RecordsPanel({ query }: { query: string }) {
   return (
     <div className="py-1">
       {filtered.length === 0 && (
-        <p className="px-3 py-3 text-xs text-app-faint">No records yet.</p>
+        <EmptyState
+          compact
+          icon={Database}
+          title="No records yet"
+          description="Records will appear here when a system creates them."
+        />
       )}
       {filtered.slice(0, 60).map((record) => (
         <Row
@@ -576,7 +582,12 @@ function TasksPanel({ query }: { query: string }) {
   return (
     <div className="py-1">
       {filtered.length === 0 && (
-        <p className="px-3 py-3 text-xs text-app-faint">No tasks yet.</p>
+        <EmptyState
+          compact
+          icon={CheckCircle2}
+          title="No tasks yet"
+          description="Tasks assigned to you or your Coworker will land here."
+        />
       )}
       {filtered.map((task) => (
         <Row
@@ -618,7 +629,12 @@ function SchedulesPanel({ query }: { query: string }) {
   return (
     <div className="py-1">
       {filtered.length === 0 && (
-        <p className="px-3 py-3 text-xs text-app-faint">No schedules yet.</p>
+        <EmptyState
+          compact
+          icon={Calendar}
+          title="No schedules yet"
+          description="Ask Coworker to run a job on a schedule and it'll appear here."
+        />
       )}
       {filtered.map((schedule) => (
         <Row
@@ -661,7 +677,12 @@ function ReportsPanel({ query }: { query: string }) {
   return (
     <div className="py-1">
       {filtered.length === 0 && (
-        <p className="px-3 py-3 text-xs text-app-faint">No reports yet.</p>
+        <EmptyState
+          compact
+          icon={LineChart}
+          title="No reports yet"
+          description="Reports built from your systems show up here."
+        />
       )}
       {filtered.map((report) => (
         <Row

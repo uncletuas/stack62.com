@@ -3,11 +3,15 @@ import { APP_GUARD } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { ActivityModule } from '../activity/activity.module';
+import { FileSharingModule } from '../file-sharing/file-sharing.module';
 import { MembershipsModule } from '../memberships/memberships.module';
 import { OrganizationsModule } from '../organizations/organizations.module';
+import { UserEntity } from '../users/entities/user.entity';
 import { UsersModule } from '../users/users.module';
 import { WorkspacesModule } from '../workspaces/workspaces.module';
+import { AccountVerificationController } from './account-verification.controller';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { GoogleOAuthService } from './google-oauth.service';
@@ -21,6 +25,8 @@ import { JwtStrategy } from './jwt.strategy';
     OrganizationsModule,
     WorkspacesModule,
     MembershipsModule,
+    FileSharingModule, // for EmailSenderService (verify/reset emails)
+    TypeOrmModule.forFeature([UserEntity]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       inject: [ConfigService],
@@ -35,7 +41,7 @@ import { JwtStrategy } from './jwt.strategy';
       }),
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, AccountVerificationController],
   providers: [
     AuthService,
     GoogleOAuthService,

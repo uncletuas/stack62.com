@@ -131,8 +131,8 @@ export function InboxEditor() {
               onClick={() => setView(t.key)}
               className={`flex items-center gap-1 rounded px-2 py-1 text-xs ${
                 view === t.key
-                  ? "bg-white/10 text-white"
-                  : "text-app-subtle hover:bg-white/5"
+                  ? "bg-white/10 text-app"
+                  : "text-app-subtle hover:bg-app-hover"
               }`}
             >
               {t.label}
@@ -146,7 +146,7 @@ export function InboxEditor() {
       </header>
 
       {(view === "mine" || view === "all") && (
-        <div className="border-b border-app bg-slate-900/40 px-4 py-2">
+        <div className="border-b border-app bg-app-hover px-4 py-2">
           <div className="flex gap-2">
             <Input
               value={draft.title}
@@ -235,7 +235,7 @@ function TaskList({
         return (
           <div
             key={t.id}
-            className="flex items-center gap-3 px-4 py-2 hover:bg-white/5"
+            className="flex items-center gap-3 px-4 py-2 hover:bg-app-hover"
           >
             <button
               onClick={() => onStatus(t, done ? "todo" : "done")}

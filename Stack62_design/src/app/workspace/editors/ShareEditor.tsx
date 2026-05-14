@@ -142,7 +142,7 @@ export function ShareEditor({ tab }: { tab: EditorTab }) {
         )}
       </header>
 
-      <section className="border-b border-app bg-slate-900/40 p-4">
+      <section className="border-b border-app bg-app-hover p-4">
         <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
           <Input
             value={draft.name}

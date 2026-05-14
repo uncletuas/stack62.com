@@ -150,7 +150,7 @@ export function TemplatesEditor() {
                   <button
                     key={t.key}
                     onClick={() => start(t)}
-                    className="flex items-start gap-3 rounded-xl border border-app bg-slate-900/40 p-4 text-left transition hover:border-app-strong hover:bg-app-surface"
+                    className="flex items-start gap-3 rounded-xl border border-app bg-app-hover p-4 text-left transition hover:border-app-strong hover:bg-app-surface"
                   >
                     <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-indigo-500/15 text-indigo-300">
                       <Icon className="h-4 w-4" />

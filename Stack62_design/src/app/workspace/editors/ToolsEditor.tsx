@@ -203,7 +203,7 @@ export function Marketplace() {
                 return (
                   <div
                     key={p.key}
-                    className="flex flex-col rounded-xl border border-app bg-slate-900/50 p-4"
+                    className="flex flex-col rounded-xl border border-app bg-app-elevated/50 p-4"
                   >
                     <div className="flex items-start gap-3">
                       <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-violet-500/15 text-violet-300">
@@ -227,7 +227,7 @@ export function Marketplace() {
                       {p.description}
                     </p>
                     {p.key === "whatsapp-cloud" && (
-                      <p className="mt-2 rounded-md border border-app bg-slate-950/60 px-2 py-1.5 text-[11px] leading-4 text-app-subtle">
+                      <p className="mt-2 rounded-md border border-app bg-app px-2 py-1.5 text-[11px] leading-4 text-app-subtle">
                         Official WhatsApp Business setup opens Meta Business onboarding. QR login is for WhatsApp Web sessions, not the audited Cloud API integration.
                       </p>
                     )}
@@ -406,7 +406,7 @@ function ConnectionDialog({
           </div>
           <button
             onClick={onClose}
-            className="grid h-7 w-7 place-items-center rounded text-app-subtle hover:bg-white/10 hover:text-white"
+            className="grid h-7 w-7 place-items-center rounded text-app-subtle hover:bg-app-hover hover:text-app"
           >
             <X className="h-4 w-4" />
           </button>
@@ -460,7 +460,7 @@ function ConnectionDialog({
           </div>
         </div>
 
-        <footer className="flex items-center justify-end gap-2 border-t border-app bg-slate-950/60 px-4 py-3">
+        <footer className="flex items-center justify-end gap-2 border-t border-app bg-app px-4 py-3">
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={onClose}>
               Cancel
@@ -543,7 +543,7 @@ export function Connections() {
         return (
           <div
             key={c.id}
-            className="flex items-center gap-3 rounded-xl border border-app bg-slate-900/40 p-4"
+            className="flex items-center gap-3 rounded-xl border border-app bg-app-hover p-4"
           >
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-violet-500/15 text-violet-300">
               <Icon className="h-4 w-4" />
@@ -701,7 +701,7 @@ function WhatsAppNumberDialog({
           </div>
           <button
             onClick={onClose}
-            className="grid h-7 w-7 place-items-center rounded text-app-subtle hover:bg-white/10 hover:text-white"
+            className="grid h-7 w-7 place-items-center rounded text-app-subtle hover:bg-app-hover hover:text-app"
           >
             <X className="h-4 w-4" />
           </button>
@@ -717,7 +717,7 @@ function WhatsAppNumberDialog({
                 <button
                   key={number.id}
                   onClick={() => void onSelect(number)}
-                  className="grid w-full grid-cols-[1fr_auto] gap-3 rounded-lg border border-app bg-slate-950/60 px-3 py-2 text-left hover:bg-white/5"
+                  className="grid w-full grid-cols-[1fr_auto] gap-3 rounded-lg border border-app bg-app px-3 py-2 text-left hover:bg-app-hover"
                 >
                   <span className="min-w-0">
                     <span className="block truncate text-sm font-medium text-app">
@@ -789,7 +789,7 @@ function FieldGroup({
   children: React.ReactNode;
 }) {
   return (
-    <fieldset className="rounded-lg border border-app bg-slate-950/60 p-3">
+    <fieldset className="rounded-lg border border-app bg-app p-3">
       <legend className="px-1 text-[10px] font-semibold uppercase tracking-wider text-app-faint">
         {label}
         {sensitive && (

@@ -163,7 +163,7 @@ export function TaskEditor({ tab }: { tab: EditorTab }) {
         </header>
 
         {task.description && (
-          <section className="mt-4 rounded-lg border border-app bg-slate-900/35 p-4">
+          <section className="mt-4 rounded-lg border border-app bg-app-elevated/35 p-4">
             <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-app-faint">
               Description
             </h2>

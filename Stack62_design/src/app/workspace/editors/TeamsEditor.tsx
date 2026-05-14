@@ -74,12 +74,12 @@ export function TeamsEditor() {
     <div className="h-full overflow-y-auto bg-app text-app">
       <div className="mx-auto max-w-4xl p-6">
         <header className="flex items-center gap-3 border-b border-app pb-3">
-          <Users className="h-5 w-5 text-cyan-400" />
+          <Users className="h-5 w-5 text-accent" />
           <h1 className="text-lg font-semibold">Team</h1>
           <span className="text-xs text-app-faint">{members.length} members</span>
         </header>
 
-        <section className="mt-5 rounded-xl border border-app bg-slate-900/40 p-4">
+        <section className="mt-5 rounded-xl border border-app bg-app-hover p-4">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-app-subtle">
             Invite member
           </h2>
@@ -186,7 +186,7 @@ export function TeamsEditor() {
               {invites.map((i) => (
                 <div
                   key={i.id}
-                  className="flex items-center gap-3 rounded border border-app bg-slate-900/40 p-3 text-sm"
+                  className="flex items-center gap-3 rounded border border-app bg-app-hover p-3 text-sm"
                 >
                   <Mail className="h-4 w-4 text-app-faint" />
                   <span className="flex-1">{i.email}</span>

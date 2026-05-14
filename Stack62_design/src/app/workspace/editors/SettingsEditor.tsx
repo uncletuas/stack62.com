@@ -95,7 +95,7 @@ export function SettingsEditor({ tab }: { tab: EditorTab }) {
       {/* Left sidenav */}
       <aside className="flex w-56 shrink-0 flex-col border-r border-app bg-app-surface">
         <div className="flex items-center gap-2 border-b border-app px-3 py-3">
-          <ShieldCheck className="h-4 w-4 text-emerald-400" />
+          <ShieldCheck className="h-4 w-4 text-accent" />
           <h2 className="text-sm font-semibold">Settings</h2>
         </div>
         <nav className="flex-1 overflow-auto p-2">
@@ -106,8 +106,8 @@ export function SettingsEditor({ tab }: { tab: EditorTab }) {
               onClick={() => setSection(key)}
               className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition ${
                 section === key
-                  ? "bg-app-hover font-medium"
-                  : "text-app-faint hover:bg-app-hover hover:text-app"
+                  ? "bg-accent text-accent-fg font-medium"
+                  : "text-app-muted hover:bg-app-hover hover:text-app"
               }`}
             >
               <Icon className="h-3.5 w-3.5" />
@@ -268,7 +268,7 @@ function IntegrationsSection() {
           return (
             <div
               key={provider.key}
-              className="rounded-lg border border-app bg-slate-900/40 p-4"
+              className="rounded-lg border border-app bg-app-hover p-4"
             >
               <div className="flex items-start gap-3">
                 <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-emerald-500/15 text-emerald-300">
@@ -295,7 +295,7 @@ function IntegrationsSection() {
                   </div>
                   <p className="mt-1 text-xs text-app-faint">{provider.description}</p>
                   {"note" in provider && provider.note && (
-                    <p className="mt-2 rounded-md border border-app bg-slate-950/60 px-2 py-1.5 text-[11px] leading-4 text-app-subtle">
+                    <p className="mt-2 rounded-md border border-app bg-app px-2 py-1.5 text-[11px] leading-4 text-app-subtle">
                       {provider.note}
                     </p>
                   )}
@@ -413,7 +413,7 @@ function WhatsAppNumberPicker({
           <h2 className="text-sm font-semibold">Choose WhatsApp number</h2>
           <button
             onClick={onClose}
-            className="ml-auto grid h-7 w-7 place-items-center rounded text-app-subtle hover:bg-white/10"
+            className="ml-auto grid h-7 w-7 place-items-center rounded text-app-subtle hover:bg-app-hover"
           >
             <X className="h-4 w-4" />
           </button>
@@ -429,7 +429,7 @@ function WhatsAppNumberPicker({
                 <button
                   key={number.id}
                   onClick={() => void onSelect(number)}
-                  className="grid w-full grid-cols-[1fr_auto] gap-3 rounded-lg border border-app bg-slate-950/60 px-3 py-2 text-left hover:bg-white/5"
+                  className="grid w-full grid-cols-[1fr_auto] gap-3 rounded-lg border border-app bg-app px-3 py-2 text-left hover:bg-app-hover"
                 >
                   <span className="min-w-0">
                     <span className="block truncate text-sm font-medium text-app">
@@ -462,7 +462,7 @@ function Card({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-app bg-slate-900/40 p-4">
+    <section className="rounded-xl border border-app bg-app-hover p-4">
       <h2 className="flex items-center gap-2 text-sm font-semibold">
         <Icon className="h-4 w-4 text-emerald-400" />
         {title}

@@ -63,7 +63,7 @@ export function BriefingEditor() {
       <div className="mx-auto max-w-5xl p-6">
         <header className="mb-5 flex items-end justify-between gap-3 border-b border-app pb-4">
           <div className="flex items-center gap-3">
-            <Newspaper className="h-5 w-5 text-cyan-300" />
+            <Newspaper className="h-5 w-5 text-accent" />
             <div>
               <h1 className="text-xl font-semibold">Flow</h1>
               <p className="text-xs text-app-faint">
@@ -87,8 +87,8 @@ export function BriefingEditor() {
           </Button>
         </header>
 
-        <section className="rounded-lg border border-app bg-slate-900/35">
-          <header className="flex items-center gap-2 border-b border-slate-800/80 px-4 py-2">
+        <section className="rounded-lg border border-app bg-app-elevated/35">
+          <header className="flex items-center gap-2 border-b border-app/80 px-4 py-2">
             <Clock className="h-3.5 w-3.5 text-app-subtle" />
             <h2 className="text-xs font-semibold uppercase tracking-wider text-app-muted">
               Workspace stream
@@ -184,14 +184,14 @@ function ActivityRow({
 }) {
   const color =
     origin === "ai"
-      ? "text-cyan-300"
+      ? "text-accent"
       : origin === "system"
         ? "text-app-subtle"
         : "text-emerald-300";
   return (
     <button
       onClick={onClick}
-      className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-white/5"
+      className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-app-hover"
     >
       <Icon className={`h-3.5 w-3.5 ${color}`} />
       <span className="truncate text-app">{label}</span>

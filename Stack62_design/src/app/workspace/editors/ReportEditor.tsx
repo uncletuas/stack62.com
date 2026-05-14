@@ -146,7 +146,7 @@ export function ReportEditor({ tab }: { tab: EditorTab }) {
     <div className="h-full overflow-y-auto bg-app text-app">
       <div className="mx-auto max-w-5xl p-6">
         <header className="flex items-center gap-3 border-b border-app pb-3">
-          <LineChart className="h-5 w-5 text-cyan-300" />
+          <LineChart className="h-5 w-5 text-accent" />
           <div className="min-w-0">
             <h1 className="truncate text-lg font-semibold">{report.title}</h1>
             <p className="text-xs text-app-faint">
@@ -183,7 +183,7 @@ export function ReportEditor({ tab }: { tab: EditorTab }) {
             {metrics.map(([key, value]) => (
               <div
                 key={key}
-                className="rounded-lg border border-app bg-slate-900/35 px-3 py-2"
+                className="rounded-lg border border-app bg-app-elevated/35 px-3 py-2"
               >
                 <p className="truncate text-[11px] uppercase tracking-wider text-app-faint">
                   {key}

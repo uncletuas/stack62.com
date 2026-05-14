@@ -245,7 +245,7 @@ export function JobEditor({ tab }: { tab: EditorTab }) {
                 onChange={(e) =>
                   setDraft((d) => ({ ...d, instructions: e.target.value }))
                 }
-                className="min-h-[160px] border-app bg-app-surface text-white"
+                className="min-h-[160px] border-app bg-app-surface text-app"
               />
             </Field>
             <Field label="Trigger">
@@ -377,7 +377,7 @@ function RunCard({ run }: { run: CoworkerJobRun }) {
             </p>
           )}
           {run.summary && (
-            <p className="rounded bg-slate-900/60 px-2 py-1 text-app whitespace-pre-wrap">
+            <p className="rounded bg-app-elevated px-2 py-1 text-app whitespace-pre-wrap">
               {run.summary}
             </p>
           )}
@@ -423,7 +423,7 @@ function StepLine({
   }
   if (step.type === "message" && step.text) {
     return (
-      <p className="rounded bg-slate-900/40 px-2 py-1 text-[11px] text-app whitespace-pre-wrap">
+      <p className="rounded bg-app-hover px-2 py-1 text-[11px] text-app whitespace-pre-wrap">
         {step.text}
       </p>
     );

@@ -5,6 +5,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { resolvePostgres, resolveRedis } from './config/connection-urls';
 import { validateEnv } from './config/env.schema';
+import { CryptoModule } from './shared/crypto/crypto.module';
 import { AccessControlModule } from './shared/access-control/access-control.module';
 import { SecurityModule } from './shared/security/security.module';
 import { EngineModule } from './modules/engine/engine.module';
@@ -44,6 +45,7 @@ import { BillingModule } from './modules/billing/billing.module';
 @Module({
   imports: [
     AccessControlModule,
+    CryptoModule,
     SecurityModule,
     ConfigModule.forRoot({
       isGlobal: true,
@@ -65,6 +67,13 @@ import { BillingModule } from './modules/billing/billing.module';
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {
         const pg = resolvePostgres();
+        // Migration strategy:
+        //   - `migrationsRun: true` applies any pending committed
+        //     migrations on every boot.
+        //   - `synchronize` defaults to true for the first deploy /
+        //     active development phase. Flip DATABASE_SYNC=false in
+        //     production once the schema is settled; from then on,
+        //     schema changes go through migration files.
         return {
           type: 'postgres',
           host: pg.host,
@@ -74,6 +83,9 @@ import { BillingModule } from './modules/billing/billing.module';
           database: pg.database,
           autoLoadEntities: true,
           synchronize: configService.get<boolean>('DATABASE_SYNC', true),
+          migrations: [__dirname + '/migrations/*.{js,ts}'],
+          migrationsRun: true,
+          migrationsTableName: 'typeorm_migrations',
           logging: configService.get<boolean>('DATABASE_LOGGING', false),
           ssl: pg.ssl ? { rejectUnauthorized: false } : false,
         };

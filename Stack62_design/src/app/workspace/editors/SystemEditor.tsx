@@ -168,7 +168,7 @@ export function SystemEditor({ tab }: { tab: EditorTab }) {
                       parentRefId: detail.id,
                     })
                   }
-                  className="rounded-lg border border-app bg-slate-900/50 p-4 text-left transition hover:border-app-strong hover:bg-app-surface"
+                  className="rounded-lg border border-app bg-app-elevated/50 p-4 text-left transition hover:border-app-strong hover:bg-app-surface"
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-semibold">{m.name}</span>
@@ -211,7 +211,7 @@ export function SystemEditor({ tab }: { tab: EditorTab }) {
                       parentRefId: detail.id,
                     })
                   }
-                  className="flex w-full items-center gap-3 rounded-lg border border-app bg-slate-900/50 p-3 text-left text-sm hover:bg-app-surface"
+                  className="flex w-full items-center gap-3 rounded-lg border border-app bg-app-elevated/50 p-3 text-left text-sm hover:bg-app-surface"
                 >
                   <Workflow className="h-4 w-4 text-purple-400" />
                   <span className="flex-1">{w.name}</span>
@@ -241,12 +241,12 @@ function Stat({
   value: number;
 }) {
   return (
-    <div className="rounded-lg border border-app bg-slate-900/50 p-3">
+    <div className="rounded-lg border border-app bg-app-elevated/50 p-3">
       <div className="flex items-center gap-2 text-xs text-app-faint">
         <Icon className="h-3.5 w-3.5" />
         {label}
       </div>
-      <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
+      <p className="mt-2 text-2xl font-semibold text-app">{value}</p>
     </div>
   );
 }

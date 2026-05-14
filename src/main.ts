@@ -1,7 +1,11 @@
+// Side-effect import: must run before NestFactory.create so Sentry's
+// auto-instrumentation hooks pick up request handling.
+import './instrument';
 import { RequestMethod, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { NestFactory } from '@nestjs/core';
+import * as Sentry from '@sentry/node';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -47,6 +51,13 @@ async function bootstrap() {
       persistAuthorization: true,
     },
   });
+
+  // Sentry expressErrorHandler must come BEFORE Nest's own filters so
+  // it sees thrown exceptions. Safe no-op if Sentry didn't initialise.
+  if (process.env.SENTRY_DSN) {
+    const httpAdapter = app.getHttpAdapter().getInstance();
+    Sentry.setupExpressErrorHandler(httpAdapter);
+  }
 
   app.enableShutdownHooks();
   await app.listen(port);

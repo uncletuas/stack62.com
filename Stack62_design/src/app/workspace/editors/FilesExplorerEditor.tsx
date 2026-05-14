@@ -29,6 +29,7 @@ import {
 import { apiRequest } from "../../lib/api";
 import { useAppContext } from "../../context/app-context";
 import { useWorkspace } from "../workspace-context";
+import { EmptyState } from "../../components/EmptyState";
 
 /**
  * The Files surface — folder navigation + drag-and-drop upload + search.
@@ -487,45 +488,6 @@ function FileTile({
       >
         <Info className="size-3.5" />
       </button>
-    </div>
-  );
-}
-
-/**
- * Reusable empty state used across the workspace. One illustration
- * icon, a bold title line, supporting copy, and an optional CTA
- * button. Replaces the dozens of dim "No X yet" placeholders we
- * sprinkled across panels.
- */
-function EmptyState({
-  icon: Icon,
-  title,
-  description,
-  actionLabel,
-  onAction,
-}: {
-  icon: typeof Upload;
-  title: string;
-  description: string;
-  actionLabel?: string;
-  onAction?: () => void;
-}) {
-  return (
-    <div className="mx-auto max-w-sm text-center">
-      <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-accent-soft text-accent">
-        <Icon className="h-5 w-5" />
-      </div>
-      <h3 className="mt-3 text-base font-semibold text-app">{title}</h3>
-      <p className="mt-1 text-sm text-app-muted">{description}</p>
-      {actionLabel && onAction && (
-        <button
-          type="button"
-          onClick={onAction}
-          className="mt-4 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-accent-hover"
-        >
-          {actionLabel}
-        </button>
-      )}
     </div>
   );
 }
