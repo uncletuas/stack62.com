@@ -1,5 +1,6 @@
 import { useWorkspace } from "../workspace-context";
 import { BriefingEditor } from "./BriefingEditor";
+import { EditorErrorBoundary } from "./EditorErrorBoundary";
 import { FileEditor } from "./FileEditor";
 import { FilesExplorerEditor } from "./FilesExplorerEditor";
 import { HistoryEditor } from "./HistoryEditor";
@@ -29,6 +30,18 @@ export function EditorSurface() {
       <div className="grid h-full place-items-center bg-app text-app-faint" />
     );
   }
+  // Reset the error boundary whenever the active tab id changes so a
+  // previously crashed editor doesn't permanently lock out a new one.
+  return (
+    <EditorErrorBoundary resetKey={activeTab.id}>
+      <RenderEditor />
+    </EditorErrorBoundary>
+  );
+}
+
+function RenderEditor() {
+  const { activeTab } = useWorkspace();
+  if (!activeTab) return null;
   switch (activeTab.kind) {
     case "welcome":
       return <WelcomeEditor />;

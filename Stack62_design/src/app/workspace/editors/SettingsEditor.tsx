@@ -474,22 +474,38 @@ function Card({
 
 function ProfileSection() {
   const { user, logout } = useAppContext();
+  const initials = (() => {
+    const f = user?.firstName?.[0] ?? "";
+    const l = user?.lastName?.[0] ?? "";
+    return (f + l).toUpperCase() || "U";
+  })();
   return (
-    <Card icon={User} title="Profile">
-      <Field label="Name">
-        <Input
-          value={user ? `${user.firstName} ${user.lastName}` : ""}
-          readOnly
-          className="border-app bg-app-surface"
-        />
-      </Field>
-      <Field label="Email">
-        <Input value={user?.email ?? ""} readOnly className="border-app bg-app-surface" />
-      </Field>
-      <Button variant="outline" onClick={logout} className="gap-1">
-        <LogOut className="h-3.5 w-3.5" /> Sign out
-      </Button>
-    </Card>
+    <section className="rounded-xl border border-app bg-app-elevated p-6 shadow-sm">
+      <div className="flex items-center gap-4">
+        <div className="grid h-16 w-16 place-items-center rounded-full bg-accent text-2xl font-semibold text-accent-fg">
+          {initials}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-base font-semibold text-app">
+            {user ? `${user.firstName} ${user.lastName}` : "Signed out"}
+          </p>
+          <p className="truncate text-sm text-app-muted">
+            {user?.email ?? "—"}
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          onClick={logout}
+          className="gap-1 border-app"
+        >
+          <LogOut className="h-3.5 w-3.5" /> Sign out
+        </Button>
+      </div>
+      <p className="mt-4 text-xs text-app-faint">
+        Avatar uploads, password changes, and email verification are coming soon.
+        For now, profile data follows whatever you set when you signed up.
+      </p>
+    </section>
   );
 }
 
@@ -741,7 +757,7 @@ function AppearanceSection() {
     {
       value: "dark",
       label: "Dark",
-      description: "Default. Easy on the eyes for long sessions.",
+      description: "Easy on the eyes for long evening sessions.",
       icon: Moon,
     },
     {
@@ -767,19 +783,19 @@ function AppearanceSection() {
               onClick={() => setMode(opt.value)}
               className={`flex flex-col items-start gap-2 rounded-xl border p-3 text-left transition ${
                 active
-                  ? "border-cyan-400/50 bg-cyan-500/10 text-app shadow-[0_0_0_1px_rgba(34,211,238,0.25)]"
+                  ? "border-accent bg-accent-soft text-app shadow-sm"
                   : "border-app bg-app-elevated text-app-muted hover:border-app-strong hover:text-app"
               }`}
             >
               <div className="flex w-full items-center gap-2">
                 <span className={`grid h-7 w-7 place-items-center rounded-lg ${
-                  active ? "bg-cyan-500/20 text-cyan-300" : "bg-app-overlay text-app-muted"
+                  active ? "bg-accent text-accent-fg" : "bg-app-hover text-app-muted"
                 }`}>
                   <Icon className="h-3.5 w-3.5" />
                 </span>
                 <span className="text-sm font-semibold">{opt.label}</span>
                 {active && (
-                  <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-cyan-300" />
+                  <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-accent" />
                 )}
               </div>
               <p className="text-[11px] leading-relaxed text-app-subtle">

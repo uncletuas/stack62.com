@@ -24,8 +24,7 @@ import {
   Sparkles,
   Trash2,
   Users,
-  Volume2,
-  VolumeX,
+  Video,
   Workflow,
   X,
 } from "lucide-react";
@@ -55,6 +54,7 @@ import {
 } from "../lib/resources";
 import { useWorkspace, type EditorTab } from "./workspace-context";
 import { roomsApi, type RoomDto } from "../lib/dms-resources";
+import { CoworkerFace } from "./CoworkerFace";
 
 const ROLE_BADGE: Record<CoworkerRole, string> = {
   admin: "border-rose-500/40 bg-rose-500/10 text-rose-200",
@@ -267,7 +267,16 @@ export function CoworkerRail() {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<PanelTab>("coworker");
   const [position, setPosition] = useState<Position>(() => loadPosition());
-  const [voiceOn, setVoiceOn] = useState<boolean>(() => readVoicePreference());
+  /** True while the speech synthesizer is actively vocalising. Used to
+   * animate the Coworker face (mouth moves) so the bot looks alive. */
+  const [speaking, setSpeaking] = useState(false);
+  /** Voice conversation mode — continuous loop where the rail listens,
+   * sends the recognised utterance, speaks the reply, then re-listens.
+   * Toggled by the morphing send/voice button in the composer. */
+  const [voiceConversation, setVoiceConversation] = useState(false);
+  /** Live multimodal mode — periodic webcam snapshots get sent so the
+   * Coworker can react to what it sees. Toggled separately. */
+  const [liveMode, setLiveMode] = useState(false);
 
   /**
    * Snap the floating launcher to one of the four corners / center.
@@ -282,11 +291,260 @@ export function CoworkerRail() {
     savePosition(next);
   }, []);
 
-  const setVoice = useCallback((next: boolean) => {
-    setVoiceOn(next);
-    writeVoicePreference(next);
-    if (!next) stopSpeaking();
+  // ── Voice conversation mode ────────────────────────────────────────────
+  // A continuous loop: listen → recognise → send → speak reply → repeat.
+  // Like a hands-free phone call with the Coworker.
+  type SpeechWindow = Window & {
+    SpeechRecognition?: typeof window.SpeechRecognition;
+    webkitSpeechRecognition?: typeof window.SpeechRecognition;
+  };
+  const recognitionRef = useRef<InstanceType<
+    NonNullable<typeof window.SpeechRecognition>
+  > | null>(null);
+  const voiceConversationRef = useRef(false);
+  voiceConversationRef.current = voiceConversation;
+
+  const stopVoiceConversation = useCallback(() => {
+    setVoiceConversation(false);
+    voiceConversationRef.current = false;
+    try {
+      recognitionRef.current?.stop();
+    } catch {
+      /* ignore */
+    }
+    recognitionRef.current = null;
+    stopSpeaking();
   }, []);
+
+  const startVoiceConversation = useCallback(() => {
+    const Recognition =
+      (window as SpeechWindow).SpeechRecognition ??
+      (window as SpeechWindow).webkitSpeechRecognition ??
+      null;
+    if (!Recognition) {
+      // Browser doesn't support speech recognition — fall back to a
+      // friendly nudge instead of silently failing.
+      window.alert(
+        "Voice mode needs the Web Speech API, which isn't available in this browser. Try Chrome, Edge, or Brave.",
+      );
+      return;
+    }
+    setVoiceConversation(true);
+    voiceConversationRef.current = true;
+  }, []);
+
+  /**
+   * The actual listen/send/speak cycle. Driven by an effect so it
+   * restarts automatically after each spoken reply.
+   *
+   * Stop conditions: voiceConversationRef goes false (user tapped
+   * stop), recognition errors out twice in a row, or the rail closes.
+   */
+  useEffect(() => {
+    if (!voiceConversation) return;
+    let cancelled = false;
+    const Recognition =
+      (window as SpeechWindow).SpeechRecognition ??
+      (window as SpeechWindow).webkitSpeechRecognition ??
+      null;
+    if (!Recognition) return;
+
+    const cycle = async () => {
+      while (!cancelled && voiceConversationRef.current) {
+        // Wait until we're not speaking, so we don't pick up our own
+        // synthesized voice through the microphone.
+        if (speaking) {
+          await new Promise((r) => setTimeout(r, 200));
+          continue;
+        }
+        try {
+          const transcript = await new Promise<string>((resolve, reject) => {
+            const r = new Recognition();
+            recognitionRef.current = r;
+            r.continuous = false;
+            r.interimResults = false;
+            r.lang = navigator.language || "en-US";
+            let finalText = "";
+            r.onresult = (event: SpeechRecognitionEvent) => {
+              for (let i = event.resultIndex; i < event.results.length; i++) {
+                const result = event.results[i];
+                if (result.isFinal && result[0]?.transcript) {
+                  finalText += result[0].transcript;
+                }
+              }
+            };
+            r.onend = () => resolve(finalText.trim());
+            r.onerror = (event: SpeechRecognitionErrorEvent) => {
+              if (event.error === "no-speech") {
+                resolve("");
+              } else {
+                reject(new Error(event.error));
+              }
+            };
+            try {
+              r.start();
+            } catch {
+              resolve("");
+            }
+          });
+          if (cancelled || !voiceConversationRef.current) break;
+          if (!transcript) continue;
+          // Push as if the user typed and hit send. We reuse send()
+          // by setting the draft + invoking it; send() will speak the
+          // reply through speakReply() which sets `speaking`.
+          setDraft(transcript);
+          await new Promise((r) => setTimeout(r, 30));
+          await send();
+        } catch {
+          // Silent — recognition can error on permission denies; we
+          // just exit the loop so the user isn't trapped.
+          if (!cancelled) stopVoiceConversation();
+          return;
+        }
+      }
+    };
+    void cycle();
+    return () => {
+      cancelled = true;
+      try {
+        recognitionRef.current?.abort();
+      } catch {
+        /* ignore */
+      }
+      recognitionRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceConversation]);
+
+  // ── Live multimodal (webcam) mode ──────────────────────────────────────
+  // Periodically snapshot the webcam and ship the frame to the Coworker
+  // so it can react to what it sees. Not true streaming — that needs a
+  // realtime multimodal endpoint — but feels conversational.
+  const liveStreamRef = useRef<MediaStream | null>(null);
+  const liveTimerRef = useRef<number | null>(null);
+
+  const stopLive = useCallback(() => {
+    setLiveMode(false);
+    if (liveTimerRef.current) {
+      window.clearInterval(liveTimerRef.current);
+      liveTimerRef.current = null;
+    }
+    if (liveStreamRef.current) {
+      liveStreamRef.current.getTracks().forEach((t) => t.stop());
+      liveStreamRef.current = null;
+    }
+  }, []);
+
+  const toggleLiveMode = useCallback(async () => {
+    if (liveMode) {
+      stopLive();
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      window.alert(
+        "Live mode needs a webcam. Your browser doesn't expose camera access.",
+      );
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 360 },
+        audio: false,
+      });
+      liveStreamRef.current = stream;
+      setLiveMode(true);
+      // Capture one snapshot every 6 seconds. The Coworker receives a
+      // text prompt like "[live frame] describe what you see briefly."
+      // The frame itself flows in as an attachment via the existing
+      // upload path so the vision model on the server can read it.
+      liveTimerRef.current = window.setInterval(async () => {
+        try {
+          const track = stream.getVideoTracks()[0];
+          if (!track) return;
+          const imageCapture =
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (window as any).ImageCapture &&
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            new (window as any).ImageCapture(track);
+          let blob: Blob | null = null;
+          if (imageCapture?.takePhoto) {
+            blob = await imageCapture.takePhoto();
+          } else {
+            // Fallback: draw the current video frame onto a canvas.
+            const video = document.createElement("video");
+            video.srcObject = stream;
+            video.muted = true;
+            await video.play();
+            const canvas = document.createElement("canvas");
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext("2d")?.drawImage(video, 0, 0);
+            blob = await new Promise<Blob | null>((r) =>
+              canvas.toBlob(r, "image/jpeg", 0.85),
+            );
+            video.pause();
+          }
+          if (!blob) return;
+          const file = new File([blob], `live-${Date.now()}.jpg`, {
+            type: "image/jpeg",
+          });
+          onPickFiles({
+            length: 1,
+            0: file,
+            item: () => file,
+          } as unknown as FileList);
+        } catch {
+          /* one bad frame shouldn't kill the loop */
+        }
+      }, 6000);
+    } catch (err) {
+      window.alert(
+        "Couldn't access the camera: " +
+          (err instanceof Error ? err.message : "unknown error"),
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveMode, stopLive]);
+
+  // Cleanup on unmount.
+  useEffect(() => () => stopLive(), [stopLive]);
+
+  /**
+   * Wraps the free speak() helper with lifecycle hooks so we can
+   * animate the Coworker face while it's vocalising. Returns a promise
+   * that resolves when speaking ends so the voice-conversation loop
+   * can chain into the next listen cycle.
+   */
+  const speakReply = useCallback(
+    (text: string): Promise<void> =>
+      new Promise((resolve) => {
+        if (!text?.trim() || !("speechSynthesis" in window)) {
+          resolve();
+          return;
+        }
+        try {
+          window.speechSynthesis.cancel();
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.rate = 1.05;
+          utterance.pitch = 1.0;
+          utterance.lang = navigator.language || "en-US";
+          utterance.onstart = () => setSpeaking(true);
+          utterance.onend = () => {
+            setSpeaking(false);
+            resolve();
+          };
+          utterance.onerror = () => {
+            setSpeaking(false);
+            resolve();
+          };
+          window.speechSynthesis.speak(utterance);
+        } catch {
+          setSpeaking(false);
+          resolve();
+        }
+      }),
+    [],
+  );
 
   const [flashMessage, setFlashMessage] = useState<string | null>(null);
   const flashTimerRef = useRef<{ visible: number | null; cycle: number | null }>({
@@ -550,13 +808,13 @@ export function CoworkerRail() {
       setDraft("");
       if (command.kind === "anchor") {
         moveToAnchor(command.anchor);
-        if (voiceOn) speak(`Moving to ${command.anchor.replace("-", " ")}.`);
+        if (voiceConversation) void speakReply(`Moving to ${command.anchor.replace("-", " ")}.`);
       } else if (command.kind === "close") {
         setOpen(false);
-        if (voiceOn) speak("Stepping aside.");
+        if (voiceConversation) void speakReply("Stepping aside.");
       } else if (command.kind === "open") {
         setOpen(true);
-        if (voiceOn) speak("I'm here.");
+        if (voiceConversation) void speakReply("I'm here.");
       }
       return;
     }
@@ -608,12 +866,16 @@ export function CoworkerRail() {
       ]);
       // Speak the reply if voice mode is on. Trim down extremely long
       // responses so the user isn't stuck waiting on a 5-minute monologue.
-      if (voiceOn && result.message.role === "assistant" && result.message.content) {
+      if (
+        voiceConversation &&
+        result.message.role === "assistant" &&
+        result.message.content
+      ) {
         const spoken =
           result.message.content.length > 600
             ? result.message.content.slice(0, 600) + "…"
             : result.message.content;
-        speak(spoken);
+        await speakReply(spoken);
       }
       void refreshConversations();
     } catch (err) {
@@ -729,7 +991,12 @@ export function CoworkerRail() {
           className="relative grid h-12 w-12 place-items-center rounded-full text-white"
           style={{ backgroundColor: "var(--app-accent)" }}
         >
-          <Bot className="h-5 w-5" />
+          <CoworkerFace
+            size={28}
+            speaking={speaking}
+            thinking={sending}
+            mood={voiceConversation ? "listening" : "happy"}
+          />
           <span
             className={`absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full ring-2 ring-white ${
               pendingCount > 0 ? "bg-amber-400" : "bg-emerald-500"
@@ -775,8 +1042,12 @@ export function CoworkerRail() {
           setDraft={setDraft}
           sending={sending}
           onClose={() => setOpen(false)}
-          voiceOn={voiceOn}
-          setVoice={setVoice}
+          speaking={speaking}
+          voiceConversation={voiceConversation}
+          onStartVoiceConversation={() => startVoiceConversation()}
+          onStopVoiceConversation={() => stopVoiceConversation()}
+          liveMode={liveMode}
+          onToggleLive={() => toggleLiveMode()}
           onSend={() => void send()}
           onNewChat={newChat}
           onSwitchConversation={switchConversation}
@@ -892,8 +1163,15 @@ interface GeniePanelProps {
   setDraft: (next: string) => void;
   sending: boolean;
   onClose: () => void;
-  voiceOn: boolean;
-  setVoice: (next: boolean) => void;
+  /** Animated face state — true while TTS is vocalising. */
+  speaking: boolean;
+  /** True while in hands-free voice conversation mode. */
+  voiceConversation: boolean;
+  onStartVoiceConversation: () => void;
+  onStopVoiceConversation: () => void;
+  /** Live multimodal (webcam) mode. */
+  liveMode: boolean;
+  onToggleLive: () => void;
   onSend: () => void;
   onNewChat: () => void;
   onSwitchConversation: (id: string) => void;
@@ -926,8 +1204,12 @@ function GeniePanel({
   setDraft,
   sending,
   onClose,
-  voiceOn,
-  setVoice,
+  speaking,
+  voiceConversation,
+  onStartVoiceConversation,
+  onStopVoiceConversation,
+  liveMode,
+  onToggleLive,
   onSend,
   onNewChat,
   onSwitchConversation,
@@ -1005,24 +1287,24 @@ function GeniePanel({
             </div>
             <button
               type="button"
-              onClick={() => setVoice(!voiceOn)}
-              className={`rounded-full p-1 transition ${
-                voiceOn
-                  ? "bg-accent-soft text-accent"
+              onClick={onToggleLive}
+              className={`rounded-full p-1.5 transition ${
+                liveMode
+                  ? "bg-rose-100 text-rose-600 animate-pulse"
                   : "text-app-muted hover:bg-app-hover"
               }`}
-              title={voiceOn ? "Voice on — tap to mute" : "Voice off — tap to enable"}
+              title={
+                liveMode
+                  ? "Live mode on — Coworker can see what's on your camera"
+                  : "Start live mode (Coworker sees your camera)"
+              }
             >
-              {voiceOn ? (
-                <Volume2 className="h-4 w-4" />
-              ) : (
-                <VolumeX className="h-4 w-4" />
-              )}
+              <Video className="h-4 w-4" />
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="rounded-full p-1 text-app-muted hover:bg-app-hover"
+              className="rounded-full p-1.5 text-app-muted hover:bg-app-hover"
               title="Close (Esc)"
             >
               <X className="h-4 w-4" />
@@ -1136,100 +1418,119 @@ function GeniePanel({
         {/* Composer (visible on chat tab only) */}
         {tab === "coworker" && !showHistory && (
           <footer className="shrink-0 border-t border-app bg-app-hover p-2">
-            {attachments.length > 0 && (
-              <ul className="mb-1.5 flex flex-wrap gap-1.5">
-                {attachments.map((a) => (
-                  <li
-                    key={a.id}
-                    className={`flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] ${
-                      a.error
-                        ? "border-rose-500/40 bg-rose-500/10 text-rose-200"
-                        : a.uploading
-                        ? "border-slate-500/30 bg-slate-500/10 text-app-muted"
-                        : "border-accent bg-accent-soft text-accent"
-                    }`}
-                    title={a.error ?? `${a.filename} · ${formatBytes(a.size)}`}
+            {voiceConversation ? (
+              <VoiceConversationView
+                speaking={speaking}
+                listening={!speaking && !sending}
+                thinking={sending}
+                onStop={onStopVoiceConversation}
+              />
+            ) : (
+              <>
+                {attachments.length > 0 && (
+                  <ul className="mb-1.5 flex flex-wrap gap-1.5">
+                    {attachments.map((a) => (
+                      <li
+                        key={a.id}
+                        className={`flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] ${
+                          a.error
+                            ? "border-rose-500/40 bg-rose-500/10 text-rose-600"
+                            : a.uploading
+                              ? "border-app bg-app text-app-muted"
+                              : "border-accent bg-accent-soft text-accent"
+                        }`}
+                        title={a.error ?? `${a.filename} · ${formatBytes(a.size)}`}
+                      >
+                        {a.uploading ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <FileText className="h-3 w-3" />
+                        )}
+                        <span className="max-w-[140px] truncate">{a.filename}</span>
+                        <button
+                          type="button"
+                          onClick={() => onRemoveAttachment(a.id)}
+                          className="rounded-full p-0.5 hover:bg-app-hover"
+                          title="Remove"
+                        >
+                          <X className="h-2.5 w-2.5" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="flex items-end gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      onPickFiles(e.target.files);
+                      e.target.value = "";
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-app bg-app text-app-muted hover:border-accent hover:text-accent"
+                    title="Attach files"
                   >
-                    {a.uploading ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : (
-                      <FileText className="h-3 w-3" />
-                    )}
-                    <span className="max-w-[140px] truncate">{a.filename}</span>
+                    <Paperclip className="h-4 w-4" />
+                  </button>
+                  <textarea
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        onSend();
+                      }
+                    }}
+                    placeholder={
+                      attachments.length > 0
+                        ? `Add a note about ${attachments.length} file${
+                            attachments.length === 1 ? "" : "s"
+                          }… (optional)`
+                        : `Message ${name}, or tap the icon to talk…`
+                    }
+                    rows={2}
+                    className="min-h-[44px] w-full resize-none rounded-xl border border-app bg-app px-2.5 py-1.5 text-xs text-app placeholder-app focus:border-accent focus:outline-none"
+                    autoFocus
+                  />
+                  {/* Morphing button: when there's draft text, it's a
+                      send (paper plane). When empty, it's a mic that
+                      tapping starts a hands-free voice conversation. */}
+                  {draft.trim() ||
+                  attachments.filter((a) => a.uploaded).length > 0 ? (
                     <button
                       type="button"
-                      onClick={() => onRemoveAttachment(a.id)}
-                      className="rounded-full p-0.5 hover:bg-app-hover"
-                      title="Remove"
+                      onClick={onSend}
+                      disabled={
+                        sending || attachments.some((a) => a.uploading)
+                      }
+                      className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-accent text-accent-fg shadow-sm disabled:opacity-40"
+                      title="Send"
                     >
-                      <X className="h-2.5 w-2.5" />
+                      {sending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Send className="h-4 w-4" />
+                      )}
                     </button>
-                  </li>
-                ))}
-              </ul>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={onStartVoiceConversation}
+                      className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-accent text-accent-fg shadow-sm hover:bg-accent-hover"
+                      title="Talk to Coworker"
+                    >
+                      <Mic className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              </>
             )}
-            <div className="flex items-end gap-2">
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  onPickFiles(e.target.files);
-                  e.target.value = "";
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-app bg-app text-app-muted hover:border-accent hover:text-accent"
-                title="Attach files"
-              >
-                <Paperclip className="h-4 w-4" />
-              </button>
-              <VoiceInputButton
-                onTranscript={(text) =>
-                  setDraft((prev) => (prev ? `${prev} ${text}` : text))
-                }
-              />
-              <textarea
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    onSend();
-                  }
-                }}
-                placeholder={
-                  attachments.length > 0
-                    ? `Add a note about ${attachments.length} file${
-                        attachments.length === 1 ? "" : "s"
-                      }… (optional)`
-                    : `Ask ${name} anything…`
-                }
-                rows={2}
-                className="min-h-[44px] w-full resize-none rounded-xl border border-app bg-app px-2.5 py-1.5 text-xs text-app placeholder:text-app-faint focus:border-accent focus:outline-none"
-                autoFocus
-              />
-              <button
-                type="button"
-                onClick={onSend}
-                disabled={
-                  sending ||
-                  attachments.some((a) => a.uploading) ||
-                  (!draft.trim() && attachments.filter((a) => a.uploaded).length === 0)
-                }
-                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-accent text-accent-fg shadow-sm disabled:opacity-40"
-                title="Send"
-              >
-                {sending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-              </button>
-            </div>
           </footer>
         )}
       </aside>
@@ -1822,6 +2123,71 @@ function timeAgo(iso: string) {
   if (h < 24) return `${h}h`;
   const d = Math.floor(h / 24);
   return `${d}d`;
+}
+
+/**
+ * Visual surface shown in the composer slot while in voice
+ * conversation mode. Animated big Coworker face + status pill +
+ * stop button. The actual listen/send/speak loop lives in the parent.
+ */
+function VoiceConversationView({
+  speaking,
+  listening,
+  thinking,
+  onStop,
+}: {
+  speaking: boolean;
+  listening: boolean;
+  thinking: boolean;
+  onStop: () => void;
+}) {
+  const status = speaking
+    ? "Speaking…"
+    : thinking
+      ? "Thinking…"
+      : listening
+        ? "Listening…"
+        : "Standing by";
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-accent bg-accent-soft px-3 py-2.5">
+      <div
+        className="grid h-12 w-12 shrink-0 place-items-center rounded-full text-white"
+        style={{ backgroundColor: "var(--app-accent)" }}
+      >
+        <CoworkerFace
+          size={32}
+          speaking={speaking}
+          thinking={thinking}
+          mood="listening"
+        />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium text-app">Voice conversation</p>
+        <p className="flex items-center gap-1.5 text-[11px] text-app-muted">
+          <span
+            className={`inline-block h-1.5 w-1.5 rounded-full ${
+              speaking
+                ? "bg-accent"
+                : listening
+                  ? "bg-emerald-500 animate-pulse"
+                  : thinking
+                    ? "bg-amber-500"
+                    : "bg-app-faint"
+            }`}
+          />
+          {status}
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onStop}
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-rose-600 text-white shadow-sm hover:bg-rose-700"
+        title="End voice conversation"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </div>
+  );
 }
 
 /**
