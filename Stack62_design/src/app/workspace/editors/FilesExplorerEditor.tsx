@@ -3,13 +3,16 @@ import {
   ChevronRight,
   Clock,
   Copy,
+  Download,
   FolderPlus,
   HardDrive,
   Info,
   Loader2,
+  MoreVertical,
   Search,
   Share2,
   Sparkles,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
@@ -27,6 +30,11 @@ import {
   type SemanticHitDto,
 } from "../../lib/dms-resources";
 import { apiRequest } from "../../lib/api";
+import {
+  deleteFile,
+  fetchFileBlobUrl,
+  fileDownloadUrl,
+} from "../../lib/resources";
 import { useAppContext } from "../../context/app-context";
 import { useWorkspace } from "../workspace-context";
 import { EmptyState } from "../../components/EmptyState";
@@ -198,6 +206,34 @@ export function FilesExplorerEditor() {
               onOpenFolder={openFolder}
               onOpenFile={openInTab}
               onShowDetails={setSelectedFileId}
+              onShareFile={(file) => {
+                // Pre-fill the email composer with a short note + the
+                // file's deep link. The user can edit and send via Resend.
+                const subject = `Stack62: ${file.filename}`;
+                const body = `I'm sharing "${file.filename}" with you via Stack62.\n\nOpen the file: ${window.location.origin}/app?file=${file.id}\n`;
+                window.dispatchEvent(
+                  new CustomEvent("stack62:open-email", {
+                    detail: { subject, body },
+                  }),
+                );
+              }}
+              onDeleteFile={async (file) => {
+                if (
+                  !window.confirm(
+                    `Delete "${file.filename}"? This action cannot be undone.`,
+                  )
+                )
+                  return;
+                try {
+                  await deleteFile(file.id);
+                  setFiles((prev) => prev.filter((f) => f.id !== file.id));
+                  if (selectedFileId === file.id) setSelectedFileId(null);
+                } catch (err) {
+                  window.alert(
+                    `Couldn't delete: ${err instanceof Error ? err.message : "unknown error"}`,
+                  );
+                }
+              }}
               selectedFileId={selectedFileId}
             />
           )}
@@ -265,6 +301,8 @@ function BrowseView({
   onOpenFolder,
   onOpenFile,
   onShowDetails,
+  onShareFile,
+  onDeleteFile,
   selectedFileId,
 }: {
   folders: FolderDto[];
@@ -273,6 +311,8 @@ function BrowseView({
   onOpenFolder: (f: FolderDto) => void;
   onOpenFile: (id: string, filename: string) => void;
   onShowDetails: (id: string) => void;
+  onShareFile: (f: FileRow) => void;
+  onDeleteFile: (f: FileRow) => void;
   selectedFileId: string | null;
 }) {
   const [filter, setFilter] = useState<
@@ -387,6 +427,8 @@ function BrowseView({
                   active={selectedFileId === file.id}
                   onOpen={() => onOpenFile(file.id, file.filename)}
                   onShowDetails={() => onShowDetails(file.id)}
+                  onShare={() => onShareFile(file)}
+                  onDelete={() => onDeleteFile(file)}
                 />
               ))}
             </div>
@@ -399,33 +441,77 @@ function BrowseView({
 }
 
 /**
- * File tile — Slack-style: type-coded icon at top, filename below,
- * meta line at bottom. Whole tile is clickable to open the file; a
- * small ⋯ button on hover opens the details panel.
+ * File tile — Google Drive style: live image thumbnails for image
+ * files, type-coded labels for everything else, hover reveals a
+ * 3-dot actions menu (Open / Download / Share / Delete) and the
+ * details button.
+ *
+ * Thumbnails for non-images (PDF first page, DOCX preview) are TODO —
+ * they need server-side rendering (we'd add a /v1/files/:id/thumbnail
+ * endpoint that renders + caches). For now those types fall back to
+ * the colored label.
  */
 function FileTile({
   file,
   active,
   onOpen,
   onShowDetails,
+  onShare,
+  onDelete,
 }: {
   file: FileRow;
   active: boolean;
   onOpen: () => void;
   onShowDetails: () => void;
+  onShare: () => void;
+  onDelete: () => void;
 }) {
   const ext = (file.filename.split(".").pop() || "").toLowerCase();
   const mt = file.mimeType.toLowerCase();
+  const isImage =
+    mt.startsWith("image/") || /png|jpe?g|gif|webp|svg/.test(ext);
 
-  // Pick a visual treatment based on type. Background tint + icon
-  // color matches Slack's color-coded file thumbs.
+  // Lazy-load the image preview only when the tile becomes visible.
+  // Saves a download for every file in a long list. Once loaded the
+  // blob URL is kept until the tile unmounts.
+  const tileRef = useRef<HTMLDivElement | null>(null);
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isImage) return;
+    const el = tileRef.current;
+    if (!el) return;
+    let cancelled = false;
+    let revoked: string | null = null;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          observer.disconnect();
+          fetchFileBlobUrl(file.id)
+            .then((url) => {
+              if (cancelled) {
+                URL.revokeObjectURL(url);
+                return;
+              }
+              revoked = url;
+              setThumbUrl(url);
+            })
+            .catch(() => undefined);
+        });
+      },
+      { rootMargin: "150px" },
+    );
+    observer.observe(el);
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+      if (revoked) URL.revokeObjectURL(revoked);
+    };
+  }, [file.id, isImage]);
+
   const visual = (() => {
-    if (mt.startsWith("image/") || /png|jpe?g|gif|webp|svg/.test(ext))
-      return {
-        bg: "bg-rose-100",
-        text: "text-rose-600",
-        label: ext.toUpperCase() || "IMG",
-      };
+    if (isImage)
+      return { bg: "bg-rose-100", text: "text-rose-600", label: "IMG" };
     if (mt === "application/pdf" || ext === "pdf")
       return { bg: "bg-amber-100", text: "text-amber-700", label: "PDF" };
     if (/docx?|rtf|txt|md|odt/.test(ext) || mt.includes("word"))
@@ -446,11 +532,16 @@ function FileTile({
         text: "text-orange-700",
         label: "PPT",
       };
-    return { bg: "bg-app-hover", text: "text-app-muted", label: ext.toUpperCase() || "FILE" };
+    return {
+      bg: "bg-app-hover",
+      text: "text-app-muted",
+      label: ext.toUpperCase() || "FILE",
+    };
   })();
 
   return (
     <div
+      ref={tileRef}
       className={`group relative flex flex-col overflow-hidden rounded-lg border bg-app-elevated transition ${
         active
           ? "border-accent shadow-md"
@@ -463,31 +554,187 @@ function FileTile({
         className="flex flex-1 flex-col items-stretch p-0 text-left"
         title="Open file"
       >
-        <div className={`flex aspect-[5/3] items-center justify-center ${visual.bg}`}>
-          <span className={`text-2xl font-bold tracking-tight ${visual.text}`}>
-            {visual.label}
-          </span>
+        <div
+          className={`relative flex aspect-[5/3] items-center justify-center overflow-hidden ${
+            isImage && thumbUrl ? "bg-app-hover" : visual.bg
+          }`}
+        >
+          {isImage && thumbUrl ? (
+            <img
+              src={thumbUrl}
+              alt={file.filename}
+              loading="lazy"
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <span
+              className={`text-2xl font-bold tracking-tight ${visual.text}`}
+            >
+              {visual.label}
+            </span>
+          )}
         </div>
         <div className="border-t border-app px-3 py-2">
           <p className="line-clamp-1 text-sm font-medium text-app">
             {file.filename}
           </p>
           <p className="mt-0.5 text-[11px] text-app-faint">
-            {humanBytes(Number(file.size))} · {new Date(file.createdAt).toLocaleDateString()}
+            {humanBytes(Number(file.size))} ·{" "}
+            {new Date(file.createdAt).toLocaleDateString()}
           </p>
         </div>
       </button>
+
+      {/* Hover overlay: details button + 3-dot menu */}
+      <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onShowDetails();
+          }}
+          className="grid h-7 w-7 place-items-center rounded-md bg-app-elevated/95 text-app-muted shadow-sm backdrop-blur hover:text-app"
+          title="Show details"
+          aria-label="Show file details"
+        >
+          <Info className="size-3.5" />
+        </button>
+        <FileActionsMenu
+          file={file}
+          onOpen={onOpen}
+          onShare={onShare}
+          onDelete={onDelete}
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Per-file actions menu — opens on the ⋯ button. Closes on
+ * outside-click and Escape.
+ */
+function FileActionsMenu({
+  file,
+  onOpen,
+  onShare,
+  onDelete,
+}: {
+  file: FileRow;
+  onOpen: () => void;
+  onShare: () => void;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (event: MouseEvent) => {
+      if (
+        wrapRef.current &&
+        !wrapRef.current.contains(event.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", onDoc);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const items: Array<{
+    label: string;
+    icon: typeof Info;
+    onClick: () => void;
+    danger?: boolean;
+  }> = [
+    {
+      label: "Open",
+      icon: Info,
+      onClick: () => {
+        setOpen(false);
+        onOpen();
+      },
+    },
+    {
+      label: "Download",
+      icon: Download,
+      onClick: () => {
+        setOpen(false);
+        // Trigger a real download. fileDownloadUrl is auth-aware
+        // via the apiRequest helper.
+        const a = document.createElement("a");
+        a.href = fileDownloadUrl(file.id);
+        a.download = file.filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      },
+    },
+    {
+      label: "Share",
+      icon: Share2,
+      onClick: () => {
+        setOpen(false);
+        onShare();
+      },
+    },
+    {
+      label: "Delete",
+      icon: Trash2,
+      danger: true,
+      onClick: () => {
+        setOpen(false);
+        onDelete();
+      },
+    },
+  ];
+
+  return (
+    <div ref={wrapRef} className="relative">
       <button
         type="button"
         onClick={(e) => {
           e.stopPropagation();
-          onShowDetails();
+          setOpen((cur) => !cur);
         }}
-        className="absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-md bg-app-elevated/90 text-app-muted opacity-0 shadow-sm backdrop-blur transition hover:text-app group-hover:opacity-100"
-        title="Show details"
+        className="grid h-7 w-7 place-items-center rounded-md bg-app-elevated/95 text-app-muted shadow-sm backdrop-blur hover:text-app"
+        title="More actions"
+        aria-label="File actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
       >
-        <Info className="size-3.5" />
+        <MoreVertical className="size-3.5" />
       </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full z-30 mt-1 w-44 overflow-hidden rounded-md border border-app bg-app-elevated text-sm shadow-lg"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {items.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              role="menuitem"
+              onClick={item.onClick}
+              className={`flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-app-hover ${
+                item.danger ? "text-rose-600" : "text-app"
+              }`}
+            >
+              <item.icon className="size-3.5" />
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
