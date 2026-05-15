@@ -1797,6 +1797,62 @@ export interface IntegrationProviderStatus {
   missing: string[];
 }
 
+// ── User profile / avatar ─────────────────────────────────────────
+
+export interface UserProfileDto {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  status: string;
+  avatarFileId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function fetchCurrentUser() {
+  return apiRequest<UserProfileDto>('/users/me');
+}
+
+export async function updateCurrentUserProfile(patch: {
+  firstName?: string;
+  lastName?: string;
+}) {
+  return apiRequest<UserProfileDto>('/users/me', {
+    method: 'PATCH',
+    body: patch,
+  });
+}
+
+export async function uploadCurrentUserAvatar(
+  file: File,
+  organizationId: string,
+) {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('organizationId', organizationId);
+  return apiRequest<UserProfileDto>('/users/me/avatar', {
+    method: 'POST',
+    body: form,
+  });
+}
+
+export async function clearCurrentUserAvatar() {
+  return apiRequest<UserProfileDto>('/users/me/avatar', {
+    method: 'DELETE',
+  });
+}
+
+/**
+ * URL for rendering a user's avatar in <img src>. Append a cache-
+ * busting param after upload so the browser doesn't keep the old
+ * image from its disk cache.
+ */
+export function userAvatarUrl(userId: string, version?: string) {
+  const base = `${getApiBaseUrl()}/users/${userId}/avatar`;
+  return version ? `${base}?v=${encodeURIComponent(version)}` : base;
+}
+
 export function fetchIntegrationProvidersStatus() {
   return apiRequest<IntegrationProviderStatus[]>(
     '/integrations/providers/status',

@@ -16,6 +16,14 @@ export class UserEntity extends AppBaseEntity {
   @Column({ name: 'last_name', length: 120 })
   lastName!: string;
 
+  /**
+   * Profile photo, stored as a reference to a row in `files` with
+   * scope='avatar'. Nullable — many users will never upload one and
+   * we fall back to initials in the UI.
+   */
+  @Column({ name: 'avatar_file_id', type: 'uuid', nullable: true })
+  avatarFileId!: string | null;
+
   @Column({ length: 30, default: 'active' })
   status!: string;
 

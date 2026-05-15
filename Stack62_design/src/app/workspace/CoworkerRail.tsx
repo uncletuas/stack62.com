@@ -55,9 +55,10 @@ import {
 } from "../lib/resources";
 import { useWorkspace, type EditorTab } from "./workspace-context";
 import { roomsApi, type RoomDto } from "../lib/dms-resources";
-import { CoworkerFace } from "./CoworkerFace";
+import { CoworkerFace, type CoworkerMood } from "./CoworkerFace";
 import { CoworkerCallView } from "./CoworkerCallView";
 import { RealtimeVoiceClient } from "../lib/realtime-voice";
+import { classifyMood } from "../lib/mood";
 
 const ROLE_BADGE: Record<CoworkerRole, string> = {
   admin: "border-rose-500/40 bg-rose-500/10 text-rose-200",
@@ -295,6 +296,13 @@ export function CoworkerRail() {
   /** True when the Coworker config has autonomousMode on. Drives
    *  the emerald color + AUTO badge on the launcher. */
   const autonomous = !!coworker?.autonomousMode;
+  /**
+   * Derived mood for the face — recomputed from the most-recent
+   * assistant and user messages whenever the conversation grows or
+   * the voice connection state changes. Listening wins when realtime
+   * voice is connected and nothing has been said yet.
+   */
+  const [mood, setMood] = useState<CoworkerMood>("neutral");
   /** Voice conversation mode — continuous loop where the rail listens,
    * sends the recognised utterance, speaks the reply, then re-listens.
    * Toggled by the morphing send/voice button in the composer. */
@@ -302,6 +310,24 @@ export function CoworkerRail() {
   /** Live multimodal mode — periodic webcam snapshots get sent so the
    * Coworker can react to what it sees. Toggled separately. */
   const [liveMode, setLiveMode] = useState(false);
+
+  // Recompute the face mood from recent conversation. Runs cheaply
+  // on every message append + on voice-connect toggle. We sample
+  // only the latest user + assistant turns so a single happy reply
+  // doesn't keep the face smiling forever after sad news.
+  useEffect(() => {
+    const lastAssistant = [...messages]
+      .reverse()
+      .find((m) => m.role === "assistant");
+    const lastUser = [...messages].reverse().find((m) => m.role === "user");
+    setMood(
+      classifyMood({
+        assistantText: lastAssistant?.content,
+        userText: lastUser?.content,
+        listening: voiceConversation && !speaking,
+      }),
+    );
+  }, [messages, voiceConversation, speaking]);
 
   /**
    * Snap the floating launcher to one of the four corners / center.
@@ -1200,7 +1226,7 @@ export function CoworkerRail() {
             size={28}
             speaking={speaking}
             thinking={sending}
-            mood={voiceConversation ? "listening" : "happy"}
+            mood={mood}
             mouthPulse={mouthPulse}
             autonomous={autonomous}
           />
@@ -1247,6 +1273,7 @@ export function CoworkerRail() {
           starting={liveStarting}
           error={liveError}
           mouthPulse={mouthPulse}
+          mood={mood}
           visionLive={visionLive}
           onRetry={() => {
             // Reset error then re-enter the toggle so we re-prompt
@@ -1302,6 +1329,7 @@ export function CoworkerRail() {
           sending={sending}
           onClose={() => setOpen(false)}
           speaking={speaking}
+          mood={mood}
           voiceConversation={voiceConversation}
           onStartVoiceConversation={() => void startVoiceConversation()}
           onStopVoiceConversation={() => stopVoiceConversation()}
@@ -1424,6 +1452,8 @@ interface GeniePanelProps {
   onClose: () => void;
   /** Animated face state — true while TTS is vocalising. */
   speaking: boolean;
+  /** Mood derived from recent conversation — drives the face. */
+  mood: CoworkerMood;
   /** True while in hands-free voice conversation mode. */
   voiceConversation: boolean;
   onStartVoiceConversation: () => void;
@@ -1464,6 +1494,7 @@ function GeniePanel({
   sending,
   onClose,
   speaking,
+  mood,
   voiceConversation,
   onStartVoiceConversation,
   onStopVoiceConversation,
@@ -1512,36 +1543,29 @@ function GeniePanel({
           width: panelW,
           height: panelH,
           animation: "stack62-pop 240ms ease-out",
-          background:
-            "linear-gradient(160deg, rgba(15,23,42,0.96) 0%, rgba(8,47,73,0.92) 50%, rgba(30,18,57,0.96) 100%)",
         }}
       >
-        {/* Header */}
-        <header className="relative shrink-0 border-b border-app px-3 py-2.5">
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-x-0 top-0 h-px"
-            style={{
-              background:
-                "linear-gradient(90deg, transparent, rgba(34,211,238,0.6), rgba(167,139,250,0.5), transparent)",
-              backgroundSize: "200% 100%",
-              animation: "stack62-shimmer 4s linear infinite",
-            }}
-          />
+        {/* Header — minimal, theme-aware */}
+        <header className="relative shrink-0 border-b border-app bg-app-surface px-3 py-2">
           <div className="flex items-center gap-2.5">
-            <span className="relative grid h-9 w-9 place-items-center rounded-full border border-cyan-300/40 bg-app-elevated">
-              <Bot className="h-4 w-4 text-cyan-200" />
-              <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-white" />
+            <span
+              className="relative grid h-8 w-8 place-items-center rounded-full text-white"
+              style={{ backgroundColor: "var(--app-accent)" }}
+            >
+              <CoworkerFace
+                size={20}
+                speaking={speaking}
+                thinking={sending}
+                mood={mood}
+              />
+              <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-app-surface" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold tracking-tight">
+              <p className="truncate text-sm font-semibold leading-tight">
                 {name}
               </p>
-              <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-app-muted">
-                <span className={`rounded-full border px-1.5 py-0.5 ${ROLE_BADGE[role]}`}>
-                  {role.replace("_", " ")}
-                </span>
-                <span className="text-app-subtle">· coworker</span>
+              <p className="truncate text-[10px] text-app-subtle">
+                {role.replace("_", " ")}
               </p>
             </div>
             <button
@@ -1549,12 +1573,12 @@ function GeniePanel({
               onClick={onToggleLive}
               className={`rounded-full p-1.5 transition ${
                 liveMode
-                  ? "bg-rose-100 text-rose-600 animate-pulse"
+                  ? "bg-rose-500/15 text-rose-500"
                   : "text-app-muted hover:bg-app-hover"
               }`}
               title={
                 liveMode
-                  ? "Live mode on — Coworker can see what's on your camera"
+                  ? "Live mode on — Coworker can see your camera"
                   : "Start live mode (Coworker sees your camera)"
               }
             >
@@ -1570,22 +1594,21 @@ function GeniePanel({
             </button>
           </div>
 
-          {/* Tabs — Coworker (1:1 AI) / Team (channels) / Rooms (groups + DMs) */}
-          <nav className="mt-2.5 flex gap-1 rounded-full border border-app bg-app p-0.5 text-[11px]">
-            <TabButton
+          {/* Tabs — single line, low contrast until selected */}
+          <nav className="mt-2 flex gap-0.5 border-b border-app text-[11px]">
+            <PanelTab
               active={tab === "coworker"}
               onClick={() => setTab("coworker")}
               icon={Bot}
               label={`Coworker${total ? ` · ${total}` : ""}`}
-              accent={total > 0}
             />
-            <TabButton
+            <PanelTab
               active={tab === "team"}
               onClick={() => setTab("team")}
               icon={Users}
               label="Team"
             />
-            <TabButton
+            <PanelTab
               active={tab === "rooms"}
               onClick={() => setTab("rooms")}
               icon={MessageSquare}
@@ -1682,6 +1705,7 @@ function GeniePanel({
                 speaking={speaking}
                 listening={!speaking && !sending}
                 thinking={sending}
+                mood={mood}
                 onStop={onStopVoiceConversation}
               />
             ) : (
@@ -1818,12 +1842,44 @@ function TabButton({
         active
           ? "bg-accent-soft text-accent"
           : accent
-          ? "text-amber-200 hover:bg-app-hover"
+          ? "text-amber-500 hover:bg-app-hover"
           : "text-app-muted hover:bg-app-hover"
       }`}
     >
       <Icon className="h-3.5 w-3.5" />
       <span className="text-[11px]">{label}</span>
+    </button>
+  );
+}
+
+/**
+ * Underline-style tab used in the panel header. Cleaner than the
+ * pill variant — the panel was looking crowded with two rows of
+ * colorful pills competing for attention.
+ */
+function PanelTab({
+  active,
+  onClick,
+  icon: Icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: LucideIcon;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 py-1.5 transition ${
+        active
+          ? "border-accent text-accent"
+          : "border-transparent text-app-muted hover:text-app"
+      }`}
+    >
+      <Icon className="h-3 w-3" />
+      <span>{label}</span>
     </button>
   );
 }
@@ -2393,11 +2449,13 @@ function VoiceConversationView({
   speaking,
   listening,
   thinking,
+  mood,
   onStop,
 }: {
   speaking: boolean;
   listening: boolean;
   thinking: boolean;
+  mood: CoworkerMood;
   onStop: () => void;
 }) {
   const status = speaking
@@ -2417,7 +2475,7 @@ function VoiceConversationView({
           size={32}
           speaking={speaking}
           thinking={thinking}
-          mood="listening"
+          mood={mood}
         />
       </div>
       <div className="min-w-0 flex-1">

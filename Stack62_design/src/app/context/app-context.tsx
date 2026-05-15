@@ -25,6 +25,8 @@ export interface AuthUser {
   firstName: string;
   lastName: string;
   status: string;
+  /** File id of the user's uploaded avatar; null when not set. */
+  avatarFileId?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }

@@ -68,8 +68,32 @@ export class UsersService {
       firstName: user.firstName,
       lastName: user.lastName,
       status: user.status,
+      avatarFileId: user.avatarFileId,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
+  }
+
+  async setAvatar(
+    userId: string,
+    avatarFileId: string | null,
+  ): Promise<UserEntity> {
+    const user = await this.findById(userId);
+    user.avatarFileId = avatarFileId;
+    return this.usersRepository.save(user);
+  }
+
+  async updateProfile(
+    userId: string,
+    patch: { firstName?: string; lastName?: string },
+  ): Promise<UserEntity> {
+    const user = await this.findById(userId);
+    if (typeof patch.firstName === 'string' && patch.firstName.trim()) {
+      user.firstName = patch.firstName.trim().slice(0, 120);
+    }
+    if (typeof patch.lastName === 'string' && patch.lastName.trim()) {
+      user.lastName = patch.lastName.trim().slice(0, 120);
+    }
+    return this.usersRepository.save(user);
   }
 }

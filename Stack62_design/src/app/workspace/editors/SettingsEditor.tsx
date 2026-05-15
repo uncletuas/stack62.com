@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { Bell, Bot, Building2, CheckCircle2, Landmark, Loader2, LogOut, MessageCircle, Monitor, Moon, Palette, Plug, Save, ShieldCheck, Sun, User, X, XCircle } from "lucide-react";
+import { Bell, Bot, Building2, Camera, CheckCircle2, Landmark, Loader2, LogOut, MessageCircle, Monitor, Moon, Palette, Plug, Save, ShieldCheck, Sun, Trash2, User, X, XCircle } from "lucide-react";
+import { appDialog } from "../../components/app-dialog";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { useAppContext } from "../../context/app-context";
 import { useTheme, type ThemeMode } from "../../context/theme-context";
 import {
+  clearCurrentUserAvatar,
   disconnectIntegrationConnection,
   fetchCoworker,
   fetchIntegrationConnections,
@@ -15,7 +17,10 @@ import {
   quickBooksOAuthUrl,
   selectWhatsAppPhoneNumber,
   updateCoworker,
+  updateCurrentUserProfile,
   updateOrgSettings,
+  uploadCurrentUserAvatar,
+  userAvatarUrl,
   type Coworker,
   type IntegrationConnection,
   type WhatsAppPhoneNumberOption,
@@ -530,37 +535,215 @@ function Card({
 }
 
 function ProfileSection() {
-  const { user, logout } = useAppContext();
+  const { user, currentOrganization, logout, refreshContext } = useAppContext();
+  const { appendRunLog } = useWorkspace();
+  const [firstName, setFirstName] = useState(user?.firstName ?? "");
+  const [lastName, setLastName] = useState(user?.lastName ?? "");
+  const [savingName, setSavingName] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  // Cache-bust the avatar so a fresh upload doesn't keep showing the
+  // old image from the browser's disk cache.
+  const [avatarV, setAvatarV] = useState(user?.updatedAt ?? "");
+
+  useEffect(() => {
+    setFirstName(user?.firstName ?? "");
+    setLastName(user?.lastName ?? "");
+    setAvatarV(user?.updatedAt ?? "");
+  }, [user?.id, user?.firstName, user?.lastName, user?.updatedAt]);
+
   const initials = (() => {
     const f = user?.firstName?.[0] ?? "";
     const l = user?.lastName?.[0] ?? "";
     return (f + l).toUpperCase() || "U";
   })();
+  const avatarSrc =
+    user?.avatarFileId && user.id ? userAvatarUrl(user.id, avatarV) : null;
+
+  const onPickAvatar = async (file: File | undefined) => {
+    if (!file || !user || !currentOrganization) return;
+    if (file.size > 5 * 1024 * 1024) {
+      await appDialog.alert({
+        title: "Image too large",
+        description: "Keep it under 5MB. Compress with any image tool first.",
+        tone: "destructive",
+      });
+      return;
+    }
+    setUploading(true);
+    try {
+      await uploadCurrentUserAvatar(file, currentOrganization.id);
+      await refreshContext();
+      setAvatarV(String(Date.now()));
+      appendRunLog({
+        level: "ok",
+        text: "Profile photo updated.",
+        source: "profile",
+      });
+    } catch (err) {
+      await appDialog.alert({
+        title: "Upload failed",
+        description: err instanceof Error ? err.message : "Unknown error.",
+        tone: "destructive",
+      });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const onClearAvatar = async () => {
+    if (!user?.avatarFileId) return;
+    const ok = await appDialog.confirm({
+      title: "Remove profile photo?",
+      description: "Your initials will show again until you upload a new one.",
+      confirmLabel: "Remove",
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await clearCurrentUserAvatar();
+      await refreshContext();
+    } catch (err) {
+      await appDialog.alert({
+        title: "Could not remove",
+        description: err instanceof Error ? err.message : "Unknown error.",
+        tone: "destructive",
+      });
+    }
+  };
+
+  const onSaveName = async () => {
+    if (!user) return;
+    const cleanFirst = firstName.trim();
+    const cleanLast = lastName.trim();
+    if (!cleanFirst || !cleanLast) {
+      await appDialog.alert({
+        title: "Name required",
+        description: "First and last names cannot be empty.",
+      });
+      return;
+    }
+    if (cleanFirst === user.firstName && cleanLast === user.lastName) return;
+    setSavingName(true);
+    try {
+      await updateCurrentUserProfile({
+        firstName: cleanFirst,
+        lastName: cleanLast,
+      });
+      await refreshContext();
+      appendRunLog({
+        level: "ok",
+        text: "Profile saved.",
+        source: "profile",
+      });
+    } catch (err) {
+      await appDialog.alert({
+        title: "Save failed",
+        description: err instanceof Error ? err.message : "Unknown error.",
+        tone: "destructive",
+      });
+    } finally {
+      setSavingName(false);
+    }
+  };
+
   return (
     <section className="rounded-xl border border-app bg-app-elevated p-6 shadow-sm">
-      <div className="flex items-center gap-4">
-        <div className="grid h-16 w-16 place-items-center rounded-full bg-accent text-2xl font-semibold text-accent-fg">
-          {initials}
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-base font-semibold text-app">
-            {user ? `${user.firstName} ${user.lastName}` : "Signed out"}
-          </p>
-          <p className="truncate text-sm text-app-muted">
+      <div className="flex items-start gap-5">
+        {/* Avatar with hover-to-upload */}
+        <label className="group relative cursor-pointer">
+          <div className="grid h-20 w-20 place-items-center overflow-hidden rounded-full bg-accent text-2xl font-semibold text-accent-fg shadow-sm">
+            {avatarSrc ? (
+              <img
+                src={avatarSrc}
+                alt="Profile"
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              initials
+            )}
+          </div>
+          <div className="absolute inset-0 grid place-items-center rounded-full bg-black/50 opacity-0 transition group-hover:opacity-100">
+            {uploading ? (
+              <Loader2 className="h-5 w-5 animate-spin text-white" />
+            ) : (
+              <Camera className="h-5 w-5 text-white" />
+            )}
+          </div>
+          <input
+            type="file"
+            accept="image/*"
+            hidden
+            disabled={uploading || !currentOrganization}
+            onChange={(e) => void onPickAvatar(e.target.files?.[0])}
+          />
+        </label>
+
+        <div className="min-w-0 flex-1 space-y-3">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-app-faint">
+                First name
+              </label>
+              <Input
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                className="h-8 border-app bg-app-surface text-sm"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-app-faint">
+                Last name
+              </label>
+              <Input
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                className="h-8 border-app bg-app-surface text-sm"
+              />
+            </div>
+          </div>
+          <p className="truncate text-xs text-app-muted">
             {user?.email ?? "—"}
           </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              onClick={() => void onSaveName()}
+              disabled={
+                savingName ||
+                (firstName === user?.firstName && lastName === user?.lastName)
+              }
+              className="gap-1"
+            >
+              {savingName ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Save className="h-3.5 w-3.5" />
+              )}
+              Save
+            </Button>
+            {user?.avatarFileId && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void onClearAvatar()}
+                className="gap-1 border-app"
+              >
+                <Trash2 className="h-3.5 w-3.5" /> Remove photo
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={logout}
+              className="ml-auto gap-1 border-app"
+            >
+              <LogOut className="h-3.5 w-3.5" /> Sign out
+            </Button>
+          </div>
         </div>
-        <Button
-          variant="outline"
-          onClick={logout}
-          className="gap-1 border-app"
-        >
-          <LogOut className="h-3.5 w-3.5" /> Sign out
-        </Button>
       </div>
       <p className="mt-4 text-xs text-app-faint">
-        Avatar uploads, password changes, and email verification are coming soon.
-        For now, profile data follows whatever you set when you signed up.
+        Click your photo to upload a new one (PNG, JPG, WebP, GIF · under 5MB).
       </p>
     </section>
   );
