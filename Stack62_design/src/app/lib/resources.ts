@@ -2236,5 +2236,78 @@ export async function updateSchedule(
   });
 }
 
+// ── Meeting bot ────────────────────────────────────────────────────
+
+export type MeetingBotStatus =
+  | 'queued'
+  | 'joining'
+  | 'in_meeting'
+  | 'summarising'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export interface MeetingBotSession {
+  id: string;
+  organizationId: string;
+  workspaceId: string;
+  requestedByUserId: string;
+  roomId: string | null;
+  provider: string;
+  meetingUrl: string;
+  displayName: string;
+  title: string | null;
+  status: MeetingBotStatus;
+  startedAt: string | null;
+  endedAt: string | null;
+  summary: string | null;
+  summaryMessageId: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MeetingBotTranscriptLine {
+  id: string;
+  speakerLabel: string | null;
+  text: string;
+  startsAtSec: number | null;
+  createdAt: string;
+}
+
+export async function fetchMeetingBotSessions(query: { organizationId: string }) {
+  return apiRequest<MeetingBotSession[]>('/meeting-bot/sessions', { query });
+}
+
+export async function fetchMeetingBotSession(sessionId: string) {
+  return apiRequest<MeetingBotSession>(`/meeting-bot/sessions/${sessionId}`);
+}
+
+export async function fetchMeetingBotTranscript(sessionId: string) {
+  return apiRequest<MeetingBotTranscriptLine[]>(
+    `/meeting-bot/sessions/${sessionId}/transcript`,
+  );
+}
+
+export async function scheduleMeetingBot(payload: {
+  organizationId: string;
+  workspaceId: string;
+  meetingUrl: string;
+  title?: string;
+  roomId?: string;
+}) {
+  return apiRequest<MeetingBotSession>('/meeting-bot/sessions', {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+export async function speakInMeeting(sessionId: string, text: string) {
+  return apiRequest<{ enqueued: boolean }>(
+    `/meeting-bot/sessions/${sessionId}/speak`,
+    { method: 'POST', body: { text } },
+  );
+}
+
 
 

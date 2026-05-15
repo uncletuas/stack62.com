@@ -47,6 +47,9 @@ const RoomEditor = lazy(() =>
 const ScheduleEditor = lazy(() =>
   import("./ScheduleEditor").then((m) => ({ default: m.ScheduleEditor })),
 );
+const MeetingBotEditor = lazy(() =>
+  import("./MeetingBotEditor").then((m) => ({ default: m.MeetingBotEditor })),
+);
 const ShareEditor = lazy(() =>
   import("./ShareEditor").then((m) => ({ default: m.ShareEditor })),
 );
@@ -124,6 +127,8 @@ function RenderEditor() {
       return <WorkflowEditor key={activeTab.id} tab={activeTab} />;
     case "schedule":
       return <ScheduleEditor key={activeTab.id} tab={activeTab} />;
+    case "meeting-bot":
+      return <MeetingBotEditor key={activeTab.id} tab={activeTab} />;
     case "plan":
       return <PlanEditor key={activeTab.id} tab={activeTab} />;
     case "preview":

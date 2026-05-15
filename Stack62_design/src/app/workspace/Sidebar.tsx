@@ -14,6 +14,7 @@ import {
   Settings,
   ShieldCheck,
   Users,
+  Video,
   Wrench,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -626,6 +627,14 @@ function SchedulesPanel({ query }: { query: string }) {
 
   return (
     <div className="py-1">
+      <Row
+        icon={Video}
+        label="Meeting bot"
+        meta="LIVE"
+        onClick={() =>
+          navigate({ kind: "meeting-bot", title: "Meeting bot" })
+        }
+      />
       {filtered.length === 0 && (
         <EmptyState
           compact

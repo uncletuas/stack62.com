@@ -59,6 +59,14 @@ export class RealtimeVoiceClient {
   private localStream: MediaStream | null = null;
   private callbacks: RealtimeVoiceCallbacks = {};
   private connected = false;
+  /** True between response.created and response.done. While set, we
+   *  hold off on sending non-audio conversation items (video frames)
+   *  so we don't interrupt the model mid-turn. */
+  private assistantResponding = false;
+  /** Frames captured while the assistant is responding sit here and
+   *  we ship the most recent one once the response completes — so the
+   *  model still has visual context for the *next* turn. */
+  private deferredFrame: string | null = null;
 
   // ── Vision (Phase 2) ──────────────────────────────────────────────
   private videoStream: MediaStream | null = null;
@@ -153,10 +161,17 @@ export class RealtimeVoiceClient {
         JSON.stringify({
           type: "session.update",
           session: {
+            // Explicit create_response + interrupt_response so server
+            // VAD owns turn-taking. Without these the model would wait
+            // for an explicit response.create from us and never reply
+            // after the first turn.
             turn_detection: {
               type: "server_vad",
               threshold: 0.5,
-              silence_duration_ms: 400,
+              prefix_padding_ms: 300,
+              silence_duration_ms: 500,
+              create_response: true,
+              interrupt_response: true,
             },
             input_audio_transcription: { model: "whisper-1" },
           },
@@ -258,24 +273,17 @@ export class RealtimeVoiceClient {
         if (!ctx) return;
         ctx.drawImage(v, 0, 0, c.width, c.height);
         const dataUrl = c.toDataURL("image/jpeg", 0.6);
-        // Ship to the model as a user input item. `detail: "low"`
-        // keeps the token cost down (≈85 tokens per frame).
-        this.dc.send(
-          JSON.stringify({
-            type: "conversation.item.create",
-            item: {
-              type: "message",
-              role: "user",
-              content: [
-                {
-                  type: "input_image",
-                  image_url: dataUrl,
-                  detail: "low",
-                },
-              ],
-            },
-          }),
-        );
+
+        // While the assistant is mid-response, don't ship the frame —
+        // injecting a new user item would interrupt the in-flight
+        // response and is the most common cause of "stops replying
+        // after the first turn". Stash the latest frame so we send it
+        // once the response completes.
+        if (this.assistantResponding) {
+          this.deferredFrame = dataUrl;
+          return;
+        }
+        this.sendFrame(dataUrl);
       } catch {
         /* one bad frame shouldn't kill the loop */
       }
@@ -284,6 +292,26 @@ export class RealtimeVoiceClient {
     // then on the interval.
     tick();
     this.videoSampler = window.setInterval(tick, this.visionIntervalMs);
+  }
+
+  private sendFrame(dataUrl: string) {
+    if (!this.dc || this.dc.readyState !== "open") return;
+    this.dc.send(
+      JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_image",
+              image_url: dataUrl,
+              detail: "low",
+            },
+          ],
+        },
+      }),
+    );
   }
 
   /** Stop sending frames + tear down the hidden <video>. */
@@ -372,6 +400,9 @@ export class RealtimeVoiceClient {
       return;
     }
     switch (evt.type) {
+      case "response.created":
+        this.assistantResponding = true;
+        break;
       case "response.audio.delta":
         // First audio chunk of a response → assistant started speaking.
         // We coalesce multiple deltas into a single "speaking" state
@@ -379,8 +410,18 @@ export class RealtimeVoiceClient {
         this.callbacks.onAssistantSpeakingStart?.();
         break;
       case "response.audio.done":
+        this.callbacks.onAssistantSpeakingEnd?.();
+        break;
       case "response.done":
         this.callbacks.onAssistantSpeakingEnd?.();
+        this.assistantResponding = false;
+        // Ship a deferred frame now that the model is free again,
+        // so the next user turn has fresh visual context.
+        if (this.deferredFrame) {
+          const frame = this.deferredFrame;
+          this.deferredFrame = null;
+          this.sendFrame(frame);
+        }
         break;
       case "response.audio_transcript.delta":
         if (typeof evt.delta === "string") {
@@ -409,7 +450,12 @@ export class RealtimeVoiceClient {
         );
         break;
       default:
-        // Unhandled — fine; the spec adds events over time.
+        // Unhandled — fine; the spec adds events over time. Log so we
+        // can spot regressions when OpenAI ships new event shapes.
+        if (typeof evt.type === "string" && evt.type.startsWith("response.")) {
+          // eslint-disable-next-line no-console
+          console.debug("[realtime] unhandled response event:", evt.type);
+        }
         break;
     }
   }

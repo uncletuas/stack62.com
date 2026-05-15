@@ -41,6 +41,7 @@ export type EditorKind =
   | "files-explorer"
   | "room"
   | "streaming-doc"
+  | "meeting-bot"
   | "settings";
 
 /**
