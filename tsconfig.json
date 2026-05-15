@@ -1,4 +1,6 @@
 {
+  "include": ["src/**/*", "test/**/*"],
+  "exclude": ["node_modules", "dist", "services", "Stack62_design"],
   "compilerOptions": {
     "module": "nodenext",
     "moduleResolution": "nodenext",
