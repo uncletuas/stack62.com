@@ -7,13 +7,17 @@ import { AccessControlModule } from '../../shared/access-control/access-control.
 import { ActivityModule } from '../activity/activity.module';
 import { MeetingBotSessionEntity } from './entities/meeting-bot-session.entity';
 import { MeetingBotTranscriptEntity } from './entities/meeting-bot-transcript.entity';
-import { MEETING_BOT_QUEUE } from './meeting-bot.constants';
+import {
+  MEETING_BOT_QUEUE,
+  MEETING_BOT_SPEAK_QUEUE,
+} from './meeting-bot.constants';
 import { MeetingBotController } from './meeting-bot.controller';
 import { MeetingBotService } from './meeting-bot.service';
 
 @Module({
   imports: [
     BullModule.registerQueue({ name: MEETING_BOT_QUEUE }),
+    BullModule.registerQueue({ name: MEETING_BOT_SPEAK_QUEUE }),
     TypeOrmModule.forFeature([
       MeetingBotSessionEntity,
       MeetingBotTranscriptEntity,

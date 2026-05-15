@@ -1,5 +1,22 @@
+import { spawn } from "node:child_process";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { chromium, type Page } from "playwright";
 import type { ApiClient } from "./api-client.js";
+import {
+  registerSession,
+  unregisterSession,
+  type SpeakHandle,
+} from "./session-registry.js";
+
+/**
+ * Name of the PulseAudio virtual sink the worker container creates at
+ * startup. Chrome is launched with --alsa-output-device pointing at
+ * this sink's monitor, so anything we play via paplay is fed into the
+ * Meet tab's "microphone" stream.
+ */
+const VIRTUAL_SINK = process.env.MEETING_BOT_VIRTUAL_SINK || "virtual_speaker";
 
 /**
  * Drives a single Google Meet attendance session.
@@ -26,6 +43,7 @@ export async function runMeetingBot(
   meetingUrl: string,
   displayName: string,
   api: ApiClient,
+  sessionId?: string,
 ): Promise<void> {
   // Mark "joining" the moment the job is picked up.
   await api.status({ status: "joining" });
@@ -34,9 +52,12 @@ export async function runMeetingBot(
     headless: true,
     args: [
       "--use-fake-ui-for-media-stream",
+      "--use-fake-device-for-media-stream",
+      `--use-file-for-fake-audio-capture=/tmp/meeting-bot-mic.wav`,
       "--disable-blink-features=AutomationControlled",
       "--no-sandbox",
       "--disable-dev-shm-usage",
+      "--autoplay-policy=no-user-gesture-required",
     ],
   });
 
@@ -113,6 +134,15 @@ export async function runMeetingBot(
     await page.keyboard.press("c").catch(() => undefined);
     await page.waitForTimeout(800);
 
+    // Register a speak handle so the speak-queue worker can poke this
+    // page while the call is live. Cleared in finally below.
+    if (sessionId) {
+      const handle: SpeakHandle = {
+        playAudio: (mp3) => speakInMeeting(page, mp3),
+      };
+      registerSession(sessionId, handle);
+    }
+
     // Caption scraping loop.
     await scrapeCaptions(page, api, startedAt);
 
@@ -125,8 +155,90 @@ export async function runMeetingBot(
       .catch(() => undefined);
     throw err;
   } finally {
+    if (sessionId) unregisterSession(sessionId);
     await browser.close().catch(() => undefined);
   }
+}
+
+/**
+ * Play a TTS clip into the live Meet. Toggles the mic on, plays the
+ * mp3 through the PulseAudio virtual sink the container created at
+ * startup (Chrome captures that as the mic stream), then toggles the
+ * mic back off. Errors are swallowed — speak-out is best-effort and
+ * we don't want a paplay failure to crash the attend job.
+ */
+async function speakInMeeting(page: Page, mp3: Buffer): Promise<void> {
+  const tmpDir = mkdtempSync(join(tmpdir(), "stack62-tts-"));
+  const mp3Path = join(tmpDir, "utter.mp3");
+  writeFileSync(mp3Path, mp3);
+  try {
+    await toggleMic(page, /* on */ true);
+    // Small wait so Meet has a chance to flip the mic state before we
+    // start dumping audio into it.
+    await page.waitForTimeout(250);
+
+    // Decode mp3 → pcm on stdout via ffmpeg, pipe into paplay on the
+    // virtual sink. ffmpeg + paplay are both installed via the
+    // Dockerfile. We block until paplay exits (i.e. the clip finished
+    // playing).
+    await new Promise<void>((resolve, reject) => {
+      const ff = spawn("ffmpeg", [
+        "-loglevel",
+        "error",
+        "-i",
+        mp3Path,
+        "-f",
+        "wav",
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
+        "-",
+      ]);
+      const pa = spawn("paplay", [
+        `--device=${VIRTUAL_SINK}`,
+        "--raw=false",
+      ]);
+      ff.stdout.pipe(pa.stdin);
+      const fail = (err: Error) => reject(err);
+      ff.on("error", fail);
+      pa.on("error", fail);
+      pa.on("close", (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`paplay exited ${code}`));
+      });
+    });
+
+    // Brief tail so Meet's mic-on indicator doesn't clip the last word.
+    await page.waitForTimeout(400);
+  } finally {
+    await toggleMic(page, /* on */ false).catch(() => undefined);
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+/** Toggle the Meet mic button to the requested state. Idempotent: if
+ *  the mic is already in the requested state we leave it alone. */
+async function toggleMic(page: Page, on: boolean): Promise<void> {
+  // Meet renders one toggle button with aria-label "Turn on/off
+  // microphone" depending on the current state.
+  const wantLabel = on ? /turn on microphone/i : /turn off microphone/i;
+  const btn = page.locator(`button[aria-label]`).filter({
+    hasText: "",
+  });
+  // Fallback to aria-label-text matching since :has-text doesn't read
+  // aria-label.
+  const all = await page.$$(`button[aria-label]`);
+  for (const handle of all) {
+    const label = (await handle.getAttribute("aria-label")) || "";
+    if (wantLabel.test(label)) {
+      await handle.click().catch(() => undefined);
+      return;
+    }
+  }
+  // No-op if the button in the wanted direction isn't visible — the
+  // mic is probably already in the target state.
+  void btn;
 }
 
 /** Click the first selector that matches an element actually on the

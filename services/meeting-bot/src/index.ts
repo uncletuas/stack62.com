@@ -15,6 +15,7 @@
 import { Worker, type Job } from "bullmq";
 import { makeApiClient } from "./api-client.js";
 import { runMeetingBot } from "./meet-bot.js";
+import { getSession } from "./session-registry.js";
 
 interface JobData {
   sessionId: string;
@@ -24,6 +25,12 @@ interface JobData {
   displayName: string;
   apiBaseUrl: string;
   workerToken: string;
+}
+
+interface SpeakJobData {
+  sessionId: string;
+  audioBase64: string;
+  text: string;
 }
 
 const REDIS_URL = process.env.REDIS_URL;
@@ -52,7 +59,7 @@ const worker = new Worker<JobData>(
     );
     const api = makeApiClient(data.apiBaseUrl, data.sessionId, data.workerToken);
     try {
-      await runMeetingBot(data.meetingUrl, data.displayName, api);
+      await runMeetingBot(data.meetingUrl, data.displayName, api, data.sessionId);
       // eslint-disable-next-line no-console
       console.log(`[meeting-bot] job ${job.id} completed.`);
     } catch (err) {
@@ -78,12 +85,37 @@ worker.on("error", (err) => {
   console.error("[meeting-bot] worker error:", err);
 });
 
+// ── Speak-out worker ───────────────────────────────────────────────
+// Separate queue so an active attend job (which sits in-meeting for
+// the whole call) doesn't block speak jobs targeted at it.
+const speakWorker = new Worker<SpeakJobData>(
+  "meeting-bot-speak",
+  async (job: Job<SpeakJobData>) => {
+    const handle = getSession(job.data.sessionId);
+    if (!handle) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[meeting-bot] speak job ${job.id} dropped: session ${job.data.sessionId} not active on this worker.`,
+      );
+      return;
+    }
+    const mp3 = Buffer.from(job.data.audioBase64, "base64");
+    await handle.playAudio(mp3);
+  },
+  { connection, concurrency: 1, autorun: true },
+);
+speakWorker.on("error", (err) => {
+  // eslint-disable-next-line no-console
+  console.error("[meeting-bot] speak worker error:", err);
+});
+
 // Graceful shutdown so in-flight Meet sessions get a chance to leave
 // the call cleanly.
 const shutdown = async () => {
   // eslint-disable-next-line no-console
   console.log("[meeting-bot] shutting down…");
   await worker.close();
+  await speakWorker.close();
   process.exit(0);
 };
 process.on("SIGTERM", () => void shutdown());

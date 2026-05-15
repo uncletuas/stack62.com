@@ -37,6 +37,11 @@ class ScheduleMeetingDto {
   roomId?: string;
 }
 
+class SpeakDto {
+  @IsString()
+  text!: string;
+}
+
 class TranscriptChunkDto {
   @IsOptional()
   @IsString()
@@ -97,6 +102,20 @@ export class MeetingBotController {
   @Get('sessions/:id/transcript')
   transcript(@Param('id') id: string, @CurrentUser() user: JwtUser) {
     return this.service.getTranscript(id, user.userId);
+  }
+
+  @ApiBearerAuth()
+  @Post('sessions/:id/speak')
+  speak(
+    @Param('id') id: string,
+    @Body() body: SpeakDto,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.service.speak({
+      sessionId: id,
+      text: body.text,
+      actorUserId: user.userId,
+    });
   }
 
   // ── Worker callbacks ────────────────────────────────────────────────

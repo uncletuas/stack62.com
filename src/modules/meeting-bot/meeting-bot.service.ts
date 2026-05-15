@@ -16,7 +16,9 @@ import { MeetingBotSessionEntity } from './entities/meeting-bot-session.entity';
 import { MeetingBotTranscriptEntity } from './entities/meeting-bot-transcript.entity';
 import {
   MEETING_BOT_QUEUE,
+  MEETING_BOT_SPEAK_QUEUE,
   type MeetingBotJobData,
+  type MeetingBotSpeakJobData,
 } from './meeting-bot.constants';
 
 /**
@@ -41,6 +43,8 @@ export class MeetingBotService {
     private readonly transcriptsRepo: Repository<MeetingBotTranscriptEntity>,
     @InjectQueue(MEETING_BOT_QUEUE)
     private readonly queue: Queue<MeetingBotJobData>,
+    @InjectQueue(MEETING_BOT_SPEAK_QUEUE)
+    private readonly speakQueue: Queue<MeetingBotSpeakJobData>,
     private readonly accessControl: AccessControlService,
     private readonly activity: ActivityService,
     private readonly config: ConfigService,
@@ -131,6 +135,94 @@ export class MeetingBotService {
     });
 
     return session;
+  }
+
+  // ── Speak out (Phase 5) ─────────────────────────────────────────────
+  // The user (or Coworker engine) asks the bot to say something into
+  // the live meeting. We generate the TTS server-side, enqueue the
+  // audio bytes on a separate queue, and the worker plays them
+  // through PulseAudio's virtual sink so Chrome captures them as the
+  // bot's mic input.
+
+  async speak(input: {
+    sessionId: string;
+    text: string;
+    actorUserId: string;
+  }): Promise<{ enqueued: boolean }> {
+    const session = await this.findById(input.sessionId, input.actorUserId);
+    if (session.status !== 'in_meeting') {
+      throw new BadRequestException(
+        `Bot isn't in the meeting (status: ${session.status}). Speak is only available while the bot is live.`,
+      );
+    }
+    const cleaned = input.text.trim();
+    if (!cleaned) throw new BadRequestException('text required.');
+    if (cleaned.length > 800) {
+      throw new BadRequestException(
+        'Keep utterances under 800 characters — long monologues are bot-energy. Break it into shorter messages.',
+      );
+    }
+
+    const audio = await this.synthesiseSpeech(cleaned);
+    await this.speakQueue.add(
+      'speak',
+      {
+        sessionId: session.id,
+        audioBase64: audio.toString('base64'),
+        text: cleaned,
+      },
+      { attempts: 1, removeOnComplete: 50, removeOnFail: 25 },
+    );
+
+    await this.activity.log({
+      organizationId: session.organizationId,
+      workspaceId: session.workspaceId,
+      actorUserId: input.actorUserId,
+      action: 'meeting_bot.speak',
+      targetType: 'meeting_bot_session',
+      targetId: session.id,
+      origin: 'user',
+      metadata: { textLength: cleaned.length },
+    });
+
+    return { enqueued: true };
+  }
+
+  /**
+   * Generate TTS audio via OpenAI's tts-1 model. Returns the raw
+   * mp3 buffer. Voice + model are configurable via env so the user
+   * can swap to tts-1-hd or a different voice without code changes.
+   */
+  private async synthesiseSpeech(text: string): Promise<Buffer> {
+    const apiKey = this.config.get<string>('OPENAI_API_KEY');
+    if (!apiKey) {
+      throw new BadRequestException(
+        'OPENAI_API_KEY is not configured. Speak-out needs OpenAI TTS.',
+      );
+    }
+    const model = this.config.get<string>('MEETING_BOT_TTS_MODEL') || 'tts-1';
+    const voice = this.config.get<string>('MEETING_BOT_TTS_VOICE') || 'verse';
+
+    const response = await fetch('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        voice,
+        input: text,
+        response_format: 'mp3',
+      }),
+    });
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      this.logger.error(`OpenAI TTS failed: ${errText.slice(0, 200)}`);
+      throw new Error(`TTS HTTP ${response.status}`);
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer);
   }
 
   // ── Read ────────────────────────────────────────────────────────────

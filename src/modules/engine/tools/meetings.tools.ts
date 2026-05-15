@@ -94,6 +94,38 @@ export class MeetingsTools {
       ),
 
       tool(
+        'meetings.speak',
+        'Make the Coworker bot speak a short utterance out loud in the live Google Meet it is attending. Only works while the session status is "in_meeting". Keep under 800 characters — break long thoughts into multiple calls. The bot will briefly unmute, speak, then mute again.',
+        {
+          properties: {
+            sessionId: {
+              type: 'string',
+              description: 'Active meeting session id (status must be in_meeting). Get it from meetings.list_mine.',
+            },
+            text: {
+              type: 'string',
+              description: 'What the bot should say. Conversational, concise. Under 800 chars.',
+            },
+          },
+          required: ['sessionId', 'text'],
+        },
+        async (input, ctx) => {
+          const sessionId = String(input.sessionId);
+          const text = String(input.text);
+          const result = await this.meetingBot.speak({
+            sessionId,
+            text,
+            actorUserId: ctx.actorUserId,
+          });
+          return {
+            output: result,
+            summary: `Queued speech for the bot to say in the meeting.`,
+          };
+        },
+        { actionLevel: 3, sensitive: true },
+      ),
+
+      tool(
         'meetings.summary',
         'Fetch the summary + transcript of a past meeting-bot session. Use this to answer "what did we decide in the standup?" — the Coworker can quote back the captured captions.',
         {

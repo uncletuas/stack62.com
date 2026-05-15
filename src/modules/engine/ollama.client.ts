@@ -45,13 +45,34 @@ export class OllamaClient {
   constructor(private readonly configService: ConfigService) {}
 
   baseUrl(): string {
+    // Self-hosted endpoint (vLLM / TGI / Together / etc) wins over a
+    // local Ollama box. Both are fine — the API shape is selected via
+    // mode() below.
     return (
-      this.configService.get<string>('OLLAMA_BASE_URL') || DEFAULT_BASE_URL
+      this.configService.get<string>('SELF_HOSTED_LLM_URL') ||
+      this.configService.get<string>('OLLAMA_BASE_URL') ||
+      DEFAULT_BASE_URL
     );
   }
 
   model(): string {
-    return this.configService.get<string>('OLLAMA_MODEL') || DEFAULT_MODEL;
+    return (
+      this.configService.get<string>('SELF_HOSTED_LLM_MODEL') ||
+      this.configService.get<string>('OLLAMA_MODEL') ||
+      DEFAULT_MODEL
+    );
+  }
+
+  /** "openai" → vLLM / TGI / OpenRouter-compatible. "ollama" → native Ollama. */
+  private mode(): 'openai' | 'ollama' {
+    if (this.configService.get<string>('SELF_HOSTED_LLM_URL')) return 'openai';
+    return 'ollama';
+  }
+
+  private apiKey(): string | undefined {
+    return (
+      this.configService.get<string>('SELF_HOSTED_LLM_API_KEY') || undefined
+    );
   }
 
   /**
@@ -64,9 +85,14 @@ export class OllamaClient {
     this.healthCheckedAt = now;
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 1500);
+    const probePath = this.mode() === 'openai' ? '/v1/models' : '/api/tags';
+    const headers: Record<string, string> = {};
+    const key = this.apiKey();
+    if (key) headers.Authorization = `Bearer ${key}`;
     try {
-      const res = await fetch(`${this.baseUrl()}/api/tags`, {
+      const res = await fetch(`${this.baseUrl()}${probePath}`, {
         signal: ctrl.signal,
+        headers,
       });
       this.healthy = res.ok;
     } catch {
@@ -78,19 +104,50 @@ export class OllamaClient {
   }
 
   async complete(messages: ChatMessage[], opts?: { json?: boolean }): Promise<string> {
-    const body: Record<string, unknown> = {
-      model: this.model(),
-      messages,
-      stream: false,
-    };
-    if (opts?.json) body.format = 'json';
-
+    const mode = this.mode();
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), DEFAULT_TIMEOUT_MS);
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const key = this.apiKey();
+    if (key) headers.Authorization = `Bearer ${key}`;
+
     try {
+      if (mode === 'openai') {
+        const body: Record<string, unknown> = {
+          model: this.model(),
+          messages,
+          stream: false,
+        };
+        if (opts?.json) {
+          body.response_format = { type: 'json_object' };
+        }
+        const res = await fetch(`${this.baseUrl()}/v1/chat/completions`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+          signal: ctrl.signal,
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          throw new Error(
+            `Self-hosted LLM ${res.status}: ${text || res.statusText}`,
+          );
+        }
+        const data = (await res.json()) as {
+          choices?: Array<{ message?: { content?: string } }>;
+        };
+        return data.choices?.[0]?.message?.content ?? '';
+      }
+
+      const body: Record<string, unknown> = {
+        model: this.model(),
+        messages,
+        stream: false,
+      };
+      if (opts?.json) body.format = 'json';
       const res = await fetch(`${this.baseUrl()}/api/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(body),
         signal: ctrl.signal,
       });
