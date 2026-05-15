@@ -25,11 +25,13 @@ import type { LucideIcon } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { useAppContext } from "../../context/app-context";
+import { appDialog } from "../../components/app-dialog";
 import {
   auditExportCsvUrl,
   createIntegrationConnection,
   fetchIntegrationConnections,
   fetchIntegrationMarketplace,
+  fetchIntegrationProvidersStatus,
   fetchWhatsAppPhoneNumbers,
   googleOAuthUrl,
   metaOAuthUrl,
@@ -38,6 +40,7 @@ import {
   verifyIntegrationConnection,
   type IntegrationConnection,
   type IntegrationProvider,
+  type IntegrationProviderStatus,
   type WhatsAppPhoneNumberOption,
 } from "../../lib/resources";
 import { useWorkspace, type EditorTab } from "../workspace-context";
@@ -107,21 +110,26 @@ export function Marketplace() {
   const { appendRunLog } = useWorkspace();
   const [providers, setProviders] = useState<IntegrationProvider[]>([]);
   const [connections, setConnections] = useState<IntegrationConnection[]>([]);
+  const [status, setStatus] = useState<IntegrationProviderStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("");
   const [active, setActive] = useState<IntegrationProvider | null>(null);
 
   const reload = async () => {
     if (!currentOrganization) return;
-    const [p, c] = await Promise.all([
+    const [p, c, s] = await Promise.all([
       fetchIntegrationMarketplace().catch(() => []),
       fetchIntegrationConnections({
         organizationId: currentOrganization.id,
         workspaceId: currentWorkspace?.id,
       }).catch(() => []),
+      fetchIntegrationProvidersStatus().catch(
+        () => [] as IntegrationProviderStatus[],
+      ),
     ]);
     setProviders(p);
     setConnections(c);
+    setStatus(s);
     setLoading(false);
   };
 
@@ -145,6 +153,11 @@ export function Marketplace() {
     () => new Set(connections.map((c) => c.providerKey)),
     [connections],
   );
+  const statusByKey = useMemo(() => {
+    const m = new Map<string, IntegrationProviderStatus>();
+    status.forEach((s) => m.set(s.providerKey, s));
+    return m;
+  }, [status]);
 
   const grouped = useMemo(() => {
     const filtered = providers.filter((p) => {
@@ -200,10 +213,23 @@ export function Marketplace() {
               {list.map((p) => {
                 const Icon = iconFor(p.key);
                 const connected = connectedKeys.has(p.key);
+                const providerStatus = statusByKey.get(p.key);
+                const oauthEntry = OAUTH_PROVIDERS[p.key];
+                // A provider is "unconfigured" only when (a) it uses
+                // OAuth on this Stack62 deployment and (b) the status
+                // endpoint says its env vars are missing. Non-OAuth
+                // providers (SMTP, webhooks, etc) connect via a form
+                // so the operator's env doesn't matter.
+                const unconfigured =
+                  !!oauthEntry &&
+                  providerStatus !== undefined &&
+                  !providerStatus.configured;
                 return (
                   <div
                     key={p.key}
-                    className="flex flex-col rounded-xl border border-app bg-app-elevated/50 p-4"
+                    className={`flex flex-col rounded-xl border border-app bg-app-elevated/50 p-4 ${
+                      unconfigured ? "opacity-70" : ""
+                    }`}
                   >
                     <div className="flex items-start gap-3">
                       <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-violet-500/15 text-violet-300">
@@ -217,11 +243,18 @@ export function Marketplace() {
                           {p.category}
                         </p>
                       </div>
-                      {connected && (
+                      {connected ? (
                         <span className="flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-300">
                           <Check className="h-3 w-3" /> connected
                         </span>
-                      )}
+                      ) : unconfigured ? (
+                        <span
+                          className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] text-amber-300"
+                          title={`Operator hasn't set: ${providerStatus?.missing.join(", ")}`}
+                        >
+                          not configured
+                        </span>
+                      ) : null}
                     </div>
                     <p className="mt-2 line-clamp-2 text-xs text-app-subtle">
                       {p.description}
@@ -248,10 +281,24 @@ export function Marketplace() {
                         size="sm"
                         variant={connected ? "outline" : "default"}
                         className="gap-1"
+                        disabled={unconfigured && !connected}
+                        title={
+                          unconfigured
+                            ? `${p.name} sign-in is not configured for this Stack62 app. Operator needs to set ${providerStatus?.missing.join(", ")}.`
+                            : undefined
+                        }
                         onClick={async () => {
                           const oauth = OAUTH_PROVIDERS[p.key];
                           if (!oauth) {
                             setActive(p);
+                            return;
+                          }
+                          if (unconfigured && providerStatus) {
+                            await appDialog.alert({
+                              title: `${p.name} is not configured`,
+                              description: `Your Stack62 operator hasn't set up this provider yet. They need to set these env vars on the API service: ${providerStatus.missing.join(", ")}. Then redeploy and try again.`,
+                              tone: "info",
+                            });
                             return;
                           }
                           if (!currentOrganization) return;

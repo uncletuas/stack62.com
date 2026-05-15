@@ -46,6 +46,18 @@ export class IntegrationsController {
     return this.integrationsService.listMarketplace();
   }
 
+  /**
+   * Per-provider config status — whether the OAuth env vars are set.
+   * The UI dims providers with `configured: false` so the user knows
+   * before clicking "Connect" that the operator hasn't set up that
+   * integration on this Stack62 deployment.
+   */
+  @Public()
+  @Get('providers/status')
+  providersStatus() {
+    return this.integrationsService.getProviderConfigStatus();
+  }
+
   @RequireAccess({
     resource: 'organization',
     action: 'update',

@@ -85,6 +85,48 @@ export class IntegrationsService {
     return USER_OAUTH_INTEGRATIONS;
   }
 
+  /**
+   * Report which OAuth providers have credentials configured on this
+   * deployment. The UI uses this to grey out providers that would
+   * 400 on click, so the user doesn't have to find out by failing.
+   *
+   * "configured" means: the minimum env vars needed to *start* the
+   * OAuth flow are set. Some providers also need a secret to *finish*
+   * the flow; we still report configured=true because the click-flow
+   * gets us to the redirect — finish errors surface separately.
+   */
+  getProviderConfigStatus(): Array<{
+    providerKey: string;
+    configured: boolean;
+    missing: string[];
+  }> {
+    const cs = this.configService;
+    const has = (key: string) => !!cs.get<string>(key);
+    const report = (
+      providerKey: string,
+      requiredAny: string[][],
+    ): { providerKey: string; configured: boolean; missing: string[] } => {
+      const missing = requiredAny
+        .filter((alts) => !alts.some((k) => has(k)))
+        .map((alts) => alts.join(' or '));
+      return { providerKey, configured: missing.length === 0, missing };
+    };
+    return [
+      report('google-workspace', [
+        ['GOOGLE_CLIENT_ID', 'GOOGLE_WORKSPACE_CLIENT_ID'],
+        ['GOOGLE_REDIRECT_URI'],
+      ]),
+      report('whatsapp-cloud', [
+        ['META_APP_ID'],
+        ['META_REDIRECT_URI'],
+      ]),
+      report('quickbooks', [
+        ['QUICKBOOKS_CLIENT_ID', 'INTUIT_CLIENT_ID'],
+        ['QUICKBOOKS_REDIRECT_URI', 'INTUIT_REDIRECT_URI'],
+      ]),
+    ];
+  }
+
   async createConnection(
     payload: CreateIntegrationConnectionDto,
     actorUserId: string,

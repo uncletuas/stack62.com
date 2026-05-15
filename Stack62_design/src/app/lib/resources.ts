@@ -1791,6 +1791,18 @@ export function fetchIntegrationMarketplace() {
   return apiRequest<IntegrationProvider[]>('/integrations/marketplace');
 }
 
+export interface IntegrationProviderStatus {
+  providerKey: string;
+  configured: boolean;
+  missing: string[];
+}
+
+export function fetchIntegrationProvidersStatus() {
+  return apiRequest<IntegrationProviderStatus[]>(
+    '/integrations/providers/status',
+  );
+}
+
 export function fetchIntegrationConnections(query: {
   organizationId?: string;
   workspaceId?: string;
