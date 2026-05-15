@@ -56,6 +56,7 @@ import { useWorkspace, type EditorTab } from "./workspace-context";
 import { roomsApi, type RoomDto } from "../lib/dms-resources";
 import { CoworkerFace } from "./CoworkerFace";
 import { CoworkerCallView } from "./CoworkerCallView";
+import { RealtimeVoiceClient } from "../lib/realtime-voice";
 
 const ROLE_BADGE: Record<CoworkerRole, string> = {
   admin: "border-rose-500/40 bg-rose-500/10 text-rose-200",
@@ -337,9 +338,29 @@ export function CoworkerRail() {
     async () => undefined,
   );
 
+  /**
+   * OpenAI Realtime WebRTC client. When available it replaces the
+   * Web Speech listen/send/speak loop entirely — audio in + LLM +
+   * audio out all go through a single WebRTC peer connection with
+   * ~200ms latency (vs ~2s for the Web Speech round trip).
+   *
+   * We try Realtime first; if the backend hasn't been configured
+   * with OPENAI_API_KEY, or the browser refuses the mic, or any other
+   * step fails, we silently fall back to the Web Speech path.
+   */
+  const realtimeRef = useRef<RealtimeVoiceClient | null>(null);
+  const [realtimeActive, setRealtimeActive] = useState(false);
+
   const stopVoiceConversation = useCallback(() => {
     setVoiceConversation(false);
     voiceConversationRef.current = false;
+    // Tear down realtime if it was the active path.
+    if (realtimeRef.current) {
+      realtimeRef.current.close();
+      realtimeRef.current = null;
+    }
+    setRealtimeActive(false);
+    // Tear down the Web Speech path too.
     try {
       recognitionRef.current?.stop();
     } catch {
@@ -349,21 +370,56 @@ export function CoworkerRail() {
     stopSpeaking();
   }, []);
 
-  const startVoiceConversation = useCallback(() => {
+  const startVoiceConversation = useCallback(async () => {
+    // Always flip the UI to voice mode immediately so the user gets
+    // visual feedback while we negotiate the connection.
+    setVoiceConversation(true);
+    voiceConversationRef.current = true;
+
+    // Try OpenAI Realtime first.
+    try {
+      const client = new RealtimeVoiceClient();
+      await client.connect({
+        onAssistantSpeakingStart: () => setSpeaking(true),
+        onAssistantSpeakingEnd: () => setSpeaking(false),
+        onAssistantTranscriptDelta: () => {
+          // Each transcript chunk → one mouth pulse so the face
+          // punches along with the speech rhythm.
+          setMouthPulse((n) => n + 1);
+        },
+        onError: (err) => {
+          // eslint-disable-next-line no-console
+          console.warn("Realtime voice error", err);
+        },
+        onDisconnected: () => {
+          setRealtimeActive(false);
+          setSpeaking(false);
+        },
+      });
+      realtimeRef.current = client;
+      setRealtimeActive(true);
+      return;
+    } catch (err) {
+      // Realtime unavailable — fall through to Web Speech path.
+      // eslint-disable-next-line no-console
+      console.info(
+        "Realtime voice unavailable, falling back to Web Speech:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+
     const Recognition =
       (window as SpeechWindow).SpeechRecognition ??
       (window as SpeechWindow).webkitSpeechRecognition ??
       null;
     if (!Recognition) {
-      // Browser doesn't support speech recognition — fall back to a
-      // friendly nudge instead of silently failing.
+      // Neither Realtime nor Web Speech — admit defeat.
+      setVoiceConversation(false);
+      voiceConversationRef.current = false;
       window.alert(
-        "Voice mode needs the Web Speech API, which isn't available in this browser. Try Chrome, Edge, or Brave.",
+        "Voice mode needs either a backend OpenAI key or the Web Speech API. This browser doesn't expose either.",
       );
-      return;
     }
-    setVoiceConversation(true);
-    voiceConversationRef.current = true;
   }, []);
 
   /**
@@ -375,6 +431,10 @@ export function CoworkerRail() {
    */
   useEffect(() => {
     if (!voiceConversation) return;
+    // OpenAI Realtime owns audio when active — don't run the fallback
+    // Web Speech listen loop concurrently or both would compete for
+    // the mic.
+    if (realtimeActive) return;
     let cancelled = false;
     const Recognition =
       (window as SpeechWindow).SpeechRecognition ??
@@ -1211,7 +1271,7 @@ export function CoworkerRail() {
           onClose={() => setOpen(false)}
           speaking={speaking}
           voiceConversation={voiceConversation}
-          onStartVoiceConversation={() => startVoiceConversation()}
+          onStartVoiceConversation={() => void startVoiceConversation()}
           onStopVoiceConversation={() => stopVoiceConversation()}
           liveMode={liveMode}
           onToggleLive={() => toggleLiveMode()}

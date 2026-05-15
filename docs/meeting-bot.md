@@ -1,11 +1,18 @@
 # Meeting Bot — architecture & rollout plan
 
-The Coworker joins a Zoom / Google Meet / Microsoft Teams link as
-"Stack62 Coworker", transcribes the audio, takes notes, and posts a
-summary to the user's Coworker room when the call ends.
+The Coworker joins a **Google Meet** link as "Stack62 Coworker",
+transcribes the audio, takes notes, and posts a summary to the user's
+Coworker room when the call ends. Optional follow-on: speak responses
+back into the meeting when the Coworker has something to contribute.
 
 This isn't shipped yet — it's a significant infra change. This doc
 captures the design so we can ship it cleanly when the user is ready.
+
+**Scope decision (current)**: Google Meet only. Zoom and Teams are
+deferred — Zoom needs the heavyweight Meeting SDK + a separate
+developer account, Teams adds another protocol surface. Meet via
+Playwright is the cheapest path to "Coworker attends meetings" and
+covers the majority of Stack62's expected users on its own.
 
 ## High-level design
 
@@ -57,8 +64,8 @@ captures the design so we can ship it cleanly when the user is ready.
     audio-capture extension support).
   - Navigates to the meeting URL.
   - Joins as a guest with name "Stack62 Coworker" — provider-specific
-    join flows handled in `provider/zoom.ts`, `provider/google-meet.ts`,
-    `provider/teams.ts`.
+    join flow lives in `provider/google-meet.ts`. Zoom / Teams are
+    not in scope for v1.
   - Captures the call audio via the WebRTC MediaStream Capture API or
     a Chromium extension (`chrome.tabCapture` for tab audio).
   - Pipes audio chunks (16 kHz mono) into Whisper via the OpenAI
@@ -85,7 +92,7 @@ captures the design so we can ship it cleanly when the user is ready.
 - `meetings.attend` — high-level wrapper: takes a meeting URL,
   optionally a Coworker room id to post the summary to, schedules
   the session, returns the session id. The Coworker calls this when
-  the user says "join my 3 PM Zoom and take notes".
+  the user says "join my 3 PM Meet and take notes".
 - `meetings.summary` — fetch the latest finished session's summary.
 
 ### 4. Summariser
@@ -105,15 +112,21 @@ captures the design so we can ship it cleanly when the user is ready.
 | New Render service | A worker with Docker, ~512 MB RAM, ~$7/mo |
 | Container image | `mcr.microsoft.com/playwright:focal` (~600 MB) + our code |
 | Env vars | `OPENAI_API_KEY` for Whisper; `MEETING_BOT_DISPLAY_NAME` (default "Stack62 Coworker") |
-| Meet/Zoom/Teams behavior | Each platform has guest-join quirks; the v1 ships Google Meet first (cleanest API), then Zoom (more friction), then Teams |
+| Google Meet behavior | Guest-join works without an SDK; Playwright drives the join, mic-muted, audio-only listen. Corporate-firewalled meets that block guests will fail — we surface the join error to the user instead of pretending it worked. |
 | Risk | TOS — each platform's anti-bot detection. Display name and audio-only join keeps it well clear of automated-detection heuristics, but a corp-firewalled Meet may block the join. We handle the failure gracefully and notify the user. |
 
-## Risk-mitigated rollout
+## Rollout
 
-1. **MVP**: Google Meet only. Audio-only. Transcript + summary.
-2. **+1 week**: Zoom. Same flow with provider-specific join.
-3. **+2 weeks**: Teams + speaker diarization (separate speaker tracks).
-4. **+3 weeks**: Action-item extraction → auto-create tasks for assignees.
+1. **MVP**: Google Meet only. Audio-only listen. Streaming STT →
+   live transcript stored in `meeting_transcripts`. Claude
+   end-of-call summary posted to the user's Coworker room with the
+   action items pulled out as Stack62 tasks.
+2. **+1 week**: Speaker diarization (Deepgram diarization or pyannote)
+   so the transcript labels who said what.
+3. **+1 week**: Coworker speaks back into the meeting — TTS routed
+   to the headless Chrome's virtual mic so the bot can contribute
+   when the user @-mentions "Stack62" in the meeting chat or when
+   the engine decides it has something useful to add.
 
-Estimated effort end-to-end: **5–8 days of focused work**, dominated
-by Playwright join flows and audio capture plumbing.
+Estimated effort end-to-end: **4–6 days of focused work** for the
+MVP, dominated by Playwright Meet-join flow + audio capture plumbing.
