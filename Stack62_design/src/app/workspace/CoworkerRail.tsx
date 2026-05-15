@@ -268,6 +268,18 @@ export function CoworkerRail() {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<PanelTab>("coworker");
   const [position, setPosition] = useState<Position>(() => loadPosition());
+
+  // Global listener: anything that wants to summon the Coworker can
+  // dispatch `stack62:open-coworker`. Used by the Welcome quick
+  // action and the command palette.
+  useEffect(() => {
+    const onSummon = () => {
+      setOpen(true);
+      setTab("coworker");
+    };
+    window.addEventListener("stack62:open-coworker", onSummon);
+    return () => window.removeEventListener("stack62:open-coworker", onSummon);
+  }, []);
   /** True while the speech synthesizer is actively vocalising. Used to
    * animate the Coworker face (mouth moves) so the bot looks alive. */
   const [speaking, setSpeaking] = useState(false);

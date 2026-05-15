@@ -47,9 +47,6 @@ const RoomEditor = lazy(() =>
 const ScheduleEditor = lazy(() =>
   import("./ScheduleEditor").then((m) => ({ default: m.ScheduleEditor })),
 );
-const SettingsEditor = lazy(() =>
-  import("./SettingsEditor").then((m) => ({ default: m.SettingsEditor })),
-);
 const ShareEditor = lazy(() =>
   import("./ShareEditor").then((m) => ({ default: m.ShareEditor })),
 );
@@ -154,7 +151,14 @@ function RenderEditor() {
     case "streaming-doc":
       return <StreamingDocEditor />;
     case "settings":
-      return <SettingsEditor key={activeTab.id} tab={activeTab} />;
+      // Settings is a modal dialog now (SettingsDialog mounted at the
+      // Workspace root). Anything that still navigates here drops to
+      // the welcome surface and we open the dialog via the global
+      // event so the user lands somewhere sane.
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("stack62:open-settings"));
+      }
+      return <WelcomeEditor />;
     default:
       return <WelcomeEditor />;
   }

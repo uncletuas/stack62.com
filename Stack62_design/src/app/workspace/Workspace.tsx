@@ -3,6 +3,7 @@ import { ActivityBar } from "./ActivityBar";
 import { CommandPalette } from "./CommandPalette";
 import { CoworkerRail } from "./CoworkerRail";
 import { EditorSurface } from "./editors";
+import { SettingsDialog } from "./editors/SettingsEditor";
 import { EmailComposer } from "./EmailComposer";
 import { RunPanel } from "./RunPanel";
 import { Sidebar } from "./Sidebar";
@@ -39,7 +40,10 @@ function useDocumentFocusMode() {
         (kind === "file" ||
           kind === "document" ||
           kind === "report" ||
-          kind === "preview")
+          kind === "preview" ||
+          // Files-explorer has its own filter chips + grid; the
+          // sidebar's "by-type" list duplicates them.
+          kind === "files-explorer")
       ) {
         setSidebarOpen(false);
       }
@@ -75,6 +79,7 @@ function Inner() {
         initialSubject={composer.initial.subject}
         initialBody={composer.initial.body}
       />
+      <SettingsDialog />
     </div>
   );
 }

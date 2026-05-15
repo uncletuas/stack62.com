@@ -18,6 +18,7 @@ import {
   LogOut,
   Mail,
   PanelLeft,
+  Settings as SettingsIcon,
   Plus,
   Printer,
   Search,
@@ -644,6 +645,20 @@ function ProfileMenu({
               />
             </button>
           </div>
+          {/* Settings opens the modal dialog directly. */}
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              window.dispatchEvent(
+                new CustomEvent("stack62:open-settings"),
+              );
+            }}
+            className="flex w-full items-center gap-2 border-b border-app px-4 py-2.5 text-left text-sm text-app hover:bg-app-hover"
+          >
+            <SettingsIcon className="h-3.5 w-3.5 text-app-muted" />
+            Settings
+          </button>
           {/* Compacted menu groups */}
           <ProfileSubmenu label="File" items={fileItems} />
           <ProfileSubmenu label="Export" items={exportItems} />

@@ -28,17 +28,25 @@ export function ActivityBar() {
     useWorkspace();
 
   const click = (key: ActivityKey) => {
+    // Files opens its grid editor directly — no sidebar duplication
+    // of the same filter chips. Force the sidebar closed on entry so
+    // the grid gets the full canvas. Other activities keep the
+    // sidebar toggle.
+    if (key === "files") {
+      setActivity(key);
+      setSidebarOpen(false);
+      navigate({ kind: "files-explorer", title: "Files" });
+      return;
+    }
     if (activity === key) setSidebarOpen(!sidebarOpen);
     else {
       setActivity(key);
       setSidebarOpen(true);
     }
-    // Activities with a dedicated full-pane editor open it as a tab.
-    // (Coworker stays in the sidebar / right rail; no editor route.)
-    if (key === "files") {
-      navigate({ kind: "files-explorer", title: "Files" });
-    }
   };
+
+  const openSettings = () =>
+    window.dispatchEvent(new CustomEvent("stack62:open-settings"));
 
   return (
     <aside
@@ -70,13 +78,8 @@ export function ActivityBar() {
       <button
         title="Settings"
         aria-label="Settings"
-        aria-current={activity === "settings" ? "page" : undefined}
-        onClick={() => click("settings")}
-        className={`mt-auto flex h-11 w-11 flex-col items-center justify-center gap-0.5 rounded-md text-[10px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:h-12 sm:w-12 ${
-          activity === "settings"
-            ? "bg-accent-soft text-accent"
-            : "text-app-subtle hover:bg-app-hover hover:text-app"
-        }`}
+        onClick={openSettings}
+        className="mt-auto flex h-11 w-11 flex-col items-center justify-center gap-0.5 rounded-md text-[10px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent text-app-subtle hover:bg-app-hover hover:text-app sm:h-12 sm:w-12"
       >
         <Settings className="h-4 w-4" aria-hidden />
         <span className="hidden leading-none sm:inline">Settings</span>

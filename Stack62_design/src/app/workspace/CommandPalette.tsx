@@ -134,7 +134,10 @@ export function CommandPalette() {
         label: "Settings",
         group: "Go",
         icon: Settings,
-        run: open("settings", "Settings"),
+        run: () => {
+          window.dispatchEvent(new CustomEvent("stack62:open-settings"));
+          setPaletteOpen(false);
+        },
       },
     ];
 

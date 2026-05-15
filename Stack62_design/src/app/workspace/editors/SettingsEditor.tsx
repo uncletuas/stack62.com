@@ -20,7 +20,7 @@ import {
   type IntegrationConnection,
   type WhatsAppPhoneNumberOption,
 } from "../../lib/resources";
-import { useWorkspace, type EditorTab } from "../workspace-context";
+import { useWorkspace } from "../workspace-context";
 
 /**
  * Settings is one editor tab now, with an internal sidenav. Sections
@@ -78,72 +78,129 @@ function normalizeSection(raw: string | undefined): SettingsSection {
   }
 }
 
-export function SettingsEditor({ tab }: { tab: EditorTab }) {
-  const [section, setSection] = useState<SettingsSection>(() =>
-    normalizeSection(tab.refId),
-  );
+/**
+ * Settings — modal dialog (Linear / Notion pattern).
+ *
+ * Opens via a global event so any component (top-bar profile menu,
+ * Coworker tool, command palette) can summon it. Closes on Escape
+ * or outside-click. Categories live in the left rail of the dialog
+ * itself — no more duplicate sidebar in the workspace chrome.
+ *
+ * Trigger:
+ *   window.dispatchEvent(new CustomEvent('stack62:open-settings', {
+ *     detail: { section?: SettingsSection }
+ *   }))
+ */
+export function SettingsDialog() {
+  const [open, setOpen] = useState(false);
+  const [section, setSection] = useState<SettingsSection>("account");
 
-  // Stay in sync with outside navigation — e.g. clicking
-  // Settings · Billing in the Sidebar reuses our open Settings tab
-  // and updates `tab.refId`. Re-sync so the right section renders.
+  // Subscribe to the global open event.
   useEffect(() => {
-    setSection(normalizeSection(tab.refId));
-  }, [tab.refId]);
+    const handler = (event: Event) => {
+      const detail =
+        (event as CustomEvent<{ section?: string }>).detail ?? {};
+      if (detail.section) {
+        setSection(normalizeSection(detail.section));
+      }
+      setOpen(true);
+    };
+    window.addEventListener("stack62:open-settings", handler);
+    return () => window.removeEventListener("stack62:open-settings", handler);
+  }, []);
+
+  // Close on Escape.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  if (!open) return null;
 
   return (
-    <div className="flex h-full overflow-hidden bg-app text-app">
-      {/* Left sidenav */}
-      <aside className="flex w-56 shrink-0 flex-col border-r border-app bg-app-surface">
-        <div className="flex items-center gap-2 border-b border-app px-3 py-3">
-          <ShieldCheck className="h-4 w-4 text-accent" />
-          <h2 className="text-sm font-semibold">Settings</h2>
-        </div>
-        <nav className="flex-1 overflow-auto p-2">
-          {SECTIONS.map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setSection(key)}
-              className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition ${
-                section === key
-                  ? "bg-accent text-accent-fg font-medium"
-                  : "text-app-muted hover:bg-app-hover hover:text-app"
-              }`}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {label}
-            </button>
-          ))}
-        </nav>
-      </aside>
+    <div
+      className="fixed inset-0 z-[80] grid place-items-center bg-black/40 p-4 backdrop-blur-sm"
+      onClick={() => setOpen(false)}
+    >
+      <div
+        className="flex h-[85vh] w-full max-w-5xl overflow-hidden rounded-xl border border-app bg-app-elevated shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-dialog-title"
+      >
+        {/* Left sidenav */}
+        <aside className="flex w-56 shrink-0 flex-col border-r border-app bg-app-surface">
+          <div className="flex items-center gap-2 border-b border-app px-4 py-3">
+            <ShieldCheck className="h-4 w-4 text-accent" />
+            <h2 id="settings-dialog-title" className="text-sm font-semibold">
+              Settings
+            </h2>
+          </div>
+          <nav className="flex-1 overflow-auto p-2">
+            {SECTIONS.map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setSection(key)}
+                className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition ${
+                  section === key
+                    ? "bg-accent text-accent-fg font-medium"
+                    : "text-app-muted hover:bg-app-hover hover:text-app"
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+              </button>
+            ))}
+          </nav>
+        </aside>
 
-      {/* Section content */}
-      <div className="flex-1 overflow-auto">
-        <div className="mx-auto max-w-3xl p-6">
-          <header className="mb-4 border-b border-app pb-3">
-            <h1 className="text-lg font-semibold">
-              {SECTIONS.find((s) => s.key === section)?.label}
-            </h1>
-            <p className="text-xs text-app-faint">
-              {SECTIONS.find((s) => s.key === section)?.description}
-            </p>
+        {/* Content */}
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <header className="flex items-center justify-between border-b border-app px-6 py-3">
+            <div>
+              <h1 className="text-lg font-semibold">
+                {SECTIONS.find((s) => s.key === section)?.label}
+              </h1>
+              <p className="text-xs text-app-faint">
+                {SECTIONS.find((s) => s.key === section)?.description}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="rounded-md p-1 text-app-muted hover:bg-app-hover hover:text-app"
+              aria-label="Close settings"
+              title="Close (Esc)"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </header>
-          {section === "account" && (
-            <div className="space-y-6">
-              <ProfileSection />
-              <AppearanceSection />
+          <div className="flex-1 overflow-auto">
+            <div className="mx-auto max-w-3xl p-6">
+              {section === "account" && (
+                <div className="space-y-6">
+                  <ProfileSection />
+                  <AppearanceSection />
+                </div>
+              )}
+              {section === "organization" && (
+                <div className="space-y-6">
+                  <OrganizationSection />
+                  <WorkspaceSection />
+                </div>
+              )}
+              {section === "coworker" && <CoworkerSection />}
+              {section === "integrations" && <IntegrationsSection />}
+              {section === "security" && <SecuritySection />}
+              {section === "billing" && <BillingSection />}
             </div>
-          )}
-          {section === "organization" && (
-            <div className="space-y-6">
-              <OrganizationSection />
-              <WorkspaceSection />
-            </div>
-          )}
-          {section === "coworker" && <CoworkerSection />}
-          {section === "integrations" && <IntegrationsSection />}
-          {section === "security" && <SecuritySection />}
-          {section === "billing" && <BillingSection />}
+          </div>
         </div>
       </div>
     </div>

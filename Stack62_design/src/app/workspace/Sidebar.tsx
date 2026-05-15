@@ -123,8 +123,6 @@ export function Sidebar() {
           <ToolsPanel query={query} />
         ) : activity === "teams" ? (
           <TeamsPanel />
-        ) : activity === "settings" ? (
-          <SettingsPanel />
         ) : null}
       </div>
     </div>
@@ -747,35 +745,6 @@ function TeamsPanel() {
   );
 }
 
-function SettingsPanel() {
-  const { navigate } = useWorkspace();
-  // Aligned with the new consolidated SettingsEditor: clicking any of
-  // these reuses the same Settings tab and jumps to the section.
-  // Notifications moved to the top-bar bell — no longer a settings page.
-  const sections = [
-    { id: "account", label: "Account" },
-    { id: "organization", label: "Organization" },
-    { id: "coworker", label: "Coworker" },
-    { id: "integrations", label: "Integrations" },
-    { id: "security", label: "Security" },
-    { id: "billing", label: "Billing" },
-  ];
-  return (
-    <div className="py-1">
-      {sections.map((section) => (
-        <Row
-          key={section.id}
-          icon={Settings}
-          label={section.label}
-          onClick={() =>
-            navigate({
-              kind: "settings",
-              title: "Settings",
-              refId: section.id,
-            })
-          }
-        />
-      ))}
-    </div>
-  );
-}
+// SettingsPanel was a sidebar list of Settings sections that
+// duplicated the dialog's own sidenav. Replaced by the SettingsDialog
+// modal — trigger via window.dispatchEvent("stack62:open-settings").
