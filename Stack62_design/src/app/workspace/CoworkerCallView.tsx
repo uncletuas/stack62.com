@@ -37,6 +37,7 @@ export function CoworkerCallView({
   onToggleMic,
   onEndCall,
   mouthPulse = 0,
+  visionLive = false,
 }: {
   stream: MediaStream | null;
   speaking: boolean;
@@ -49,6 +50,10 @@ export function CoworkerCallView({
   onToggleMic: () => void;
   onEndCall: () => void;
   mouthPulse?: number;
+  /** True when realtime is shipping live frames to OpenAI — the
+   *  Coworker can actually see what's on camera. Drives a small
+   *  "seeing" pill in the call HUD so the user knows it's working. */
+  visionLive?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -89,6 +94,15 @@ export function CoworkerCallView({
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-rose-400 animate-pulse" />
             LIVE
           </span>
+          {visionLive && (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2 py-0.5 text-emerald-300"
+              title="Coworker is receiving live camera frames"
+            >
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              SEEING
+            </span>
+          )}
           <span className="text-white/70">
             {mm}:{ss}
           </span>

@@ -350,6 +350,9 @@ export function CoworkerRail() {
    */
   const realtimeRef = useRef<RealtimeVoiceClient | null>(null);
   const [realtimeActive, setRealtimeActive] = useState(false);
+  /** True while the realtime client is actively pushing live frames
+   *  to OpenAI — drives the green "SEEING" pill on the call view. */
+  const [visionLive, setVisionLive] = useState(false);
 
   const stopVoiceConversation = useCallback(() => {
     setVoiceConversation(false);
@@ -526,6 +529,9 @@ export function CoworkerRail() {
   const [liveStarting, setLiveStarting] = useState(false);
   const [liveError, setLiveError] = useState<string | null>(null);
   const liveTimerRef = useRef<number | null>(null);
+  /** Mirror of liveStream as a ref so the vision-attach retry loop
+   *  can observe "user toggled off mid-retry" without re-rendering. */
+  const liveStreamRef = useRef<MediaStream | null>(null);
 
   const stopLive = useCallback(() => {
     setLiveMode(false);
@@ -537,6 +543,11 @@ export function CoworkerRail() {
       window.clearInterval(liveTimerRef.current);
       liveTimerRef.current = null;
     }
+    // Detach the realtime vision stream too, so frames stop flowing
+    // when the user ends the call.
+    realtimeRef.current?.detachVideoStream();
+    setVisionLive(false);
+    liveStreamRef.current = null;
     setLiveStream((cur) => {
       cur?.getTracks().forEach((t) => t.stop());
       return null;
@@ -567,55 +578,71 @@ export function CoworkerRail() {
         audio: false,
       });
       setLiveStream(stream);
+      liveStreamRef.current = stream;
       setLiveStarting(false);
       // Auto-start the voice conversation loop so the user can speak
-      // and hear responses without separately tapping the mic.
+      // and hear responses without separately tapping the mic. This
+      // also lazily spins up the realtime client we then attach video to.
       setVoiceConversation(true);
       voiceConversationRef.current = true;
-      // Capture one snapshot every 6 seconds. The Coworker receives a
-      // text prompt like "[live frame] describe what you see briefly."
-      // The frame itself flows in as an attachment via the existing
-      // upload path so the vision model on the server can read it.
-      liveTimerRef.current = window.setInterval(async () => {
-        try {
-          const track = stream.getVideoTracks()[0];
-          if (!track) return;
-          const imageCapture =
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (window as any).ImageCapture &&
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            new (window as any).ImageCapture(track);
-          let blob: Blob | null = null;
-          if (imageCapture?.takePhoto) {
-            blob = await imageCapture.takePhoto();
-          } else {
-            // Fallback: draw the current video frame onto a canvas.
+
+      // Phase 2: realtime vision. Wait for the realtime client to be
+      // ready (startVoiceConversation runs async), then attach the
+      // video stream — frames flow through the OpenAI Realtime data
+      // channel at 2s intervals and become live conversational
+      // context. The Coworker can actually "see" what's on camera.
+      //
+      // Fall back path: if realtime never connects (no OPENAI_API_KEY
+      // / Web Speech only), the old upload-as-attachment snapshot
+      // pipeline kicks in instead so the server-side vision tools
+      // still see something every 6s.
+      const tryAttachVision = (attempt: number) => {
+        if (!liveStreamRef.current) return; // toggled off
+        const client = realtimeRef.current;
+        if (client && client.isConnected()) {
+          void client
+            .attachVideoStream(stream, { intervalMs: 2000 })
+            .then(() => setVisionLive(true))
+            .catch(() => setVisionLive(false));
+          return;
+        }
+        if (attempt < 10) {
+          // Retry every 500ms for up to 5s while the WebRTC handshake
+          // settles. Then fall through to the snapshot pipeline.
+          window.setTimeout(() => tryAttachVision(attempt + 1), 500);
+          return;
+        }
+        // Fallback: old snapshot-every-6s path so non-realtime users
+        // still get some vision context server-side.
+        liveTimerRef.current = window.setInterval(async () => {
+          try {
             const video = document.createElement("video");
             video.srcObject = stream;
             video.muted = true;
             await video.play();
             const canvas = document.createElement("canvas");
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
+            canvas.width = video.videoWidth || 640;
+            canvas.height = video.videoHeight || 360;
             canvas.getContext("2d")?.drawImage(video, 0, 0);
-            blob = await new Promise<Blob | null>((r) =>
-              canvas.toBlob(r, "image/jpeg", 0.85),
+            const blob = await new Promise<Blob | null>((r) =>
+              canvas.toBlob(r, "image/jpeg", 0.7),
             );
             video.pause();
+            if (!blob) return;
+            const file = new File([blob], `live-${Date.now()}.jpg`, {
+              type: "image/jpeg",
+            });
+            onPickFiles({
+              length: 1,
+              0: file,
+              item: () => file,
+            } as unknown as FileList);
+          } catch {
+            /* one bad frame shouldn't kill the loop */
           }
-          if (!blob) return;
-          const file = new File([blob], `live-${Date.now()}.jpg`, {
-            type: "image/jpeg",
-          });
-          onPickFiles({
-            length: 1,
-            0: file,
-            item: () => file,
-          } as unknown as FileList);
-        } catch {
-          /* one bad frame shouldn't kill the loop */
-        }
-      }, 6000);
+        }, 6000);
+      };
+      tryAttachVision(0);
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : "Unknown camera error.";
@@ -1216,6 +1243,7 @@ export function CoworkerRail() {
           starting={liveStarting}
           error={liveError}
           mouthPulse={mouthPulse}
+          visionLive={visionLive}
           onRetry={() => {
             // Reset error then re-enter the toggle so we re-prompt
             // for camera access.

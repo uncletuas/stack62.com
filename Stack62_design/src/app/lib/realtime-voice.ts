@@ -60,8 +60,25 @@ export class RealtimeVoiceClient {
   private callbacks: RealtimeVoiceCallbacks = {};
   private connected = false;
 
+  // ── Vision (Phase 2) ──────────────────────────────────────────────
+  private videoStream: MediaStream | null = null;
+  private videoSampler: number | null = null;
+  /** Hidden <video> element decoding the attached stream so we can
+   *  draw frames onto a canvas. Reused across captures. */
+  private videoEl: HTMLVideoElement | null = null;
+  /** Single offscreen-ish canvas reused for every frame capture. */
+  private captureCanvas: HTMLCanvasElement | null = null;
+  /** How often we send a frame to OpenAI. Default 2s — enough for the
+   *  model to follow what's in front of the camera without burning
+   *  bandwidth or tokens at higher rates. */
+  private visionIntervalMs = 2000;
+
   isConnected(): boolean {
     return this.connected;
+  }
+
+  isVisionActive(): boolean {
+    return !!this.videoStream;
   }
 
   /**
@@ -180,6 +197,111 @@ export class RealtimeVoiceClient {
   }
 
   /**
+   * Phase-2 vision: attach a video MediaStream and the client will
+   * periodically draw a frame to an offscreen canvas, encode it as
+   * a JPEG data URL, and ship it across the data channel as a
+   * conversation item with an `input_image` content block.
+   *
+   * The model accumulates those frames in conversation state so when
+   * the user speaks next, GPT-4o has the most recent frames in
+   * context (use it to answer "what am I holding?", "describe the
+   * room", etc.). We don't fire `response.create` per frame — frames
+   * are passive context; speech triggers responses.
+   *
+   * Frame rate defaults to one frame every 2s. Resolution is capped
+   * at 512×512 with quality 0.6 to keep payloads under ~30 KB each.
+   */
+  async attachVideoStream(
+    stream: MediaStream,
+    opts: { intervalMs?: number } = {},
+  ): Promise<void> {
+    if (!this.connected) {
+      throw new Error("Cannot attach video before the channel is connected.");
+    }
+    this.detachVideoStream();
+    this.videoStream = stream;
+    this.visionIntervalMs = Math.max(800, opts.intervalMs ?? 2000);
+
+    // Prepare the decoder + canvas once. We hide the <video> off-screen.
+    this.videoEl = document.createElement("video");
+    this.videoEl.srcObject = stream;
+    this.videoEl.muted = true;
+    this.videoEl.playsInline = true;
+    this.videoEl.style.position = "fixed";
+    this.videoEl.style.left = "-9999px";
+    this.videoEl.style.top = "0";
+    this.videoEl.style.width = "1px";
+    this.videoEl.style.height = "1px";
+    document.body.appendChild(this.videoEl);
+    try {
+      await this.videoEl.play();
+    } catch {
+      // Some browsers stall on autoplay without user gesture; the
+      // capture loop still works once metadata loads.
+    }
+
+    this.captureCanvas = document.createElement("canvas");
+
+    const tick = () => {
+      if (!this.videoStream || !this.dc || this.dc.readyState !== "open") return;
+      try {
+        const v = this.videoEl!;
+        const c = this.captureCanvas!;
+        const vw = v.videoWidth || 640;
+        const vh = v.videoHeight || 360;
+        // Scale down: cap longer edge at 512.
+        const max = Math.max(vw, vh);
+        const scale = max > 512 ? 512 / max : 1;
+        c.width = Math.round(vw * scale);
+        c.height = Math.round(vh * scale);
+        const ctx = c.getContext("2d");
+        if (!ctx) return;
+        ctx.drawImage(v, 0, 0, c.width, c.height);
+        const dataUrl = c.toDataURL("image/jpeg", 0.6);
+        // Ship to the model as a user input item. `detail: "low"`
+        // keeps the token cost down (≈85 tokens per frame).
+        this.dc.send(
+          JSON.stringify({
+            type: "conversation.item.create",
+            item: {
+              type: "message",
+              role: "user",
+              content: [
+                {
+                  type: "input_image",
+                  image_url: dataUrl,
+                  detail: "low",
+                },
+              ],
+            },
+          }),
+        );
+      } catch {
+        /* one bad frame shouldn't kill the loop */
+      }
+    };
+    // Fire one frame right away (so the model has context immediately),
+    // then on the interval.
+    tick();
+    this.videoSampler = window.setInterval(tick, this.visionIntervalMs);
+  }
+
+  /** Stop sending frames + tear down the hidden <video>. */
+  detachVideoStream() {
+    if (this.videoSampler) {
+      window.clearInterval(this.videoSampler);
+      this.videoSampler = null;
+    }
+    if (this.videoEl) {
+      this.videoEl.srcObject = null;
+      this.videoEl.remove();
+      this.videoEl = null;
+    }
+    this.captureCanvas = null;
+    this.videoStream = null;
+  }
+
+  /**
    * Send a typed text message into the conversation (e.g. "summarise
    * what we just said"). The model responds via the same audio track.
    */
@@ -211,6 +333,7 @@ export class RealtimeVoiceClient {
   /** Tear down everything cleanly. */
   close() {
     this.connected = false;
+    this.detachVideoStream();
     try {
       this.dc?.close();
     } catch {
