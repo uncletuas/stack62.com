@@ -56,7 +56,7 @@ export class MeetingBotSessionEntity extends AppBaseEntity {
   displayName!: string;
 
   /** Optional user-supplied title; falls back to "Meeting on <date>". */
-  @Column({ length: 200, nullable: true })
+  @Column({ type: 'varchar', length: 200, nullable: true })
   title!: string | null;
 
   @Column({ length: 30, default: 'queued' })
