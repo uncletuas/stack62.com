@@ -3,6 +3,7 @@ import { EngineRuntimeService } from '../engine-runtime.service';
 import { AutomationTools } from './automation.tools';
 import { CalendarTools } from './calendar.tools';
 import { CommunicationsTools } from './communications.tools';
+import { MeetingsTools } from './meetings.tools';
 import { MemoryTools } from './memory.tools';
 import { DataTools } from './data.tools';
 import { DocumentsTools } from './documents.tools';
@@ -43,6 +44,7 @@ export class ToolRegistry {
     private readonly documents: DocumentsTools,
     private readonly communications: CommunicationsTools,
     private readonly memory: MemoryTools,
+    private readonly meetings: MeetingsTools,
     private readonly calendar: CalendarTools,
     private readonly schedules: SchedulesTools,
     private readonly plans: PlanTools,
@@ -61,6 +63,7 @@ export class ToolRegistry {
     this.register(this.documents.build());
     this.register(this.communications.build());
     this.register(this.memory.build());
+    this.register(this.meetings.build());
     this.register(this.calendar.build());
     this.register(this.schedules.build());
     this.register(this.systems.build());

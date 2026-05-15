@@ -1,0 +1,23 @@
+{
+  "name": "stack62-meeting-bot",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Stack62 meeting-bot worker: joins Google Meet via Playwright, scrapes Meet's live captions, posts back to the Stack62 API.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node --enable-source-maps dist/index.js",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "bullmq": "^5.36.0",
+    "ioredis": "^5.4.1",
+    "playwright": "^1.49.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.5.4",
+    "@types/node": "^22.10.2"
+  }
+}

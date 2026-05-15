@@ -13,6 +13,7 @@ import { RoomsModule } from '../rooms/rooms.module';
 import { IntegrationsModule } from '../integrations/integrations.module';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { RecordsModule } from '../records/records.module';
+import { MeetingBotModule } from '../meeting-bot/meeting-bot.module';
 import { SchedulesModule } from '../schedules/schedules.module';
 import { RunnerModule } from '../runner/runner.module';
 import { SemanticSearchModule } from '../semantic-search/semantic-search.module';
@@ -35,6 +36,7 @@ import { DocumentsTools } from './tools/documents.tools';
 import { FileTools } from './tools/file.tools';
 import { IntegrationTools } from './tools/integration.tools';
 import { JobTools } from './tools/job.tools';
+import { MeetingsTools } from './tools/meetings.tools';
 import { MemoryTools } from './tools/memory.tools';
 import { PlanTools } from './tools/plan.tools';
 import { RunnerTools } from './tools/runner.tools';
@@ -50,6 +52,7 @@ import { CoworkerRuntimeService } from './coworker-runtime.service';
     TypeOrmModule.forFeature([ToolCallLogEntity]),
     RecordsModule,
     SchedulesModule,
+    MeetingBotModule,
     WorkflowsModule,
     TasksModule,
     FilesModule,
@@ -86,6 +89,7 @@ import { CoworkerRuntimeService } from './coworker-runtime.service';
     RunnerTools,
     CommandTools,
     MemoryTools,
+    MeetingsTools,
     SchedulesTools,
     EngineRuntimeService,
     ToolRegistry,

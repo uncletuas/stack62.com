@@ -32,6 +32,7 @@ import { DocumentExtractionModule } from './modules/document-extraction/document
 import { FileSharingModule } from './modules/file-sharing/file-sharing.module';
 import { FilesModule } from './modules/files/files.module';
 import { FoldersModule } from './modules/folders/folders.module';
+import { MeetingBotModule } from './modules/meeting-bot/meeting-bot.module';
 import { RealtimeVoiceModule } from './modules/realtime-voice/realtime-voice.module';
 import { RoomsModule } from './modules/rooms/rooms.module';
 import { SemanticSearchModule } from './modules/semantic-search/semantic-search.module';
@@ -143,6 +144,7 @@ import { BillingModule } from './modules/billing/billing.module';
     DocumentExtractionModule,
     SemanticSearchModule,
     FileSharingModule,
+    MeetingBotModule,
     RealtimeVoiceModule,
     RoomsModule,
     SlackModule,
