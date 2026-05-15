@@ -1337,6 +1337,10 @@ export interface Coworker {
   model: string | null;
   voice: string | null;
   defaultAutopilot: boolean;
+  /** Coworker acts on its own queue without per-action approval. */
+  autonomousMode: boolean;
+  /** Max action-level the Coworker may execute autonomously (1..5). */
+  autonomousMaxActionLevel: number;
   permissions: CoworkerPermissions;
   role: CoworkerRole;
   createdAt: string;

@@ -12,6 +12,7 @@ import { JobTools } from './job.tools';
 import { PlanTools } from './plan.tools';
 import { CommandTools } from './command.tools';
 import { RunnerTools } from './runner.tools';
+import { SchedulesTools } from './schedules.tools';
 import { SystemTools } from './system.tools';
 import { WorkspaceTools } from './workspace.tools';
 import {
@@ -43,6 +44,7 @@ export class ToolRegistry {
     private readonly communications: CommunicationsTools,
     private readonly memory: MemoryTools,
     private readonly calendar: CalendarTools,
+    private readonly schedules: SchedulesTools,
     private readonly plans: PlanTools,
     private readonly jobs: JobTools,
     private readonly workspace: WorkspaceTools,
@@ -60,6 +62,7 @@ export class ToolRegistry {
     this.register(this.communications.build());
     this.register(this.memory.build());
     this.register(this.calendar.build());
+    this.register(this.schedules.build());
     this.register(this.systems.build());
     this.register(this.plans.build());
     this.register(this.jobs.build());

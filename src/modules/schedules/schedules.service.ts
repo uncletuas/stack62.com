@@ -157,6 +157,22 @@ export class SchedulesService {
     return updatedSchedule;
   }
 
+  /**
+   * Flag/unflag a schedule as Coworker-handled. Called from the
+   * schedules.create Coworker tool right after creation — the
+   * standard CreateScheduleDto doesn't yet expose this field so it
+   * comes through a dedicated mutator.
+   */
+  async markAssignedToCoworker(
+    scheduleId: string,
+    assigned: boolean,
+  ): Promise<void> {
+    await this.schedulesRepository.update(
+      { id: scheduleId },
+      { assignedToCoworker: assigned },
+    );
+  }
+
   async delete(scheduleId: string, actorUserId: string) {
     const schedule = await this.schedulesRepository.findOne({
       where: { id: scheduleId },

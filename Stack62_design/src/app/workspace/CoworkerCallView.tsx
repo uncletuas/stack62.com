@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { CoworkerFace } from "./CoworkerFace";
-import { Mic, MicOff, Video, VideoOff, X } from "lucide-react";
+import { Loader2, Mic, MicOff, RefreshCw, Video, VideoOff, X } from "lucide-react";
 
 /**
  * Full-screen call surface for Live mode. Mimics a Zoom/Meet
@@ -31,16 +31,24 @@ export function CoworkerCallView({
   listening,
   thinking,
   micOn,
+  starting,
+  error,
+  onRetry,
   onToggleMic,
   onEndCall,
+  mouthPulse = 0,
 }: {
   stream: MediaStream | null;
   speaking: boolean;
   listening: boolean;
   thinking: boolean;
   micOn: boolean;
+  starting?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
   onToggleMic: () => void;
   onEndCall: () => void;
+  mouthPulse?: number;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -99,7 +107,40 @@ export function CoworkerCallView({
 
       {/* Main stage: user's video */}
       <div className="relative flex-1 overflow-hidden bg-black">
-        {cameraOff ? (
+        {error ? (
+          <div className="grid h-full place-items-center bg-slate-950/95 text-center text-white">
+            <div className="max-w-md space-y-3 px-6">
+              <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-rose-500/15 text-rose-400">
+                <VideoOff className="h-5 w-5" />
+              </div>
+              <p className="text-base font-semibold">{error}</p>
+              <p className="text-xs text-white/60">
+                If you don't see a prompt, check your browser's site
+                settings → Permissions → Camera.
+              </p>
+              {onRetry && (
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  className="mx-auto mt-2 flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-accent-hover"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Try again
+                </button>
+              )}
+            </div>
+          </div>
+        ) : starting && !stream ? (
+          <div className="grid h-full place-items-center bg-slate-950/95 text-center text-white">
+            <div className="space-y-3">
+              <Loader2 className="mx-auto h-8 w-8 animate-spin text-white/70" />
+              <p className="text-sm text-white/80">Starting camera…</p>
+              <p className="text-xs text-white/40">
+                Allow camera access in the browser prompt to begin.
+              </p>
+            </div>
+          </div>
+        ) : cameraOff ? (
           <div className="grid h-full place-items-center text-white/40">
             <div className="text-center">
               <VideoOff className="mx-auto h-10 w-10" />
@@ -128,6 +169,7 @@ export function CoworkerCallView({
               speaking={speaking}
               thinking={thinking}
               mood={listening ? "listening" : "happy"}
+              mouthPulse={mouthPulse}
             />
           </div>
           <div>

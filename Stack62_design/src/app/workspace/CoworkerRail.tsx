@@ -271,6 +271,16 @@ export function CoworkerRail() {
   /** True while the speech synthesizer is actively vocalising. Used to
    * animate the Coworker face (mouth moves) so the bot looks alive. */
   const [speaking, setSpeaking] = useState(false);
+  /**
+   * Bumped on every speech-boundary event from the active TTS
+   * utterance so the Coworker face can "punch" the mouth open on
+   * each spoken word. The face component watches this number and
+   * fires a one-shot wider opening on each increment.
+   */
+  const [mouthPulse, setMouthPulse] = useState(0);
+  /** True when the Coworker config has autonomousMode on. Drives
+   *  the emerald color + AUTO badge on the launcher. */
+  const autonomous = !!coworker?.autonomousMode;
   /** Voice conversation mode — continuous loop where the rail listens,
    * sends the recognised utterance, speaks the reply, then re-listens.
    * Toggled by the morphing send/voice button in the composer. */
@@ -437,6 +447,12 @@ export function CoworkerRail() {
   // through chat-completions today and it feels close to a real call.
   const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
   const [micOn, setMicOn] = useState(true);
+  /** True while the browser is asking the user for camera permission
+   *  and we haven't yet got a stream. Drives the call-view's loading
+   *  spinner so the user knows something is happening when they tap
+   *  the live button. */
+  const [liveStarting, setLiveStarting] = useState(false);
+  const [liveError, setLiveError] = useState<string | null>(null);
   const liveTimerRef = useRef<number | null>(null);
 
   const stopLive = useCallback(() => {
@@ -456,23 +472,30 @@ export function CoworkerRail() {
   }, []);
 
   const toggleLiveMode = useCallback(async () => {
-    if (liveMode) {
+    if (liveMode || liveStarting) {
       stopLive();
       return;
     }
     if (!navigator.mediaDevices?.getUserMedia) {
-      window.alert(
-        "Live mode needs a webcam. Your browser doesn't expose camera access.",
+      setLiveError(
+        "Live mode needs a webcam. This browser doesn't expose camera access.",
       );
       return;
     }
+    // Surface the call view IMMEDIATELY in a "starting" state so the
+    // user sees something happen on tap. The view shows a loading
+    // spinner until the camera stream resolves; if permission is
+    // denied, we error out with a visible message in the view itself.
+    setLiveError(null);
+    setLiveStarting(true);
+    setLiveMode(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: 1280, height: 720 },
         audio: false,
       });
       setLiveStream(stream);
-      setLiveMode(true);
+      setLiveStarting(false);
       // Auto-start the voice conversation loop so the user can speak
       // and hear responses without separately tapping the mic.
       setVoiceConversation(true);
@@ -522,13 +545,20 @@ export function CoworkerRail() {
         }
       }, 6000);
     } catch (err) {
-      window.alert(
-        "Couldn't access the camera: " +
-          (err instanceof Error ? err.message : "unknown error"),
+      const msg =
+        err instanceof Error ? err.message : "Unknown camera error.";
+      setLiveError(
+        msg.toLowerCase().includes("permission") ||
+          msg.toLowerCase().includes("denied")
+          ? "Camera access was denied. Allow the site to use your camera and try again."
+          : `Couldn't start camera: ${msg}`,
       );
+      setLiveStarting(false);
+      // Leave liveMode on with liveError set — the call view shows the
+      // error inside its own surface with a Retry button.
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveMode, stopLive]);
+  }, [liveMode, liveStarting, stopLive]);
 
   // Cleanup on unmount.
   useEffect(() => () => stopLive(), [stopLive]);
@@ -561,7 +591,35 @@ export function CoworkerRail() {
             setSpeaking(false);
             resolve();
           };
+          // onboundary fires at every word/sentence in supporting
+          // browsers — drives the per-word mouth punch animation.
+          utterance.onboundary = () => {
+            setMouthPulse((n) => n + 1);
+          };
+          // Fallback boundary heartbeat: if the browser doesn't fire
+          // onboundary, drive a heartbeat from the utterance length
+          // so the mouth still pulses ~3× per second.
+          let heartbeat: number | null = null;
+          const startHeartbeat = () => {
+            if (heartbeat) return;
+            heartbeat = window.setInterval(() => {
+              setMouthPulse((n) => n + 1);
+            }, 320);
+          };
+          const stopHeartbeat = () => {
+            if (heartbeat) {
+              window.clearInterval(heartbeat);
+              heartbeat = null;
+            }
+          };
+          utterance.addEventListener("start", startHeartbeat);
+          utterance.addEventListener("end", stopHeartbeat);
+          utterance.addEventListener("error", stopHeartbeat);
           window.speechSynthesis.speak(utterance);
+          // Defensive: some Chromium builds delay onstart until the
+          // utterance is fully queued. Force speaking=true after a
+          // brief tick so the face animates even if onstart is late.
+          window.setTimeout(() => setSpeaking(true), 50);
         } catch {
           setSpeaking(false);
           resolve();
@@ -1021,19 +1079,27 @@ export function CoworkerRail() {
           aria-hidden
           className="pointer-events-none absolute inset-[-2px] rounded-full"
           style={{
-            boxShadow:
-              "0 12px 32px rgba(79, 70, 229, 0.25), 0 4px 12px rgba(0,0,0,0.08)",
+            boxShadow: autonomous
+              ? "0 12px 32px rgba(16, 185, 129, 0.32), 0 4px 12px rgba(0,0,0,0.08)"
+              : "0 12px 32px rgba(79, 70, 229, 0.25), 0 4px 12px rgba(0,0,0,0.08)",
           }}
         />
         <span
-          className="relative grid h-12 w-12 place-items-center rounded-full text-white"
-          style={{ backgroundColor: "var(--app-accent)" }}
+          className={`relative grid h-12 w-12 place-items-center rounded-full text-white ${
+            autonomous ? "ring-2 ring-emerald-400/60" : ""
+          }`}
+          style={{
+            backgroundColor: autonomous ? "#059669" : "var(--app-accent)",
+            transition: "background-color 0.3s ease, box-shadow 0.3s ease",
+          }}
         >
           <CoworkerFace
             size={28}
             speaking={speaking}
             thinking={sending}
             mood={voiceConversation ? "listening" : "happy"}
+            mouthPulse={mouthPulse}
+            autonomous={autonomous}
           />
           <span
             className={`absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full ring-2 ring-white ${
@@ -1043,6 +1109,14 @@ export function CoworkerRail() {
           {pendingCount > 0 && (
             <span className="absolute -bottom-1 -right-1 grid h-5 min-w-[20px] place-items-center rounded-full bg-amber-400 px-1 text-[10px] font-bold text-amber-950 shadow-[0_0_10px_rgba(251,191,36,0.5)]">
               {pendingCount}
+            </span>
+          )}
+          {autonomous && (
+            <span
+              className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-emerald-700 shadow-sm"
+              title="Coworker is in autonomous mode"
+            >
+              Auto
             </span>
           )}
         </span>
@@ -1067,6 +1141,16 @@ export function CoworkerRail() {
           listening={voiceConversation && !speaking && !sending}
           thinking={sending}
           micOn={micOn}
+          starting={liveStarting}
+          error={liveError}
+          mouthPulse={mouthPulse}
+          onRetry={() => {
+            // Reset error then re-enter the toggle so we re-prompt
+            // for camera access.
+            setLiveError(null);
+            stopLive();
+            window.setTimeout(() => void toggleLiveMode(), 50);
+          }}
           onToggleMic={() => {
             setMicOn((cur) => {
               const next = !cur;
