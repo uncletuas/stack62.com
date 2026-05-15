@@ -18,6 +18,7 @@ import {
   type SlackMappingDto,
   type SlackStatusDto,
 } from "../../lib/dms-resources";
+import { appDialog } from "../../components/app-dialog";
 import { useAppContext } from "../../context/app-context";
 
 /**
@@ -100,7 +101,12 @@ export function RoomEditor() {
   };
 
   const createChannel = async () => {
-    const name = window.prompt("Channel name (e.g. design, engineering)");
+    const name = await appDialog.prompt({
+      title: "New channel",
+      description: "Name your channel (e.g. design, engineering).",
+      placeholder: "design",
+      confirmLabel: "Create",
+    });
     if (!name?.trim() || !orgId) return;
     const room = await roomsApi.create({
       organizationId: orgId,

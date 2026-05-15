@@ -1058,6 +1058,40 @@ export async function deleteFile(fileId: string) {
   });
 }
 
+export async function updateFile(
+  fileId: string,
+  patch: { filename?: string; folderId?: string | null },
+) {
+  return apiRequest<{ id: string; filename: string; folderId: string | null }>(
+    `/files/${fileId}`,
+    { method: 'PATCH', body: patch },
+  );
+}
+
+export async function copyFile(
+  fileId: string,
+  opts: { folderId?: string | null; filename?: string } = {},
+) {
+  return apiRequest<{ id: string; filename: string; folderId: string | null }>(
+    `/files/${fileId}/copy`,
+    { method: 'POST', body: opts },
+  );
+}
+
+export async function bulkDeleteFiles(ids: string[]) {
+  return apiRequest<{ results: Array<{ id: string; ok: boolean; error?: string }> }>(
+    `/files/bulk-delete`,
+    { method: 'POST', body: { ids } },
+  );
+}
+
+export async function bulkMoveFiles(ids: string[], folderId: string | null) {
+  return apiRequest<{ results: Array<{ id: string; ok: boolean; error?: string }> }>(
+    `/files/bulk-move`,
+    { method: 'POST', body: { ids, folderId } },
+  );
+}
+
 export interface EditableFileContent {
   fileId: string;
   filename: string;

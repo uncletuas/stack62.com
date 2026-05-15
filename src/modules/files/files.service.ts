@@ -396,6 +396,114 @@ export class FilesService {
     return { id: file.id, status: 'deleted' };
   }
 
+  /**
+   * Rename and/or move a file. Either field is optional — pass only
+   * what changed. `folderId: null` moves the file to the implicit org
+   * root.
+   */
+  async update(
+    fileId: string,
+    actorUserId: string,
+    patch: { filename?: string; folderId?: string | null },
+  ) {
+    const file = await this.findOne(fileId, actorUserId);
+    let dirty = false;
+    if (typeof patch.filename === 'string') {
+      const clean = patch.filename.trim();
+      if (!clean) throw new BadRequestException('filename cannot be empty.');
+      if (clean.length > 512)
+        throw new BadRequestException('filename is too long (max 512).');
+      if (/[\\/]/.test(clean))
+        throw new BadRequestException('filename cannot contain / or \\.');
+      file.filename = clean;
+      dirty = true;
+    }
+    if (patch.folderId !== undefined) {
+      file.folderId = patch.folderId;
+      dirty = true;
+    }
+    if (!dirty) return file;
+    return this.filesRepository.save(file);
+  }
+
+  /**
+   * Delete many files in one call. Per-file access is still enforced
+   * inside findOne(). Returns a per-id outcome so the UI can keep the
+   * rows that failed and clear the rest.
+   */
+  async deleteMany(fileIds: string[], actorUserId: string) {
+    const results: Array<{ id: string; ok: boolean; error?: string }> = [];
+    for (const id of fileIds) {
+      try {
+        await this.delete(id, actorUserId);
+        results.push({ id, ok: true });
+      } catch (err) {
+        results.push({
+          id,
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    return { results };
+  }
+
+  /** Move many files to a single folder (or to the root with null). */
+  async moveMany(
+    fileIds: string[],
+    folderId: string | null,
+    actorUserId: string,
+  ) {
+    const results: Array<{ id: string; ok: boolean; error?: string }> = [];
+    for (const id of fileIds) {
+      try {
+        await this.update(id, actorUserId, { folderId });
+        results.push({ id, ok: true });
+      } catch (err) {
+        results.push({
+          id,
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    return { results };
+  }
+
+  /**
+   * Duplicate a file into the same or different folder. Reuses the
+   * underlying storage object — files are content-addressed, no extra
+   * disk cost. Filename gets " (copy)" appended unless one was
+   * provided.
+   */
+  async copy(
+    fileId: string,
+    actorUserId: string,
+    opts: { folderId?: string | null; filename?: string } = {},
+  ) {
+    const src = await this.findOne(fileId, actorUserId);
+    const clone = this.filesRepository.create({
+      organizationId: src.organizationId,
+      workspaceId: src.workspaceId,
+      systemId: src.systemId,
+      scope: src.scope,
+      filename: opts.filename?.trim() || appendCopySuffix(src.filename),
+      mimeType: src.mimeType,
+      size: src.size,
+      storagePath: src.storagePath,
+      checksum: src.checksum,
+      ownerKind: src.ownerKind,
+      ownerId: src.ownerId,
+      metadata: src.metadata,
+      uploadedByUserId: actorUserId,
+      status: 'active',
+      folderId: opts.folderId === undefined ? src.folderId : opts.folderId,
+      version: 1,
+      previousVersionFileId: null,
+    });
+    return this.filesRepository.save(clone);
+  }
+
   private ensureDir(dir: string) {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
@@ -627,4 +735,12 @@ function parseCsv(text: string): string[][] {
       cells.push(cell);
       return cells;
     });
+}
+
+function appendCopySuffix(filename: string): string {
+  const dotAt = filename.lastIndexOf('.');
+  if (dotAt <= 0) return `${filename} (copy)`;
+  const base = filename.slice(0, dotAt);
+  const ext = filename.slice(dotAt);
+  return `${base} (copy)${ext}`;
 }

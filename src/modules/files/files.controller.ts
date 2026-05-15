@@ -115,4 +115,54 @@ export class FilesController {
   delete(@Param('fileId') fileId: string, @CurrentUser() user: JwtUser) {
     return this.filesService.delete(fileId, user.userId);
   }
+
+  /**
+   * Rename and/or move a file. Body: `{ filename?, folderId? }`. Pass
+   * `folderId: null` to move to the org root.
+   */
+  @Patch(':fileId')
+  update(
+    @Param('fileId') fileId: string,
+    @Body() body: { filename?: string; folderId?: string | null },
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.filesService.update(fileId, user.userId, {
+      filename: body.filename,
+      folderId: body.folderId,
+    });
+  }
+
+  @Post(':fileId/copy')
+  copy(
+    @Param('fileId') fileId: string,
+    @Body() body: { folderId?: string | null; filename?: string },
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.filesService.copy(fileId, user.userId, {
+      folderId: body.folderId,
+      filename: body.filename,
+    });
+  }
+
+  /** Bulk delete. Body: `{ ids: string[] }`. */
+  @Post('bulk-delete')
+  bulkDelete(
+    @Body() body: { ids: string[] },
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.filesService.deleteMany(body.ids ?? [], user.userId);
+  }
+
+  /** Bulk move. Body: `{ ids: string[]; folderId: string | null }`. */
+  @Post('bulk-move')
+  bulkMove(
+    @Body() body: { ids: string[]; folderId: string | null },
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.filesService.moveMany(
+      body.ids ?? [],
+      body.folderId ?? null,
+      user.userId,
+    );
+  }
 }

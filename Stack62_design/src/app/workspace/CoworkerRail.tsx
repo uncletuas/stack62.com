@@ -29,6 +29,7 @@ import {
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { appDialog } from "../components/app-dialog";
 import { useAppContext } from "../context/app-context";
 import {
   coworkerChat,
@@ -419,9 +420,12 @@ export function CoworkerRail() {
       // Neither Realtime nor Web Speech — admit defeat.
       setVoiceConversation(false);
       voiceConversationRef.current = false;
-      window.alert(
-        "Voice mode needs either a backend OpenAI key or the Web Speech API. This browser doesn't expose either.",
-      );
+      void appDialog.alert({
+        title: "Voice mode unavailable",
+        description:
+          "Voice mode needs either a backend OpenAI key or the Web Speech API. This browser doesn't expose either.",
+        tone: "info",
+      });
     }
   }, []);
 
@@ -2605,11 +2609,16 @@ function RoomsPanel({
           type="button"
           onClick={async () => {
             if (!organizationId) return;
-            const name = window.prompt(
-              filter === "channel"
-                ? "Name your channel (e.g. design)"
-                : "Name your room",
-            );
+            const name = await appDialog.prompt({
+              title:
+                filter === "channel" ? "New channel" : "New room",
+              description:
+                filter === "channel"
+                  ? "Name your channel (e.g. design, engineering)."
+                  : "Name your room.",
+              placeholder: filter === "channel" ? "design" : "Project room",
+              confirmLabel: "Create",
+            });
             if (!name?.trim()) return;
             const room = await roomsApi.create({
               organizationId,

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { GitBranch, History, Loader2, RotateCcw } from "lucide-react";
+import { appDialog } from "../../components/app-dialog";
 import { Button } from "../../components/ui/button";
 import { useAppContext } from "../../context/app-context";
 import {
@@ -60,12 +61,14 @@ export function HistoryEditor({ tab }: { tab: EditorTab }) {
 
   const rollback = async (versionId: string) => {
     if (!systemId) return;
-    if (
-      !window.confirm(
-        "Roll back this system to the selected version? Records aren't deleted but the schema returns to that version.",
-      )
-    )
-      return;
+    const ok = await appDialog.confirm({
+      title: "Roll back this system?",
+      description:
+        "The schema returns to the selected version. Records aren't deleted.",
+      confirmLabel: "Roll back",
+      tone: "destructive",
+    });
+    if (!ok) return;
     setBusy(versionId);
     try {
       await rollbackSystemVersion(systemId, versionId);

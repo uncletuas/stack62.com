@@ -20,6 +20,7 @@ import {
   Type,
   Upload,
 } from "lucide-react";
+import { appDialog } from "../../components/app-dialog";
 import { Button } from "../../components/ui/button";
 import { useAppContext } from "../../context/app-context";
 import {
@@ -898,18 +899,40 @@ function DocumentToolbar({
     document.execCommand(command, false, value);
   };
   const setBlock = (tag: string) => onExec("formatBlock", `<${tag}>`);
-  const insertLink = () => {
-    const url = window.prompt("Link URL");
+  const insertLink = async () => {
+    const url = await appDialog.prompt({
+      title: "Insert link",
+      placeholder: "https://example.com",
+      inputType: "url",
+      confirmLabel: "Insert",
+    });
     if (url) onExec("createLink", url);
   };
-  const insertImage = () => {
-    const url = window.prompt("Image URL");
+  const insertImage = async () => {
+    const url = await appDialog.prompt({
+      title: "Insert image",
+      placeholder: "https://example.com/image.png",
+      inputType: "url",
+      confirmLabel: "Insert",
+    });
     if (url) onExec("insertImage", url);
   };
-  const insertTable = () => {
-    const rowsStr = window.prompt("Rows", "3");
+  const insertTable = async () => {
+    const rowsStr = await appDialog.prompt({
+      title: "Insert table",
+      description: "How many rows?",
+      initialValue: "3",
+      inputType: "number",
+      confirmLabel: "Next",
+    });
     if (!rowsStr) return;
-    const colsStr = window.prompt("Columns", "3");
+    const colsStr = await appDialog.prompt({
+      title: "Insert table",
+      description: "How many columns?",
+      initialValue: "3",
+      inputType: "number",
+      confirmLabel: "Insert",
+    });
     if (!colsStr) return;
     const rows = Math.max(1, Math.min(20, Number(rowsStr) || 3));
     const cols = Math.max(1, Math.min(20, Number(colsStr) || 3));

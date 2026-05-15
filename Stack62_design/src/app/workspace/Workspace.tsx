@@ -12,6 +12,7 @@ import { TabBar } from "./TabBar";
 import { TitleBar } from "./TitleBar";
 import { useGlobalShortcuts } from "./use-shortcuts";
 import { useWorkspace, WorkspaceProvider } from "./workspace-context";
+import { AppDialogHost } from "../components/app-dialog";
 
 export function Workspace() {
   return (
@@ -80,6 +81,7 @@ function Inner() {
         initialBody={composer.initial.body}
       />
       <SettingsDialog />
+      <AppDialogHost />
     </div>
   );
 }
