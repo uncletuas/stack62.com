@@ -84,6 +84,10 @@ export class CoworkerService {
     if (dto.voice !== undefined) coworker.voice = dto.voice;
     if (dto.defaultAutopilot !== undefined)
       coworker.defaultAutopilot = dto.defaultAutopilot;
+    if (dto.autonomousMode !== undefined)
+      coworker.autonomousMode = dto.autonomousMode;
+    if (dto.autonomousMaxActionLevel !== undefined)
+      coworker.autonomousMaxActionLevel = dto.autonomousMaxActionLevel;
     if (dto.permissions) {
       coworker.permissions = {
         ...DEFAULT_PERMISSIONS,

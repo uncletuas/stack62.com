@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { BullModule } from '@nestjs/bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -46,6 +47,7 @@ import { BillingModule } from './modules/billing/billing.module';
   imports: [
     AccessControlModule,
     CryptoModule,
+    ScheduleModule.forRoot(),
     SecurityModule,
     ConfigModule.forRoot({
       isGlobal: true,

@@ -42,4 +42,13 @@ export class ScheduleEntity extends AppBaseEntity {
 
   @Column({ type: 'jsonb', nullable: true })
   metadata!: Record<string, unknown> | null;
+
+  /**
+   * Per-user single-Coworker model: when this schedule fires and the
+   * Coworker has autonomousMode on, the Coworker executes the
+   * associated job/task on the user's behalf. When `assignedToCoworker`
+   * is false, the schedule reminds the human instead.
+   */
+  @Column({ name: 'assigned_to_coworker', default: false })
+  assignedToCoworker!: boolean;
 }

@@ -27,6 +27,7 @@ import { EngineService } from './engine.service';
 import { IntentClassifierService } from './intent-classifier.service';
 import { OllamaClient } from './ollama.client';
 import { AutomationTools } from './tools/automation.tools';
+import { CalendarTools } from './tools/calendar.tools';
 import { CommandTools } from './tools/command.tools';
 import { CommunicationsTools } from './tools/communications.tools';
 import { DataTools } from './tools/data.tools';
@@ -34,6 +35,7 @@ import { DocumentsTools } from './tools/documents.tools';
 import { FileTools } from './tools/file.tools';
 import { IntegrationTools } from './tools/integration.tools';
 import { JobTools } from './tools/job.tools';
+import { MemoryTools } from './tools/memory.tools';
 import { PlanTools } from './tools/plan.tools';
 import { RunnerTools } from './tools/runner.tools';
 import { SystemTools } from './tools/system.tools';
@@ -72,6 +74,7 @@ import { CoworkerRuntimeService } from './coworker-runtime.service';
     WorkspaceTools,
     DataTools,
     AutomationTools,
+    CalendarTools,
     CommunicationsTools,
     IntegrationTools,
     FileTools,
@@ -81,6 +84,7 @@ import { CoworkerRuntimeService } from './coworker-runtime.service';
     JobTools,
     RunnerTools,
     CommandTools,
+    MemoryTools,
     EngineRuntimeService,
     ToolRegistry,
     CoworkerRuntimeService,

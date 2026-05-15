@@ -19,6 +19,67 @@ export class CoworkerMemoryService {
     private readonly activity: ActivityService,
   ) {}
 
+  /**
+   * Auto-capture path used by the Coworker engine after a turn that
+   * produced a memorable fact ("Sarah's office hours are 9–5",
+   * "QuickBooks API key was rotated 2026-05-10"). Skips access control
+   * because the Coworker has already been authenticated through the
+   * engine; we trust it to write its own memory.
+   *
+   * Dedup: if a row with the same kind + key already exists for the
+   * org+workspace+system, we update its content rather than spawning
+   * a duplicate. Keeps memory tidy on its own.
+   */
+  async autoCapture(input: {
+    organizationId: string;
+    workspaceId: string;
+    systemId?: string | null;
+    kind?: 'fact' | 'preference' | 'episode';
+    key: string;
+    text: string;
+    conversationId?: string | null;
+  }) {
+    const kind = input.kind ?? 'fact';
+    const existing = await this.memoriesRepo.findOne({
+      where: {
+        organizationId: input.organizationId,
+        workspaceId: input.workspaceId,
+        kind,
+        key: input.key,
+      },
+    });
+    if (existing) {
+      existing.text = input.text;
+      if (input.conversationId) {
+        existing.metadata = {
+          ...(existing.metadata ?? {}),
+          conversationId: input.conversationId,
+          updatedByCoworker: new Date().toISOString(),
+        };
+      }
+      const saved = await this.memoriesRepo.save(existing);
+      return { row: saved, action: 'updated' as const };
+    }
+    const row = await this.memoriesRepo.save(
+      this.memoriesRepo.create({
+        organizationId: input.organizationId,
+        workspaceId: input.workspaceId,
+        systemId: input.systemId ?? null,
+        kind,
+        key: input.key,
+        text: input.text,
+        source: 'coworker',
+        metadata: input.conversationId
+          ? {
+              conversationId: input.conversationId,
+              capturedAt: new Date().toISOString(),
+            }
+          : { capturedAt: new Date().toISOString() },
+      }),
+    );
+    return { row, action: 'created' as const };
+  }
+
   async list(filters: ListCoworkerMemoriesDto, actorUserId: string) {
     if (!filters.organizationId || !filters.workspaceId) {
       return [];

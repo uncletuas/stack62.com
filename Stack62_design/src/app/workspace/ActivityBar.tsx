@@ -41,21 +41,27 @@ export function ActivityBar() {
   };
 
   return (
-    <aside className="flex w-12 shrink-0 flex-col items-center border-r border-app bg-app-surface py-2 sm:w-14">
+    <aside
+      role="navigation"
+      aria-label="Primary"
+      className="flex w-12 shrink-0 flex-col items-center border-r border-app bg-app-surface py-2 sm:w-14"
+    >
       {TOP.map(({ key, label, icon: Icon }) => {
         const active = activity === key;
         return (
           <button
             key={key}
             title={label}
+            aria-label={label}
+            aria-current={active ? "page" : undefined}
             onClick={() => click(key)}
-            className={`relative mb-0.5 flex h-11 w-11 flex-col items-center justify-center gap-0.5 rounded-md text-[10px] font-medium transition sm:h-12 sm:w-12 ${
+            className={`relative mb-0.5 flex h-11 w-11 flex-col items-center justify-center gap-0.5 rounded-md text-[10px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:h-12 sm:w-12 ${
               active
                 ? "bg-accent-soft text-accent"
                 : "text-app-subtle hover:bg-app-hover hover:text-app"
             }`}
           >
-            <Icon className="h-4 w-4" />
+            <Icon className="h-4 w-4" aria-hidden />
             {/* Labels hidden on very small screens to keep the rail compact. */}
             <span className="hidden leading-none sm:inline">{label}</span>
           </button>
@@ -63,14 +69,16 @@ export function ActivityBar() {
       })}
       <button
         title="Settings"
+        aria-label="Settings"
+        aria-current={activity === "settings" ? "page" : undefined}
         onClick={() => click("settings")}
-        className={`mt-auto flex h-11 w-11 flex-col items-center justify-center gap-0.5 rounded-md text-[10px] font-medium transition sm:h-12 sm:w-12 ${
+        className={`mt-auto flex h-11 w-11 flex-col items-center justify-center gap-0.5 rounded-md text-[10px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:h-12 sm:w-12 ${
           activity === "settings"
             ? "bg-accent-soft text-accent"
             : "text-app-subtle hover:bg-app-hover hover:text-app"
         }`}
       >
-        <Settings className="h-4 w-4" />
+        <Settings className="h-4 w-4" aria-hidden />
         <span className="hidden leading-none sm:inline">Settings</span>
       </button>
     </aside>

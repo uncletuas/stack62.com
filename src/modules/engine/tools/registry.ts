@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { EngineRuntimeService } from '../engine-runtime.service';
 import { AutomationTools } from './automation.tools';
+import { CalendarTools } from './calendar.tools';
 import { CommunicationsTools } from './communications.tools';
+import { MemoryTools } from './memory.tools';
 import { DataTools } from './data.tools';
 import { DocumentsTools } from './documents.tools';
 import { FileTools } from './file.tools';
@@ -39,6 +41,8 @@ export class ToolRegistry {
     private readonly files: FileTools,
     private readonly documents: DocumentsTools,
     private readonly communications: CommunicationsTools,
+    private readonly memory: MemoryTools,
+    private readonly calendar: CalendarTools,
     private readonly plans: PlanTools,
     private readonly jobs: JobTools,
     private readonly workspace: WorkspaceTools,
@@ -54,6 +58,8 @@ export class ToolRegistry {
     this.register(this.files.build());
     this.register(this.documents.build());
     this.register(this.communications.build());
+    this.register(this.memory.build());
+    this.register(this.calendar.build());
     this.register(this.systems.build());
     this.register(this.plans.build());
     this.register(this.jobs.build());

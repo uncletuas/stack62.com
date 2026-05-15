@@ -65,6 +65,23 @@ export class CoworkerEntity extends AppBaseEntity {
   @Column({ name: 'default_autopilot', default: false })
   defaultAutopilot!: boolean;
 
+  /**
+   * Autonomous mode: when on, the Coworker executes assigned tasks
+   * (scheduled jobs, queue-driven work) on its own and only pauses
+   * for actions above the `autonomousMaxActionLevel` threshold (the
+   * default 2 covers reads/safe writes; level 3+ = sending email,
+   * posting to a public channel, money movement, etc.).
+   *
+   * The org admin / Coworker owner toggles this from Settings →
+   * Coworker. Every autonomous action is still logged in the audit
+   * trail with origin='coworker'.
+   */
+  @Column({ name: 'autonomous_mode', default: false })
+  autonomousMode!: boolean;
+
+  @Column({ name: 'autonomous_max_action_level', type: 'int', default: 2 })
+  autonomousMaxActionLevel!: number;
+
   @Column({ type: 'jsonb', default: () => "'{}'" })
   permissions!: CoworkerPermissions;
 

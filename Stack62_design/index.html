@@ -1,11 +1,22 @@
-
   <!DOCTYPE html>
   <html lang="en">
     <head>
       <meta charset="UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       <title>Stack62</title>
+      <meta name="description" content="AI-native operating systems for business teams." />
+      <meta name="theme-color" content="#4f46e5" />
+      <link rel="manifest" href="/manifest.webmanifest" />
       <style>html, body { height: 100%; margin: 0; } #root { height: 100%; }</style>
+      <script>
+        // Register the service worker after the page loads so it
+        // doesn't compete with the initial bundle for bandwidth.
+        if ("serviceWorker" in navigator) {
+          window.addEventListener("load", function () {
+            navigator.serviceWorker.register("/sw.js").catch(function () {});
+          });
+        }
+      </script>
     </head>
 
     <body>
@@ -13,4 +24,3 @@
       <script type="module" src="/src/main.tsx"></script>
     </body>
   </html>
-  
