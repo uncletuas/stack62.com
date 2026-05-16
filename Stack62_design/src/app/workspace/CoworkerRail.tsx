@@ -67,7 +67,11 @@ import {
   type StoredFile,
   type WorkflowRun,
 } from "../lib/resources";
-import { useWorkspace, type EditorTab } from "./workspace-context";
+import {
+  useWorkspace,
+  type EditorKind,
+  type EditorTab,
+} from "./workspace-context";
 import { roomsApi, type RoomDto } from "../lib/dms-resources";
 import { CoworkerFace, type CoworkerMood } from "./CoworkerFace";
 import { CoworkerCallView } from "./CoworkerCallView";
@@ -2309,8 +2313,138 @@ function MemoryTab({
 
 /* ── Message bubble ────────────────────────────────────────────────────── */
 
+/**
+ * Map a `workspace.open` intent (returned by the engine's
+ * `workspace.open` tool) to an editor kind + nav payload. Unknown
+ * targets fall through so old messages with newer/unknown targets
+ * just render as a generic "Open" chip.
+ */
+function openIntentToRoute(intent: {
+  target: string;
+  id?: string;
+  folderId?: string;
+  title?: string;
+}): { kind: EditorKind; title: string; refId?: string } | null {
+  const t = intent.target;
+  const baseTitle = intent.title ?? null;
+  switch (t) {
+    case "file":
+      return { kind: "file", title: baseTitle ?? "File", refId: intent.id };
+    case "document":
+      return {
+        kind: "document",
+        title: baseTitle ?? "Document",
+        refId: intent.id,
+      };
+    case "system":
+      return { kind: "system", title: baseTitle ?? "System", refId: intent.id };
+    case "task":
+      return { kind: "task", title: baseTitle ?? "Task", refId: intent.id };
+    case "schedule":
+      return {
+        kind: "schedule",
+        title: baseTitle ?? "Schedule",
+        refId: intent.id,
+      };
+    case "plan":
+      return { kind: "plan", title: baseTitle ?? "Plan", refId: intent.id };
+    case "report":
+      return {
+        kind: "report",
+        title: baseTitle ?? "Report",
+        refId: intent.id,
+      };
+    case "workflow":
+      return {
+        kind: "workflow",
+        title: baseTitle ?? "Workflow",
+        refId: intent.id,
+      };
+    case "meeting-bot":
+      return {
+        kind: "meeting-bot",
+        title: baseTitle ?? "Meeting bot",
+        refId: intent.id,
+      };
+    case "room":
+      return { kind: "room", title: baseTitle ?? "Room", refId: intent.id };
+    case "files-explorer":
+    case "folder":
+      return { kind: "files-explorer", title: baseTitle ?? "Files" };
+    default:
+      return null;
+  }
+}
+
+function iconForTarget(target: string): LucideIcon {
+  switch (target) {
+    case "file":
+    case "document":
+      return FileText;
+    case "folder":
+    case "files-explorer":
+      return Paperclip;
+    case "system":
+      return GitBranch;
+    case "task":
+      return CheckCircle2;
+    case "schedule":
+      return Workflow;
+    case "plan":
+      return Edit3;
+    case "meeting-bot":
+      return Video;
+    case "room":
+      return Hash;
+    default:
+      return Sparkles;
+  }
+}
+
+/**
+ * Extract `workspace.open` intents the engine emitted for this
+ * message. The chat backend stores tool calls as raw event objects;
+ * we walk them looking for a `tool.result` whose payload contains an
+ * `intent: 'workspace.open'` object.
+ */
+function extractOpenIntents(
+  toolCalls: Array<Record<string, unknown>>,
+): Array<{
+  target: string;
+  id?: string;
+  folderId?: string;
+  title?: string;
+}> {
+  const out: Array<{
+    target: string;
+    id?: string;
+    folderId?: string;
+    title?: string;
+  }> = [];
+  for (const tc of toolCalls) {
+    if (tc.type !== "tool.result" && tc.type !== "tool.call") continue;
+    const output =
+      (tc.output as Record<string, unknown> | undefined) ??
+      (tc.input as Record<string, unknown> | undefined);
+    if (!output) continue;
+    const intent = output.intent;
+    if (intent !== "workspace.open") continue;
+    const target = typeof output.target === "string" ? output.target : null;
+    if (!target) continue;
+    out.push({
+      target,
+      id: typeof output.id === "string" ? output.id : undefined,
+      folderId:
+        typeof output.folderId === "string" ? output.folderId : undefined,
+      title: typeof output.title === "string" ? output.title : undefined,
+    });
+  }
+  return out;
+}
+
 function MessageBubble({ msg }: { msg: CoworkerMessage }) {
   const isUser = msg.role === "user";
+  const { navigate } = useWorkspace();
   const tools = useMemo(
     () =>
       Array.isArray(msg.toolCalls)
@@ -2318,6 +2452,7 @@ function MessageBubble({ msg }: { msg: CoworkerMessage }) {
         : [],
     [msg.toolCalls],
   );
+  const openIntents = useMemo(() => extractOpenIntents(tools), [tools]);
   const tier =
     msg.metadata && typeof msg.metadata === "object"
       ? ((msg.metadata as Record<string, unknown>).routerTier as
@@ -2326,6 +2461,18 @@ function MessageBubble({ msg }: { msg: CoworkerMessage }) {
           | undefined)
       : null;
   const tierMeta = tierLabel(tier);
+
+  const onOpenIntent = (intent: {
+    target: string;
+    id?: string;
+    folderId?: string;
+    title?: string;
+  }) => {
+    const route = openIntentToRoute(intent);
+    if (!route) return;
+    navigate(route);
+  };
+
   return (
     <li
       className={`max-w-[88%] rounded-2xl px-2.5 py-1.5 text-xs ${
@@ -2335,7 +2482,30 @@ function MessageBubble({ msg }: { msg: CoworkerMessage }) {
       }`}
     >
       <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
-      {(!isUser && (tierMeta || tools.length > 0)) && (
+
+      {!isUser && openIntents.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {openIntents.map((intent, idx) => {
+            const Icon = iconForTarget(intent.target);
+            const label =
+              intent.title ?? defaultTargetLabel(intent.target);
+            return (
+              <button
+                key={`${intent.target}-${intent.id ?? idx}`}
+                type="button"
+                onClick={() => onOpenIntent(intent)}
+                className="inline-flex items-center gap-1 rounded-md border border-accent/40 bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-accent transition hover:bg-accent hover:text-accent-fg"
+                title={`Open this ${intent.target} in the workspace`}
+              >
+                <Icon className="h-3 w-3" />
+                <span className="max-w-[200px] truncate">{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {!isUser && (tierMeta || tools.length > 0) && (
         <div className="mt-1 flex items-center gap-1.5 border-t border-app pt-1 text-[10px] text-app-subtle">
           {tierMeta && (
             <span
@@ -2354,6 +2524,37 @@ function MessageBubble({ msg }: { msg: CoworkerMessage }) {
       )}
     </li>
   );
+}
+
+function defaultTargetLabel(target: string): string {
+  switch (target) {
+    case "file":
+      return "Open file";
+    case "folder":
+      return "Open folder";
+    case "files-explorer":
+      return "Open Files";
+    case "document":
+      return "Open document";
+    case "system":
+      return "Open system";
+    case "task":
+      return "Open task";
+    case "schedule":
+      return "Open schedule";
+    case "plan":
+      return "Open plan";
+    case "report":
+      return "Open report";
+    case "workflow":
+      return "Open workflow";
+    case "meeting-bot":
+      return "Open meeting bot";
+    case "room":
+      return "Open room";
+    default:
+      return "Open";
+  }
 }
 
 function tierLabel(tier: number | null | undefined) {
