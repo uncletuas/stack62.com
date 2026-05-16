@@ -42,7 +42,9 @@ export function classifyMood(opts: {
   }
 
   if (opts.listening) return "listening";
-  return "neutral";
+  // Default is `happy` rather than `neutral` — a friendly resting
+  // smile reads better than a flat mouth when nothing's happening.
+  return "happy";
 }
 
 function hasAny(text: string, words: string[]): boolean {

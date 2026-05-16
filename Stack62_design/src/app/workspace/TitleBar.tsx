@@ -34,6 +34,7 @@ import {
   fetchRecords,
   fetchWorkflowRuns,
   uploadFile,
+  userAvatarUrl,
 } from "../lib/resources";
 import { type MenuItem } from "./Menu";
 import { useWorkspace } from "./workspace-context";
@@ -598,16 +599,43 @@ function ProfileMenu({
     const l = user?.lastName?.[0] ?? "";
     return (f + l).toUpperCase() || "U";
   })();
+  const avatarSrc =
+    user?.avatarFileId && user.id
+      ? userAvatarUrl(user.id, user.updatedAt ?? "")
+      : null;
 
   return (
     <div ref={wrapperRef} className="relative">
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="grid h-8 w-8 place-items-center rounded-full bg-accent text-[12px] font-semibold text-accent-fg shadow-sm hover:bg-accent-hover"
+        className="grid h-8 w-8 place-items-center overflow-hidden rounded-full bg-accent text-[12px] font-semibold text-accent-fg shadow-sm hover:bg-accent-hover"
         title={user ? `${user.firstName} ${user.lastName}` : "Account"}
       >
-        {initials}
+        {avatarSrc ? (
+          <img
+            src={avatarSrc}
+            alt={user ? `${user.firstName} ${user.lastName}` : "Account"}
+            className="h-full w-full object-cover"
+            onError={(e) => {
+              // Fall back to initials if the image fails (404, server
+              // down, etc.) by hiding the image — the parent button
+              // background is the accent color so initials would show
+              // through, but we'd be left empty. Instead swap to the
+              // initials node.
+              (e.currentTarget as HTMLImageElement).style.display = "none";
+              const sibling = (e.currentTarget as HTMLImageElement)
+                .nextElementSibling as HTMLElement | null;
+              if (sibling) sibling.style.display = "grid";
+            }}
+          />
+        ) : null}
+        <span
+          className="grid h-full w-full place-items-center"
+          style={{ display: avatarSrc ? "none" : "grid" }}
+        >
+          {initials}
+        </span>
       </button>
       {open && (
         <div className="absolute right-0 top-full z-40 mt-1.5 w-72 rounded-lg border border-app bg-app-elevated shadow-lg">

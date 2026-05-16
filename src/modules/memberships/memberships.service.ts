@@ -254,6 +254,49 @@ export class MembershipsService {
   }
 
   /**
+   * Members of an org, hydrated with the underlying user profile so
+   * the team-directory UI can render names, emails, and avatars in
+   * one round trip.
+   */
+  async findAllWithUsers(filters: ListMembershipsDto, actorUserId: string) {
+    const memberships = await this.findAll(filters, actorUserId);
+    if (memberships.length === 0) return [];
+    const userIds = Array.from(new Set(memberships.map((m) => m.userId)));
+    const users = await Promise.all(
+      userIds.map((id) =>
+        this.usersService
+          .findById(id)
+          .catch(() => null),
+      ),
+    );
+    const byId = new Map(
+      users.filter((u) => u != null).map((u) => [u!.id, u!]),
+    );
+    return memberships.map((m) => {
+      const u = byId.get(m.userId);
+      return {
+        id: m.id,
+        userId: m.userId,
+        organizationId: m.organizationId,
+        workspaceId: m.workspaceId,
+        role: m.role,
+        status: m.status,
+        createdAt: m.createdAt,
+        user: u
+          ? {
+              id: u.id,
+              email: u.email,
+              firstName: u.firstName,
+              lastName: u.lastName,
+              avatarFileId: u.avatarFileId,
+              updatedAt: u.updatedAt,
+            }
+          : null,
+      };
+    });
+  }
+
+  /**
    * Public preview of an invite by token — used by the /invite/:token
    * page so the recipient sees who invited them, the org, and the role
    * before signing in or signing up.

@@ -2404,6 +2404,49 @@ export async function scheduleMeetingBot(payload: {
   });
 }
 
+/** Member of an organization with the user's profile inlined so the
+ *  UI can render names + avatars without a separate user fetch. */
+export interface OrganizationMember {
+  id: string;
+  userId: string;
+  organizationId: string;
+  workspaceId: string | null;
+  role: string;
+  status: string;
+  createdAt: string;
+  user: {
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    avatarFileId: string | null;
+    updatedAt: string;
+  } | null;
+}
+
+export async function fetchOrganizationMembers(organizationId: string) {
+  return apiRequest<OrganizationMember[]>(`/memberships/with-users`, {
+    query: { organizationId },
+  });
+}
+
+export async function inviteOrganizationMember(payload: {
+  organizationId: string;
+  email: string;
+  role?: string;
+}) {
+  return apiRequest<{ id: string; email: string }>(`/memberships/invite`, {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+export async function removeMembership(membershipId: string) {
+  return apiRequest<{ id: string }>(`/memberships/${membershipId}`, {
+    method: 'DELETE',
+  });
+}
+
 export async function speakInMeeting(sessionId: string, text: string) {
   return apiRequest<{ enqueued: boolean }>(
     `/meeting-bot/sessions/${sessionId}/speak`,

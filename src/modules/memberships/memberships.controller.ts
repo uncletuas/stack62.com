@@ -71,6 +71,27 @@ export class MembershipsController {
     return this.membershipsService.findAll(query, user.userId);
   }
 
+  /**
+   * Same scope as GET / but each membership is hydrated with the
+   * underlying user (name, email, avatar). The Coworker chat panel's
+   * Team tab reads from here so it can render an avatar-and-name
+   * directory in a single call.
+   */
+  @RequireAccess({
+    resource: 'membership',
+    action: 'read',
+    organizationId: { source: 'query', key: 'organizationId', optional: true },
+    workspaceId: { source: 'query', key: 'workspaceId', optional: true },
+    allowUnscoped: true,
+  })
+  @Get('with-users')
+  findAllWithUsers(
+    @Query() query: ListMembershipsDto,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.membershipsService.findAllWithUsers(query, user.userId);
+  }
+
   @Get('invites')
   findInvites(
     @Query('organizationId') orgId: string,
