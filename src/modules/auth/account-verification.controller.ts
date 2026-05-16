@@ -6,7 +6,10 @@ import {
   NotFoundException,
   Post,
   Query,
+  UnauthorizedException,
 } from '@nestjs/common';
+import { CurrentUser } from './decorators/current-user.decorator';
+import type { JwtUser } from './interfaces/jwt-user.interface';
 import { ApiTags } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -133,6 +136,82 @@ export class AccountVerificationController {
       targetId: user.id,
       origin: 'user',
       metadata: { email: user.email },
+    });
+    return { ok: true };
+  }
+
+  /**
+   * Authenticated password change. Requires the *current* password
+   * so a stolen JWT alone can't rotate it. Logs the rotation to
+   * activity so the audit trail shows it.
+   */
+  @Post('change-password')
+  async changePassword(
+    @Body() body: { currentPassword: string; newPassword: string },
+    @CurrentUser() actor: JwtUser,
+  ) {
+    if (!body.currentPassword || !body.newPassword) {
+      throw new BadRequestException(
+        'currentPassword and newPassword are required.',
+      );
+    }
+    if (body.newPassword.length < 8) {
+      throw new BadRequestException(
+        'New password must be at least 8 characters.',
+      );
+    }
+    if (body.newPassword === body.currentPassword) {
+      throw new BadRequestException(
+        'New password must be different from current.',
+      );
+    }
+    const user = await this.usersRepo.findOne({
+      where: { id: actor.userId },
+    });
+    if (!user) throw new NotFoundException('Account not found.');
+    const ok = await argon2.verify(user.passwordHash, body.currentPassword);
+    if (!ok) {
+      throw new UnauthorizedException('Current password is incorrect.');
+    }
+    user.passwordHash = await argon2.hash(body.newPassword);
+    await this.usersRepo.save(user);
+    await this.activity.log({
+      actorUserId: user.id,
+      action: 'account.password_changed',
+      targetType: 'user',
+      targetId: user.id,
+      origin: 'user',
+      metadata: { email: user.email },
+    });
+    return { ok: true };
+  }
+
+  /**
+   * Send the email-verification link to the currently signed-in user.
+   * Separate from `send-verification` (which takes an email body) so
+   * the UI can offer a "Resend" button without leaking that the email
+   * exists.
+   */
+  @Post('resend-verification')
+  async resendVerification(@CurrentUser() actor: JwtUser) {
+    const user = await this.usersRepo.findOne({
+      where: { id: actor.userId },
+    });
+    if (!user) throw new NotFoundException('Account not found.');
+    if (user.emailVerifiedAt) return { ok: true, alreadyVerified: true };
+    const token = crypto.randomBytes(32).toString('hex');
+    user.emailVerificationToken = token;
+    user.emailVerificationExpiresAt = new Date(
+      Date.now() + 24 * 60 * 60 * 1000,
+    );
+    await this.usersRepo.save(user);
+    const appUrl =
+      this.config.get<string>('APP_PUBLIC_URL') || 'http://localhost:5173';
+    await this.email.sendEmail({
+      to: user.email,
+      subject: 'Confirm your Stack62 email',
+      text: `Hi ${user.firstName},\n\nConfirm your email by visiting:\n${appUrl}/verify-email?token=${token}\n\nThe link expires in 24 hours.`,
+      html: verifyHtml(user.firstName, `${appUrl}/verify-email?token=${token}`),
     });
     return { ok: true };
   }

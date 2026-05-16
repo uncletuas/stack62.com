@@ -27,6 +27,8 @@ export interface AuthUser {
   status: string;
   /** File id of the user's uploaded avatar; null when not set. */
   avatarFileId?: string | null;
+  /** When the user clicked the verify-email link. Null = unverified. */
+  emailVerifiedAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }

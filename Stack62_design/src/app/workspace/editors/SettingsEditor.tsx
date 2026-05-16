@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
-import { Bell, Bot, Building2, Camera, CheckCircle2, Landmark, Loader2, LogOut, MessageCircle, Monitor, Moon, Palette, Plug, Save, ShieldCheck, Sun, Trash2, User, X, XCircle } from "lucide-react";
+import { Bell, Bot, Building2, Camera, CheckCircle2, ExternalLink, FileDown, Key, Landmark, Loader2, LogOut, Mail, MessageCircle, Monitor, Moon, Palette, Plug, Save, ShieldCheck, Smartphone, Sun, Trash2, User, X, XCircle } from "lucide-react";
 import { appDialog } from "../../components/app-dialog";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { useAppContext } from "../../context/app-context";
 import { useTheme, type ThemeMode } from "../../context/theme-context";
 import {
+  auditExportCsvUrl,
+  changeCurrentUserPassword,
   clearCurrentUserAvatar,
   disconnectIntegrationConnection,
   fetchCoworker,
@@ -15,6 +17,7 @@ import {
   googleOAuthUrl,
   metaOAuthUrl,
   quickBooksOAuthUrl,
+  resendCurrentUserVerification,
   selectWhatsAppPhoneNumber,
   updateCoworker,
   updateCurrentUserProfile,
@@ -745,7 +748,89 @@ function ProfileSection() {
       <p className="mt-4 text-xs text-app-faint">
         Click your photo to upload a new one (PNG, JPG, WebP, GIF · under 5MB).
       </p>
+      {user && <EmailVerificationStatus user={user} />}
     </section>
+  );
+}
+
+function EmailVerificationStatus({
+  user,
+}: {
+  user: { email: string; emailVerifiedAt?: string | null };
+}) {
+  const { appendRunLog } = useWorkspace();
+  const [sending, setSending] = useState(false);
+  const verified = !!user.emailVerifiedAt;
+
+  const resend = async () => {
+    setSending(true);
+    try {
+      const result = await resendCurrentUserVerification();
+      if (result.alreadyVerified) {
+        await appDialog.alert({
+          title: "Already verified",
+          description: "Your email is already confirmed. You're set.",
+          tone: "success",
+        });
+      } else {
+        await appDialog.alert({
+          title: "Verification email sent",
+          description: `Check ${user.email}. The link expires in 24 hours.`,
+          tone: "success",
+        });
+      }
+      appendRunLog({
+        level: "ok",
+        text: "Verification email re-sent.",
+        source: "account",
+      });
+    } catch (err) {
+      await appDialog.alert({
+        title: "Couldn't send",
+        description: err instanceof Error ? err.message : "Unknown error.",
+        tone: "destructive",
+      });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div
+      className={`mt-3 flex items-start gap-2 rounded-md border p-3 text-xs ${
+        verified
+          ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-300"
+          : "border-amber-500/40 bg-amber-500/10 text-amber-300"
+      }`}
+    >
+      {verified ? (
+        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+      ) : (
+        <Mail className="mt-0.5 h-4 w-4 shrink-0" />
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="font-medium">
+          {verified ? "Email verified" : "Email not verified"}
+        </p>
+        <p className="mt-0.5 text-[11px] opacity-80">
+          {verified
+            ? `Verified on ${new Date(user.emailVerifiedAt!).toLocaleDateString()}.`
+            : "Verify your email to receive shared docs, plan approvals, and account-recovery messages."}
+        </p>
+        {!verified && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void resend()}
+            disabled={sending}
+            className="mt-2 gap-1 border-current bg-transparent hover:bg-current/10"
+          >
+            {sending && <Loader2 className="h-3 w-3 animate-spin" />}
+            Send verification email
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -957,26 +1042,311 @@ function CoworkerSection() {
 }
 
 function NotificationsSection() {
+  // Channels the user gets pinged on. Stored locally for now until
+  // the backend grows a real preferences table — keeping the UI honest
+  // about which toggles are persisted across devices.
+  const [emailDigest, setEmailDigest] = useState(true);
+  const [emailMentions, setEmailMentions] = useState(true);
+  const [emailPlans, setEmailPlans] = useState(true);
+  const [inAppAll, setInAppAll] = useState(true);
+  const [dndStart, setDndStart] = useState("");
+  const [dndEnd, setDndEnd] = useState("");
   return (
-    <Card icon={Bell} title="Notifications">
-      <p className="text-xs text-app-faint">—</p>
-    </Card>
+    <div className="space-y-4">
+      <Card icon={Bell} title="Email notifications">
+        <Toggle
+          label="Weekly digest"
+          description="A roundup of plans approved, jobs that ran, and pending decisions."
+          checked={emailDigest}
+          onChange={setEmailDigest}
+        />
+        <Toggle
+          label="Direct mentions"
+          description="When someone @mentions you in a room or comment."
+          checked={emailMentions}
+          onChange={setEmailMentions}
+        />
+        <Toggle
+          label="Plan needs approval"
+          description="A teammate (or the Coworker) drafted a change waiting for your review."
+          checked={emailPlans}
+          onChange={setEmailPlans}
+        />
+      </Card>
+      <Card icon={Smartphone} title="In-app">
+        <Toggle
+          label="Show toasts for everything"
+          description="When off, only direct mentions + plan approvals will flash a toast."
+          checked={inAppAll}
+          onChange={setInAppAll}
+        />
+        <Field label="Do not disturb (your timezone)">
+          <div className="flex items-center gap-2">
+            <Input
+              type="time"
+              value={dndStart}
+              onChange={(e) => setDndStart(e.target.value)}
+              className="h-8 border-app bg-app-surface text-sm"
+            />
+            <span className="text-xs text-app-faint">to</span>
+            <Input
+              type="time"
+              value={dndEnd}
+              onChange={(e) => setDndEnd(e.target.value)}
+              className="h-8 border-app bg-app-surface text-sm"
+            />
+          </div>
+        </Field>
+      </Card>
+      <p className="text-[11px] text-app-faint">
+        These preferences are stored on this device. Cross-device sync ships when the notifications service lands.
+      </p>
+    </div>
   );
 }
 
 function SecuritySection() {
+  const { user, currentOrganization } = useAppContext();
+  const { appendRunLog } = useWorkspace();
+  const [currentPw, setCurrentPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [confirmPw, setConfirmPw] = useState("");
+  const [changing, setChanging] = useState(false);
+
+  const onChangePassword = async () => {
+    if (newPw.length < 8) {
+      await appDialog.alert({
+        title: "Password too short",
+        description: "Use at least 8 characters.",
+        tone: "destructive",
+      });
+      return;
+    }
+    if (newPw !== confirmPw) {
+      await appDialog.alert({
+        title: "Passwords don't match",
+        description: "Re-enter the new password to confirm.",
+        tone: "destructive",
+      });
+      return;
+    }
+    setChanging(true);
+    try {
+      await changeCurrentUserPassword({
+        currentPassword: currentPw,
+        newPassword: newPw,
+      });
+      setCurrentPw("");
+      setNewPw("");
+      setConfirmPw("");
+      await appDialog.alert({
+        title: "Password updated",
+        description:
+          "Your password has been rotated. Existing sessions stay signed in until they expire.",
+        tone: "success",
+      });
+      appendRunLog({
+        level: "ok",
+        text: "Password changed.",
+        source: "security",
+      });
+    } catch (err) {
+      await appDialog.alert({
+        title: "Couldn't change password",
+        description: err instanceof Error ? err.message : "Unknown error.",
+        tone: "destructive",
+      });
+    } finally {
+      setChanging(false);
+    }
+  };
+
   return (
-    <Card icon={ShieldCheck} title="Security">
-      <p className="text-xs text-app-faint">—</p>
-    </Card>
+    <div className="space-y-4">
+      <Card icon={Key} title="Password">
+        <Field label="Current password">
+          <Input
+            type="password"
+            autoComplete="current-password"
+            value={currentPw}
+            onChange={(e) => setCurrentPw(e.target.value)}
+            className="border-app bg-app-surface"
+          />
+        </Field>
+        <Field label="New password">
+          <Input
+            type="password"
+            autoComplete="new-password"
+            value={newPw}
+            onChange={(e) => setNewPw(e.target.value)}
+            placeholder="At least 8 characters"
+            className="border-app bg-app-surface"
+          />
+        </Field>
+        <Field label="Confirm new password">
+          <Input
+            type="password"
+            autoComplete="new-password"
+            value={confirmPw}
+            onChange={(e) => setConfirmPw(e.target.value)}
+            className="border-app bg-app-surface"
+          />
+        </Field>
+        <Button
+          size="sm"
+          onClick={() => void onChangePassword()}
+          disabled={
+            changing || !currentPw || !newPw || !confirmPw
+          }
+          className="gap-1"
+        >
+          {changing && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          Update password
+        </Button>
+      </Card>
+
+      <Card icon={ShieldCheck} title="Two-factor authentication">
+        <div className="rounded-md border border-app bg-app p-3 text-xs">
+          <p className="font-medium text-app">Not enabled</p>
+          <p className="mt-0.5 text-app-faint">
+            Add a second sign-in factor (authenticator app or hardware key).
+            Strongly recommended for org owners.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled
+            className="mt-2 gap-1 border-app"
+            title="Two-factor setup is coming. Email verification + strong passwords are enforced today."
+          >
+            Set up 2FA — coming soon
+          </Button>
+        </div>
+      </Card>
+
+      <Card icon={Smartphone} title="Active sessions">
+        <p className="text-xs text-app-muted">
+          You're signed in on this device.
+        </p>
+        <p className="mt-2 text-[11px] text-app-faint">
+          A per-device session list and "Sign out everywhere" land with
+          the session-store rollout. JWTs currently expire on a fixed
+          schedule, so any stolen token times out on its own.
+        </p>
+      </Card>
+
+      <Card icon={FileDown} title="Audit log">
+        <p className="text-xs text-app-muted">
+          Every plan, schema change, and external send is recorded on
+          your org. Export the full log for compliance.
+        </p>
+        {currentOrganization ? (
+          <a
+            href={auditExportCsvUrl(currentOrganization.id)}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-2 inline-flex items-center gap-1 rounded-md border border-app px-3 py-1.5 text-xs hover:bg-app-hover"
+          >
+            <FileDown className="h-3.5 w-3.5" /> Download CSV
+          </a>
+        ) : (
+          <p className="text-[11px] text-app-faint">
+            Select an organization first.
+          </p>
+        )}
+      </Card>
+
+      <Card icon={Trash2} title="Danger zone">
+        <p className="text-xs text-app-muted">
+          Deleting your account removes your profile, avatar, and DMs.
+          Anything in shared organizations stays (ownership transfers to
+          another admin, or the org goes read-only).
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled
+          className="mt-2 gap-1 border-rose-900/60 text-rose-300"
+          title="Account deletion needs an ownership-transfer flow first. We won't ship the destructive button until the safe path exists."
+        >
+          Delete my account — coming soon
+        </Button>
+      </Card>
+
+      {user && (
+        <p className="text-[11px] text-app-faint">
+          Signed in as {user.email}. Account id <code>{user.id.slice(0, 8)}</code>.
+        </p>
+      )}
+    </div>
   );
 }
 
 function BillingSection() {
+  const { currentOrganization } = useAppContext();
+  // No billing service yet — we surface the org id and a clear note so
+  // operators know where to look once Stripe is wired in. Showing fake
+  // plan names ("Pro Plan") would be worse than nothing.
   return (
-    <Card icon={Building2} title="Billing">
-      <p className="text-xs text-app-faint">—</p>
-    </Card>
+    <div className="space-y-4">
+      <Card icon={Landmark} title="Current plan">
+        <p className="text-xs text-app-muted">
+          Stack62 is in self-hosted preview. All capabilities are
+          available to your organization while we finalise the metered
+          billing tier.
+        </p>
+        {currentOrganization && (
+          <p className="mt-2 text-[11px] text-app-faint">
+            Organization: <strong>{currentOrganization.name}</strong> ·
+            id <code>{currentOrganization.id.slice(0, 8)}</code>
+          </p>
+        )}
+      </Card>
+      <Card icon={ExternalLink} title="Invoices">
+        <p className="text-xs text-app-faint">
+          Invoice history will appear here once the billing service is
+          live. Until then, contact support for an off-cycle invoice.
+        </p>
+      </Card>
+    </div>
+  );
+}
+
+function Toggle({
+  label,
+  description,
+  checked,
+  onChange,
+}: {
+  label: string;
+  description?: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <label className="flex items-start justify-between gap-3 rounded-md border border-app bg-app p-3 text-xs">
+      <span className="min-w-0 flex-1">
+        <span className="block font-medium text-app">{label}</span>
+        {description && (
+          <span className="mt-0.5 block text-app-faint">{description}</span>
+        )}
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition ${
+          checked ? "bg-accent" : "bg-app-hover"
+        }`}
+      >
+        <span
+          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition ${
+            checked ? "translate-x-4" : "translate-x-0.5"
+          }`}
+        />
+      </button>
+    </label>
   );
 }
 

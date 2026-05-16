@@ -1843,6 +1843,23 @@ export async function clearCurrentUserAvatar() {
   });
 }
 
+export async function changeCurrentUserPassword(payload: {
+  currentPassword: string;
+  newPassword: string;
+}) {
+  return apiRequest<{ ok: boolean }>('/account/change-password', {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+export async function resendCurrentUserVerification() {
+  return apiRequest<{ ok: boolean; alreadyVerified?: boolean }>(
+    '/account/resend-verification',
+    { method: 'POST' },
+  );
+}
+
 /**
  * URL for rendering a user's avatar in <img src>. Append a cache-
  * busting param after upload so the browser doesn't keep the old

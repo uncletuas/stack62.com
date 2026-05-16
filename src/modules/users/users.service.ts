@@ -69,6 +69,7 @@ export class UsersService {
       lastName: user.lastName,
       status: user.status,
       avatarFileId: user.avatarFileId,
+      emailVerifiedAt: user.emailVerifiedAt,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
