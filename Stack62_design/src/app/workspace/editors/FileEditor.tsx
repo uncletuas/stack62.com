@@ -1,23 +1,45 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import {
+  AlignCenter,
+  AlignJustify,
+  AlignLeft,
+  AlignRight,
   Bold,
+  Code,
   Download,
+  Eraser,
   FileText,
+  Heading1,
+  Heading2,
+  Heading3,
   Image as ImageIcon,
+  Indent,
   Italic,
+  Link2,
+  List,
+  ListOrdered,
   ExternalLink,
   LayoutPanelTop,
   Loader2,
+  Minus,
+  Outdent,
   Plus,
   Presentation,
   Printer,
+  Quote,
+  Redo2,
   Save,
   Sheet,
   Sparkles,
+  Strikethrough,
+  Subscript,
+  Superscript,
   Table2,
   Trash2,
   Type,
+  Underline,
+  Undo2,
   Upload,
 } from "lucide-react";
 import { appDialog } from "../../components/app-dialog";
@@ -215,6 +237,36 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
       if (revoked) URL.revokeObjectURL(revoked);
     };
   }, [tab.kind, tab.refId, currentOrganization?.id, currentWorkspace?.id]);
+
+  // Refetch when the coworker signals a possible external change. We
+  // skip the refetch if the user has unsaved local edits ("saving")
+  // because we'd otherwise stomp on their typing; the autosave will
+  // land moments later and the next coworker turn will pick it up.
+  useEffect(() => {
+    if (!tab.refId) return;
+    const handler = (event: Event) => {
+      const ev = event as CustomEvent<{ tabKind: string | null; refId: string | null }>;
+      const detail = ev.detail ?? { tabKind: null, refId: null };
+      // Only refetch if the signal matches the doc/file we're showing.
+      if (detail.refId && detail.refId !== tab.refId) return;
+      if (saving === "saving") return;
+      if (tab.kind === "document") {
+        void fetchDocument(tab.refId!).then((doc) => {
+          setDocument(doc);
+          setContent(doc.content);
+          setSaving("saved");
+        }).catch(() => { /* ignore */ });
+      } else if (tab.kind === "file" && stored?.id && EDITABLE_RE.test(stored.filename)) {
+        void fetchFileContent(stored.id).then((doc) => {
+          setEditableContent(doc);
+          setContent(doc.text);
+          setSaving("saved");
+        }).catch(() => { /* ignore */ });
+      }
+    };
+    window.addEventListener("stack62:editor-refresh", handler);
+    return () => window.removeEventListener("stack62:editor-refresh", handler);
+  }, [tab.kind, tab.refId, stored?.id, stored?.filename, saving]);
 
   const onUpload = async (list: FileList | null) => {
     if (!list || !currentOrganization) return;
@@ -455,7 +507,13 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
                 }}
               />
             ) : (
-              <DocumentSurface text={content} onChange={queueSave} zoom={zoom} />
+              <DocumentSurface
+                text={content}
+                onChange={queueSave}
+                zoom={zoom}
+                documentId={document?.id ?? null}
+                title={displayName}
+              />
             )
           ) : surface === "text" ? (
             <TextSurface text={content} onChange={queueSave} />
@@ -638,120 +696,415 @@ const PAGE_BREAK_MARK = '<hr data-page-break="1" />';
  * sheet. This matches how Word/Docs feel without requiring intricate
  * pagination algorithms.
  */
+/**
+ * Google-Docs-style rich text editor. A single contentEditable so
+ * formatting commands work reliably across the whole document, with a
+ * paginated *visual* layout via CSS (one tall column with page breaks
+ * styled in). Toolbar buttons preserve selection by handling
+ * `onMouseDown` with `preventDefault` instead of `onClick` — without
+ * that, the editor loses focus before `execCommand` runs and every
+ * command silently fails (this was the "actions are not working" bug).
+ *
+ * Coworker control: listens to `window.stack62:doc-command` events so
+ * the AI can directly drive the editor — get content, insert at cursor,
+ * apply formatting, replace selection. Each command can target a
+ * specific documentId or fall through to the focused doc.
+ */
 function DocumentSurface({
   text,
   onChange,
   zoom,
+  documentId,
+  title,
 }: {
   text: string;
   onChange: (next: string) => void;
   zoom: number;
+  documentId: string | null;
+  title: string;
 }) {
   const scale = zoom / 100;
   const [layout, setLayout] = useState<DocLayout>(DEFAULT_LAYOUT);
-  const [pages, setPages] = useState<string[]>(() => splitPages(text));
+  const editorRef = useRef<HTMLDivElement | null>(null);
   const lastEmittedRef = useRef<string>("");
+  const savedRangeRef = useRef<Range | null>(null);
+  const [stats, setStats] = useState({ words: 0, chars: 0 });
+  const [activeMarks, setActiveMarks] = useState<Set<string>>(new Set());
 
-  // Hydrate when the file content changes externally.
+  /** Push current HTML upward (debounced by the parent's autosave). */
+  const emit = useCallback(() => {
+    const el = editorRef.current;
+    if (!el) return;
+    const html = el.innerHTML;
+    lastEmittedRef.current = html;
+    onChange(html);
+    setStats(computeDocStats(el));
+  }, [onChange]);
+
+  /** Hydrate when content changes externally (initial load, coworker
+   *  edit, version rollback). Avoids stomping on user typing because
+   *  we compare against the last value we *emitted* — anything else
+   *  must be external. */
   useEffect(() => {
+    const el = editorRef.current;
+    if (!el) return;
     if (text === lastEmittedRef.current) return;
-    setPages(splitPages(text));
+    el.innerHTML = isHtml(text) ? text : escapeText(text);
+    lastEmittedRef.current = el.innerHTML;
+    setStats(computeDocStats(el));
   }, [text]);
 
-  const updatePage = (index: number, html: string) => {
-    setPages((cur) => {
-      const next = [...cur];
-      next[index] = html;
-      const joined = joinPages(next);
-      lastEmittedRef.current = joined;
-      onChange(joined);
-      return next;
-    });
+  /** Track selection so toolbar buttons can restore it before running
+   *  commands. We also use this to update the active-mark indicators
+   *  on the toolbar (B / I / U highlighted when the caret is inside
+   *  bold / italic / underlined text). */
+  const captureSelection = useCallback(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    const el = editorRef.current;
+    if (!el || !el.contains(range.commonAncestorContainer)) return;
+    savedRangeRef.current = range.cloneRange();
+    setActiveMarks(queryActiveMarks());
+  }, []);
+
+  /** Put the previously captured selection back into the document so
+   *  `execCommand` knows where to operate. */
+  const restoreSelection = useCallback(() => {
+    const range = savedRangeRef.current;
+    if (!range) {
+      // No prior selection — focus the editor and put the caret at the
+      // end so commands still have somewhere to write.
+      const el = editorRef.current;
+      if (!el) return;
+      el.focus();
+      const sel = window.getSelection();
+      const fresh = document.createRange();
+      fresh.selectNodeContents(el);
+      fresh.collapse(false);
+      sel?.removeAllRanges();
+      sel?.addRange(fresh);
+      return;
+    }
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    editorRef.current?.focus();
+  }, []);
+
+  const exec = useCallback(
+    (command: string, value?: string) => {
+      restoreSelection();
+      try {
+        document.execCommand(command, false, value);
+      } catch {
+        /* ignore — execCommand failures are silent by spec */
+      }
+      // Re-capture: command may have rewrapped the selection.
+      captureSelection();
+      emit();
+    },
+    [captureSelection, emit, restoreSelection],
+  );
+
+  const insertHtml = useCallback(
+    (html: string) => {
+      restoreSelection();
+      try {
+        document.execCommand("insertHTML", false, html);
+      } catch { /* ignore */ }
+      captureSelection();
+      emit();
+    },
+    [captureSelection, emit, restoreSelection],
+  );
+
+  /** Replace the entire document body. Used by the coworker to write
+   *  generated content. */
+  const replaceAll = useCallback(
+    (html: string) => {
+      const el = editorRef.current;
+      if (!el) return;
+      el.innerHTML = isHtml(html) ? html : escapeText(html);
+      lastEmittedRef.current = el.innerHTML;
+      onChange(el.innerHTML);
+      setStats(computeDocStats(el));
+    },
+    [onChange],
+  );
+
+  /** Append HTML at the end of the document. */
+  const appendHtml = useCallback(
+    (html: string) => {
+      const el = editorRef.current;
+      if (!el) return;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+      el.focus();
+      try {
+        document.execCommand("insertHTML", false, html);
+      } catch { /* ignore */ }
+      lastEmittedRef.current = el.innerHTML;
+      onChange(el.innerHTML);
+      setStats(computeDocStats(el));
+    },
+    [onChange],
+  );
+
+  // ── Coworker event API ──────────────────────────────────────────
+  // Listens for `stack62:doc-command` events. Events can target a
+  // specific documentId via `detail.documentId`, or omit it to apply
+  // to whichever doc is currently focused. The reply is dispatched as
+  // `stack62:doc-command-reply` so the caller can read content back.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const ev = event as CustomEvent<{
+        documentId?: string | null;
+        action:
+          | "get-content"
+          | "get-selection"
+          | "replace-all"
+          | "append"
+          | "insert"
+          | "exec"
+          | "wrap-selection"
+          | "find-replace";
+        html?: string;
+        text?: string;
+        command?: string;
+        value?: string;
+        tag?: string;
+        find?: string;
+        replace?: string;
+        requestId?: string;
+      }>;
+      const detail = ev.detail ?? ({} as Record<string, unknown>);
+      if (detail.documentId && detail.documentId !== documentId) return;
+      const reply = (payload: Record<string, unknown>) => {
+        if (!detail.requestId) return;
+        window.dispatchEvent(
+          new CustomEvent("stack62:doc-command-reply", {
+            detail: { requestId: detail.requestId, ...payload },
+          }),
+        );
+      };
+      const el = editorRef.current;
+      switch (detail.action) {
+        case "get-content":
+          reply({ documentId, title, html: el?.innerHTML ?? "", words: stats.words });
+          break;
+        case "get-selection": {
+          const sel = window.getSelection();
+          const selText = sel && sel.rangeCount > 0 ? sel.toString() : "";
+          reply({ documentId, text: selText });
+          break;
+        }
+        case "replace-all":
+          if (typeof detail.html === "string") replaceAll(detail.html);
+          else if (typeof detail.text === "string") replaceAll(escapeText(detail.text));
+          reply({ ok: true });
+          break;
+        case "append":
+          if (typeof detail.html === "string") appendHtml(detail.html);
+          else if (typeof detail.text === "string") appendHtml(escapeText(detail.text));
+          reply({ ok: true });
+          break;
+        case "insert":
+          if (typeof detail.html === "string") insertHtml(detail.html);
+          else if (typeof detail.text === "string") insertHtml(escapeText(detail.text));
+          reply({ ok: true });
+          break;
+        case "exec":
+          if (detail.command) exec(detail.command, detail.value);
+          reply({ ok: true });
+          break;
+        case "wrap-selection":
+          if (detail.tag) exec("formatBlock", `<${detail.tag}>`);
+          reply({ ok: true });
+          break;
+        case "find-replace": {
+          if (!el || !detail.find) {
+            reply({ ok: false });
+            break;
+          }
+          const before = el.innerHTML;
+          const escaped = detail.find.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const re = new RegExp(escaped, "g");
+          const after = before.replace(re, detail.replace ?? "");
+          if (after !== before) {
+            el.innerHTML = after;
+            lastEmittedRef.current = after;
+            onChange(after);
+            setStats(computeDocStats(el));
+          }
+          reply({ ok: true, replaced: (before.match(re) ?? []).length });
+          break;
+        }
+        default:
+          reply({ ok: false, error: "unknown action" });
+      }
+    };
+    window.addEventListener("stack62:doc-command", handler);
+    return () => window.removeEventListener("stack62:doc-command", handler);
+  }, [
+    documentId,
+    title,
+    stats.words,
+    appendHtml,
+    exec,
+    insertHtml,
+    onChange,
+    replaceAll,
+  ]);
+
+  // ── Keyboard shortcuts ──────────────────────────────────────────
+  const handleKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const mod = e.metaKey || e.ctrlKey;
+    if (!mod) return;
+    const k = e.key.toLowerCase();
+    if (k === "b") { e.preventDefault(); exec("bold"); }
+    else if (k === "i") { e.preventDefault(); exec("italic"); }
+    else if (k === "u") { e.preventDefault(); exec("underline"); }
+    else if (k === "k") { e.preventDefault(); void promptLink().then((u) => u && exec("createLink", u)); }
+    else if (k === "z" && !e.shiftKey) { e.preventDefault(); exec("undo"); }
+    else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); exec("redo"); }
+    else if (k === "\\" || k === "0") {
+      // Ctrl+\ / Ctrl+0 → clear formatting (matches Docs).
+      e.preventDefault(); exec("removeFormat");
+    }
   };
 
-  const insertPageBreak = (afterIndex: number) => {
-    setPages((cur) => {
-      const next = [...cur];
-      next.splice(afterIndex + 1, 0, "");
-      const joined = joinPages(next);
-      lastEmittedRef.current = joined;
-      onChange(joined);
-      return next;
+  const promptLink = async (): Promise<string | null> => {
+    const url = await appDialog.prompt({
+      title: "Insert link",
+      placeholder: "https://example.com",
+      inputType: "url",
+      confirmLabel: "Insert",
     });
+    return (url ?? "").trim() || null;
   };
 
-  const removePage = (index: number) => {
-    setPages((cur) => {
-      if (cur.length <= 1) return cur;
-      const next = cur.filter((_, i) => i !== index);
-      const joined = joinPages(next);
-      lastEmittedRef.current = joined;
-      onChange(joined);
-      return next;
-    });
+  // ── Insert helpers ──────────────────────────────────────────────
+  const insertLink = async () => {
+    const sel = window.getSelection();
+    const hasSelection = sel && sel.toString().length > 0;
+    const url = await promptLink();
+    if (!url) return;
+    if (hasSelection) {
+      exec("createLink", url);
+    } else {
+      insertHtml(`<a href="${escapeAttr(url)}" target="_blank" rel="noreferrer">${escapeText(url)}</a>`);
+    }
   };
 
+  const insertImage = async () => {
+    const url = await appDialog.prompt({
+      title: "Insert image",
+      placeholder: "https://example.com/image.png",
+      inputType: "url",
+      confirmLabel: "Insert",
+    });
+    if (!url) return;
+    insertHtml(`<img src="${escapeAttr(url)}" alt="" />`);
+  };
+
+  const insertTable = async () => {
+    const rowsStr = await appDialog.prompt({
+      title: "Insert table — rows",
+      initialValue: "3",
+      inputType: "number",
+      confirmLabel: "Next",
+    });
+    if (!rowsStr) return;
+    const colsStr = await appDialog.prompt({
+      title: "Insert table — columns",
+      initialValue: "3",
+      inputType: "number",
+      confirmLabel: "Insert",
+    });
+    if (!colsStr) return;
+    const rows = Math.max(1, Math.min(20, Number(rowsStr) || 3));
+    const cols = Math.max(1, Math.min(20, Number(colsStr) || 3));
+    let html = "<table>";
+    for (let r = 0; r < rows; r += 1) {
+      html += "<tr>";
+      for (let c = 0; c < cols; c += 1) html += "<td>&nbsp;</td>";
+      html += "</tr>";
+    }
+    html += "</table><p><br /></p>";
+    insertHtml(html);
+  };
+
+  const insertPageBreak = () => {
+    insertHtml('<hr data-page-break="1" class="page-break" /><p><br /></p>');
+  };
+
+  const insertHorizontalRule = () => insertHtml("<hr />");
+
+  // ── Page dimensions ─────────────────────────────────────────────
   const sizeIn = PAGE_SIZES[layout.pageSize];
   const isLandscape = layout.orientation === "landscape";
   const pxW = (isLandscape ? sizeIn.heightIn : sizeIn.widthIn) * 96 * scale;
-  const pxH = (isLandscape ? sizeIn.widthIn : sizeIn.heightIn) * 96 * scale;
   const padPx = layout.marginIn * 96 * scale;
 
   return (
-    <div className="min-h-full overflow-auto bg-doc-canvas">
+    <div className="flex h-full flex-col bg-doc-canvas">
       <DocumentToolbar
         layout={layout}
         setLayout={setLayout}
-        onInsertBreak={() => {
-          // Insert a break after the active page (the one with focus).
-          const active = document.activeElement as HTMLElement | null;
-          if (active?.dataset?.pageIndex !== undefined) {
-            insertPageBreak(Number(active.dataset.pageIndex));
-          } else {
-            insertPageBreak(pages.length - 1);
-          }
-        }}
+        activeMarks={activeMarks}
+        onExec={exec}
+        onLink={insertLink}
+        onImage={insertImage}
+        onTable={insertTable}
+        onPageBreak={insertPageBreak}
+        onHorizontalRule={insertHorizontalRule}
       />
 
-      <div className="space-y-6 px-10 py-6">
-        {pages.map((html, idx) => (
-          <div key={idx} className="relative">
-            <PageSheet
-              html={html}
-              widthPx={pxW}
-              heightPx={pxH}
-              paddingPx={padPx}
-              fontFamily={layout.fontFamily}
-              fontSize={layout.fontSize}
-              pageIndex={idx}
-              onChange={(next) => updatePage(idx, next)}
-            />
-            <div className="pointer-events-none absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-app-elevated px-2 py-0.5 text-[10px] uppercase tracking-wider text-app-faint shadow-sm">
-              Page {idx + 1} / {pages.length}
-            </div>
-            {pages.length > 1 && (
-              <button
-                type="button"
-                onClick={() => removePage(idx)}
-                className="absolute -top-3 right-4 rounded-full bg-app-elevated px-2 py-0.5 text-[10px] text-rose-400 shadow-sm hover:bg-rose-50"
-                title="Delete this page"
-              >
-                Remove
-              </button>
-            )}
-          </div>
-        ))}
-
-        <div className="mx-auto" style={{ width: pxW }}>
-          <button
-            type="button"
-            onClick={() => insertPageBreak(pages.length - 1)}
-            className="w-full rounded-md border border-dashed border-app-strong bg-app-elevated py-2 text-[11px] text-app-muted hover:border-cyan-400/50 hover:text-app"
+      <div className="min-h-0 flex-1 overflow-auto">
+        <div className="py-8">
+          <div
+            className="mx-auto rounded-sm bg-doc-paper shadow-doc"
+            style={{
+              width: pxW,
+              minHeight: pxW * 1.3,
+              padding: padPx,
+              fontFamily: layout.fontFamily,
+              fontSize: layout.fontSize,
+            }}
           >
-            + Add new page
-          </button>
+            <div
+              ref={editorRef}
+              contentEditable
+              suppressContentEditableWarning
+              spellCheck
+              data-doc-id={documentId ?? ""}
+              onInput={() => { emit(); captureSelection(); }}
+              onBlur={emit}
+              onKeyDown={handleKey}
+              onKeyUp={captureSelection}
+              onMouseUp={captureSelection}
+              onPaste={(e) => {
+                // Plain-text paste so we don't drag in arbitrary
+                // styles from a Word doc. The coworker can use a
+                // separate "paste rich" command if needed.
+                const text = e.clipboardData.getData("text/plain");
+                if (!text) return;
+                e.preventDefault();
+                insertHtml(escapeText(text).replace(/\n/g, "<br />"));
+              }}
+              className="docs-surface min-h-[400px] bg-transparent text-app outline-none"
+              style={{ lineHeight: 1.6 }}
+            />
+          </div>
         </div>
       </div>
+
+      <DocumentStatusBar stats={stats} title={title} />
 
       <style>{`
         .docs-surface h1 { font-size: 1.85em; font-weight: 600; margin: 18px 0 8px; }
@@ -774,14 +1127,27 @@ function DocumentSurface({
           font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
           font-size: 0.92em;
         }
-        .docs-surface table { border-collapse: collapse; margin: 12px 0; }
+        .docs-surface pre {
+          background: var(--app-overlay); padding: 10px 12px; border-radius: 6px;
+          font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+          font-size: 0.92em; overflow-x: auto;
+        }
+        .docs-surface table { border-collapse: collapse; margin: 12px 0; width: 100%; }
         .docs-surface table td, .docs-surface table th {
           border: 1px solid var(--app-border);
           padding: 6px 10px; min-width: 60px;
         }
         .docs-surface img { max-width: 100%; height: auto; }
+        .docs-surface hr.page-break {
+          border: none; border-top: 2px dashed var(--app-border-strong);
+          margin: 24px 0; page-break-after: always; break-after: page;
+        }
+        .docs-surface hr:not(.page-break) {
+          border: none; border-top: 1px solid var(--app-border-strong);
+          margin: 12px 0;
+        }
         .docs-surface:empty::before {
-          content: "Start writing — pick a heading style, drop in an image, or paste content.";
+          content: "Start writing — or ask your coworker to draft something for you.";
           color: var(--app-text-faint);
         }
       `}</style>
@@ -789,177 +1155,91 @@ function DocumentSurface({
   );
 }
 
-function PageSheet({
-  html,
-  widthPx,
-  heightPx,
-  paddingPx,
-  fontFamily,
-  fontSize,
-  pageIndex,
-  onChange,
+function DocumentStatusBar({
+  stats,
+  title,
 }: {
-  html: string;
-  widthPx: number;
-  heightPx: number;
-  paddingPx: number;
-  fontFamily: string;
-  fontSize: number;
-  pageIndex: number;
-  onChange: (next: string) => void;
+  stats: { words: number; chars: number };
+  title: string;
 }) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  const lastEmittedRef = useRef<string>("");
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (html === lastEmittedRef.current) return;
-    el.innerHTML = isHtml(html) ? html : escapeText(html);
-  }, [html]);
-
-  const emit = () => {
-    const el = ref.current;
-    if (!el) return;
-    const next = el.innerHTML;
-    lastEmittedRef.current = next;
-    onChange(next);
-  };
-
   return (
-    <div
-      className="mx-auto rounded-sm bg-doc-paper shadow-doc"
-      style={{
-        width: widthPx,
-        minHeight: heightPx,
-        padding: paddingPx,
-      }}
-    >
-      <div
-        ref={ref}
-        contentEditable
-        suppressContentEditableWarning
-        spellCheck
-        data-page-index={pageIndex}
-        onInput={emit}
-        onBlur={emit}
-        onKeyDown={(e) => {
-          if (e.ctrlKey && e.key === "Enter") {
-            // Ctrl+Enter inside a page is treated as "insert page break"
-            // by the parent — bubble via custom event.
-            e.preventDefault();
-            ref.current?.dispatchEvent(
-              new CustomEvent("stack62:page-break", { bubbles: true }),
-            );
-          }
-        }}
-        onPaste={(e) => {
-          const pastedHtml = e.clipboardData.getData("text/html");
-          if (!pastedHtml) return;
-          e.preventDefault();
-          const text = e.clipboardData.getData("text/plain");
-          document.execCommand("insertText", false, text);
-          emit();
-        }}
-        className="docs-surface min-h-full bg-transparent text-app outline-none"
-        style={{
-          fontFamily,
-          fontSize,
-          lineHeight: 1.6,
-        }}
-      />
+    <div className="flex shrink-0 items-center justify-between border-t border-app bg-app-elevated px-4 py-1 text-[11px] text-app-faint">
+      <span className="truncate">{title}</span>
+      <span className="tabular-nums">
+        {stats.words} word{stats.words === 1 ? "" : "s"} · {stats.chars} char{stats.chars === 1 ? "" : "s"}
+      </span>
     </div>
   );
 }
 
-function splitPages(text: string): string[] {
-  if (!text) return [""];
-  const re = /<hr\s+data-page-break="1"\s*\/?>/gi;
-  const parts = text.split(re);
-  return parts.length > 0 ? parts : [""];
+function computeDocStats(el: HTMLElement): { words: number; chars: number } {
+  const text = el.innerText ?? "";
+  const trimmed = text.trim();
+  const chars = trimmed.length;
+  const words = trimmed ? trimmed.split(/\s+/).filter(Boolean).length : 0;
+  return { words, chars };
 }
-function joinPages(pages: string[]): string {
-  return pages.join(PAGE_BREAK_MARK);
+
+/** Inspect the current selection and return which formatting marks
+ *  the caret currently sits inside. Used to highlight active toolbar
+ *  buttons (B / I / U / strike / lists / alignment). */
+function queryActiveMarks(): Set<string> {
+  const marks = new Set<string>();
+  if (typeof document.queryCommandState !== "function") return marks;
+  const checks: Array<[string, string]> = [
+    ["bold", "bold"],
+    ["italic", "italic"],
+    ["underline", "underline"],
+    ["strikeThrough", "strike"],
+    ["insertUnorderedList", "ul"],
+    ["insertOrderedList", "ol"],
+    ["justifyLeft", "left"],
+    ["justifyCenter", "center"],
+    ["justifyRight", "right"],
+    ["justifyFull", "justify"],
+  ];
+  for (const [cmd, key] of checks) {
+    try { if (document.queryCommandState(cmd)) marks.add(key); } catch { /* ignore */ }
+  }
+  return marks;
+}
+
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function DocumentToolbar({
   layout,
   setLayout,
-  onInsertBreak,
+  activeMarks,
+  onExec,
+  onLink,
+  onImage,
+  onTable,
+  onPageBreak,
+  onHorizontalRule,
 }: {
   layout: DocLayout;
   setLayout: (next: DocLayout) => void;
-  onInsertBreak: () => void;
+  activeMarks: Set<string>;
+  onExec: (command: string, value?: string) => void;
+  onLink: () => void;
+  onImage: () => void;
+  onTable: () => void;
+  onPageBreak: () => void;
+  onHorizontalRule: () => void;
 }) {
-  // execCommand operates on whichever contentEditable currently owns the
-  // selection — i.e. the page the user just clicked into. We just call it
-  // directly; no need to thread a callback.
-  const onExec = (command: string, value?: string) => {
-    if (typeof document.execCommand !== "function") return;
-    document.execCommand(command, false, value);
-  };
   const setBlock = (tag: string) => onExec("formatBlock", `<${tag}>`);
-  const insertLink = async () => {
-    const url = await appDialog.prompt({
-      title: "Insert link",
-      placeholder: "https://example.com",
-      inputType: "url",
-      confirmLabel: "Insert",
-    });
-    if (url) onExec("createLink", url);
-  };
-  const insertImage = async () => {
-    const url = await appDialog.prompt({
-      title: "Insert image",
-      placeholder: "https://example.com/image.png",
-      inputType: "url",
-      confirmLabel: "Insert",
-    });
-    if (url) onExec("insertImage", url);
-  };
-  const insertTable = async () => {
-    const rowsStr = await appDialog.prompt({
-      title: "Insert table",
-      description: "How many rows?",
-      initialValue: "3",
-      inputType: "number",
-      confirmLabel: "Next",
-    });
-    if (!rowsStr) return;
-    const colsStr = await appDialog.prompt({
-      title: "Insert table",
-      description: "How many columns?",
-      initialValue: "3",
-      inputType: "number",
-      confirmLabel: "Insert",
-    });
-    if (!colsStr) return;
-    const rows = Math.max(1, Math.min(20, Number(rowsStr) || 3));
-    const cols = Math.max(1, Math.min(20, Number(colsStr) || 3));
-    let html = "<table>";
-    for (let r = 0; r < rows; r += 1) {
-      html += "<tr>";
-      for (let c = 0; c < cols; c += 1) html += "<td>&nbsp;</td>";
-      html += "</tr>";
-    }
-    html += "</table><p></p>";
-    onExec("insertHTML", html);
-  };
 
   return (
-    <div className="sticky top-0 z-20 border-b border-app bg-app-elevated text-app-muted shadow-sm">
-      {/* Row 1 — Page layout */}
+    <div className="sticky top-0 z-20 shrink-0 border-b border-app bg-app-elevated text-app-muted shadow-sm">
+      {/* Row 1 — Page setup */}
       <div className="flex flex-wrap items-center gap-1 border-b border-app-soft px-3 py-1.5 text-[11px]">
         <ToolbarSelect
           label="Page size"
           value={layout.pageSize}
-          options={Object.entries(PAGE_SIZES).map(([k, v]) => ({
-            value: k,
-            label: v.name,
-          }))}
-          onPick={(v) =>
-            setLayout({ ...layout, pageSize: v as keyof typeof PAGE_SIZES })
-          }
+          options={Object.entries(PAGE_SIZES).map(([k, v]) => ({ value: k, label: v.name }))}
+          onPick={(v) => setLayout({ ...layout, pageSize: v as keyof typeof PAGE_SIZES })}
         />
         <ToolbarSelect
           label="Orientation"
@@ -968,12 +1248,7 @@ function DocumentToolbar({
             { value: "portrait", label: "Portrait" },
             { value: "landscape", label: "Landscape" },
           ]}
-          onPick={(v) =>
-            setLayout({
-              ...layout,
-              orientation: v as "portrait" | "landscape",
-            })
-          }
+          onPick={(v) => setLayout({ ...layout, orientation: v as "portrait" | "landscape" })}
         />
         <ToolbarSelect
           label="Margins"
@@ -1001,8 +1276,9 @@ function DocumentToolbar({
         />
       </div>
 
-      {/* Row 2 — Formatting */}
-      <div className="flex flex-wrap items-center gap-1 px-3 py-1.5">
+      {/* Row 2 — Formatting. Buttons use onMouseDown+preventDefault
+          so the contentEditable retains its selection. */}
+      <div className="flex flex-wrap items-center gap-0.5 px-3 py-1.5">
         <ToolbarSelect
           label="Style"
           options={[
@@ -1014,81 +1290,114 @@ function DocumentToolbar({
           onPick={(v) => setBlock(v)}
         />
         <ToolbarDivider />
-        <DocsButton title="Bold (Ctrl+B)" onClick={() => onExec("bold")}>
+        <DocsButton title="Heading 1" onAction={() => setBlock("h1")}>
+          <Heading1 className="h-4 w-4" />
+        </DocsButton>
+        <DocsButton title="Heading 2" onAction={() => setBlock("h2")}>
+          <Heading2 className="h-4 w-4" />
+        </DocsButton>
+        <DocsButton title="Heading 3" onAction={() => setBlock("h3")}>
+          <Heading3 className="h-4 w-4" />
+        </DocsButton>
+        <DocsButton title="Bold (Ctrl+B)" onAction={() => onExec("bold")} active={activeMarks.has("bold")}>
           <Bold className="h-4 w-4" />
         </DocsButton>
-        <DocsButton title="Italic (Ctrl+I)" onClick={() => onExec("italic")}>
+        <DocsButton title="Italic (Ctrl+I)" onAction={() => onExec("italic")} active={activeMarks.has("italic")}>
           <Italic className="h-4 w-4" />
         </DocsButton>
-        <DocsButton title="Underline (Ctrl+U)" onClick={() => onExec("underline")}>
-          <span className="text-sm font-semibold underline">U</span>
+        <DocsButton title="Underline (Ctrl+U)" onAction={() => onExec("underline")} active={activeMarks.has("underline")}>
+          <Underline className="h-4 w-4" />
         </DocsButton>
-        <DocsButton title="Strikethrough" onClick={() => onExec("strikeThrough")}>
-          <span className="text-sm font-semibold line-through">S</span>
+        <DocsButton title="Strikethrough" onAction={() => onExec("strikeThrough")} active={activeMarks.has("strike")}>
+          <Strikethrough className="h-4 w-4" />
         </DocsButton>
-        <input
-          type="color"
+        <DocsButton title="Subscript" onAction={() => onExec("subscript")}>
+          <Subscript className="h-4 w-4" />
+        </DocsButton>
+        <DocsButton title="Superscript" onAction={() => onExec("superscript")}>
+          <Superscript className="h-4 w-4" />
+        </DocsButton>
+        <label
+          className="grid h-8 w-8 cursor-pointer place-items-center rounded text-app-muted hover:bg-app-overlay hover:text-app"
           title="Text color"
-          onChange={(e) => onExec("foreColor", e.target.value)}
-          className="h-7 w-7 cursor-pointer rounded border border-app bg-app-elevated p-0.5"
-        />
-        <input
-          type="color"
-          title="Highlight color"
-          onChange={(e) => onExec("hiliteColor", e.target.value)}
-          className="h-7 w-7 cursor-pointer rounded border border-app bg-app-elevated p-0.5"
-        />
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          <span className="text-sm font-semibold">A</span>
+          <input
+            type="color"
+            className="absolute h-0 w-0 opacity-0"
+            onChange={(e) => onExec("foreColor", e.target.value)}
+          />
+        </label>
+        <label
+          className="grid h-8 w-8 cursor-pointer place-items-center rounded text-app-muted hover:bg-app-overlay hover:text-app"
+          title="Highlight"
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          <span className="rounded bg-yellow-300/60 px-1 text-[10px] font-semibold text-slate-900">H</span>
+          <input
+            type="color"
+            className="absolute h-0 w-0 opacity-0"
+            onChange={(e) => onExec("hiliteColor", e.target.value)}
+          />
+        </label>
         <ToolbarDivider />
-        <DocsButton title="Bulleted list" onClick={() => onExec("insertUnorderedList")}>
-          <span className="text-sm">•≡</span>
+        <DocsButton title="Bulleted list" onAction={() => onExec("insertUnorderedList")} active={activeMarks.has("ul")}>
+          <List className="h-4 w-4" />
         </DocsButton>
-        <DocsButton title="Numbered list" onClick={() => onExec("insertOrderedList")}>
-          <span className="text-sm">1.</span>
+        <DocsButton title="Numbered list" onAction={() => onExec("insertOrderedList")} active={activeMarks.has("ol")}>
+          <ListOrdered className="h-4 w-4" />
         </DocsButton>
-        <DocsButton title="Quote" onClick={() => setBlock("blockquote")}>
-          <span className="text-sm">"</span>
+        <DocsButton title="Quote" onAction={() => setBlock("blockquote")}>
+          <Quote className="h-4 w-4" />
         </DocsButton>
-        <DocsButton title="Indent" onClick={() => onExec("indent")}>
-          <span className="text-xs">⇥</span>
+        <DocsButton title="Code block" onAction={() => setBlock("pre")}>
+          <Code className="h-4 w-4" />
         </DocsButton>
-        <DocsButton title="Outdent" onClick={() => onExec("outdent")}>
-          <span className="text-xs">⇤</span>
+        <DocsButton title="Indent" onAction={() => onExec("indent")}>
+          <Indent className="h-4 w-4" />
         </DocsButton>
-        <ToolbarDivider />
-        <DocsButton title="Align left" onClick={() => onExec("justifyLeft")}>
-          <span className="text-[10px]">≡</span>
-        </DocsButton>
-        <DocsButton title="Align center" onClick={() => onExec("justifyCenter")}>
-          <span className="text-[10px]">≡</span>
-        </DocsButton>
-        <DocsButton title="Align right" onClick={() => onExec("justifyRight")}>
-          <span className="text-[10px]">≡</span>
-        </DocsButton>
-        <DocsButton title="Justify" onClick={() => onExec("justifyFull")}>
-          <span className="text-[10px]">≡</span>
+        <DocsButton title="Outdent" onAction={() => onExec("outdent")}>
+          <Outdent className="h-4 w-4" />
         </DocsButton>
         <ToolbarDivider />
-        <DocsButton title="Insert link" onClick={insertLink}>
-          <ExternalLink className="h-4 w-4" />
+        <DocsButton title="Align left" onAction={() => onExec("justifyLeft")} active={activeMarks.has("left")}>
+          <AlignLeft className="h-4 w-4" />
         </DocsButton>
-        <DocsButton title="Insert image" onClick={insertImage}>
+        <DocsButton title="Align center" onAction={() => onExec("justifyCenter")} active={activeMarks.has("center")}>
+          <AlignCenter className="h-4 w-4" />
+        </DocsButton>
+        <DocsButton title="Align right" onAction={() => onExec("justifyRight")} active={activeMarks.has("right")}>
+          <AlignRight className="h-4 w-4" />
+        </DocsButton>
+        <DocsButton title="Justify" onAction={() => onExec("justifyFull")} active={activeMarks.has("justify")}>
+          <AlignJustify className="h-4 w-4" />
+        </DocsButton>
+        <ToolbarDivider />
+        <DocsButton title="Insert link (Ctrl+K)" onAction={onLink}>
+          <Link2 className="h-4 w-4" />
+        </DocsButton>
+        <DocsButton title="Insert image" onAction={onImage}>
           <ImageIcon className="h-4 w-4" />
         </DocsButton>
-        <DocsButton title="Insert table" onClick={insertTable}>
+        <DocsButton title="Insert table" onAction={onTable}>
           <Table2 className="h-4 w-4" />
         </DocsButton>
-        <DocsButton title="Insert page break (Ctrl+Enter)" onClick={onInsertBreak}>
-          <span className="text-[10px]">⤓</span>
+        <DocsButton title="Horizontal rule" onAction={onHorizontalRule}>
+          <Minus className="h-4 w-4" />
+        </DocsButton>
+        <DocsButton title="Page break" onAction={onPageBreak}>
+          <span className="text-[10px] font-semibold">PB</span>
         </DocsButton>
         <ToolbarDivider />
-        <DocsButton title="Undo" onClick={() => onExec("undo")}>
-          <span className="text-sm">↶</span>
+        <DocsButton title="Undo (Ctrl+Z)" onAction={() => onExec("undo")}>
+          <Undo2 className="h-4 w-4" />
         </DocsButton>
-        <DocsButton title="Redo" onClick={() => onExec("redo")}>
-          <span className="text-sm">↷</span>
+        <DocsButton title="Redo (Ctrl+Y)" onAction={() => onExec("redo")}>
+          <Redo2 className="h-4 w-4" />
         </DocsButton>
-        <DocsButton title="Clear formatting" onClick={() => onExec("removeFormat")}>
-          <span className="text-xs">Tx</span>
+        <DocsButton title="Clear formatting" onAction={() => onExec("removeFormat")}>
+          <Eraser className="h-4 w-4" />
         </DocsButton>
       </div>
     </div>
@@ -1098,18 +1407,37 @@ function DocumentToolbar({
 function DocsButton({
   title,
   onClick,
+  onAction,
+  active,
   children,
 }: {
   title: string;
-  onClick: () => void;
+  onClick?: () => void;
+  /** Preferred handler for contentEditable-aware toolbars. Fires on
+   *  mousedown so the editor's selection is preserved across the
+   *  click. Use this when the action depends on selection state. */
+  onAction?: () => void;
+  active?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
       title={title}
-      onClick={onClick}
-      className="grid h-8 w-8 place-items-center rounded text-app-muted hover:bg-app-overlay hover:text-app"
+      onMouseDown={
+        onAction
+          ? (e) => {
+              e.preventDefault();
+              onAction();
+            }
+          : undefined
+      }
+      onClick={onAction ? undefined : onClick}
+      className={`grid h-8 w-8 place-items-center rounded transition ${
+        active
+          ? "bg-accent-soft text-accent"
+          : "text-app-muted hover:bg-app-overlay hover:text-app"
+      }`}
     >
       {children}
     </button>

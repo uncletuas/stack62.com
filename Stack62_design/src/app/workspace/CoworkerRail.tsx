@@ -1120,6 +1120,16 @@ export function CoworkerRail() {
         await speakReply(spoken);
       }
       void refreshConversations();
+      // Tell any open document/file/system editor on the active tab
+      // to refetch — the coworker may have edited it via tool calls.
+      window.dispatchEvent(
+        new CustomEvent("stack62:editor-refresh", {
+          detail: {
+            tabKind: activeTab?.kind ?? null,
+            refId: activeTab?.refId ?? null,
+          },
+        }),
+      );
     } catch (err) {
       setMessages((prev) => [
         ...prev.filter((m) => m.id !== optimistic.id),
