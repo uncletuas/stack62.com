@@ -9,12 +9,9 @@ import {
   ExternalLink,
   LayoutPanelTop,
   Loader2,
-  Plus,
   Presentation,
   Printer,
-  Quote,
   Save,
-  Sheet,
   Sparkles,
   Table2,
   Trash2,
@@ -66,7 +63,6 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
   const [content, setContent] = useState("");
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
-  const [docxUrl, setDocxUrl] = useState<string | null>(null);
   /** Real workbook data when the file is an .xlsx/.xls — parsed client-side
    *  with SheetJS so the user sees the actual rows, not the lossy CSV
    *  conversion. Saving still goes back as CSV; the backend re-encodes. */
@@ -103,7 +99,6 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
     setEditableContent(null);
     setImageUrl(null);
     setPdfUrl(null);
-    setDocxUrl(null);
     setContent("");
     setWorkbook(null);
     setActiveSheetIndex(0);
@@ -145,15 +140,6 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
           revoked = url;
           if (live && url) setPdfUrl(url);
           return;
-        }
-
-        // DOCX: fetch the original .docx binary so docx-preview can render
-        // it with formatting preserved. We still load the extracted-text
-        // version below for fallback / AI-assist features.
-        if (/\.docx$/i.test(file.filename)) {
-          const url = await fetchFileBlobUrl(file.id).catch(() => null);
-          revoked = url;
-          if (live && url) setDocxUrl(url);
         }
 
         // Real spreadsheet path: parse xlsx/xls binaries client-side with
@@ -454,26 +440,13 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
           ) : surface === "slides" ? (
             <SlidesEditor text={content} onChange={queueSave} title={displayName} />
           ) : surface === "document" ? (
-            docxUrl && stored ? (
-              <DocxSurface
-                url={docxUrl}
-                filename={stored.filename}
-                onPersist={(next) => {
-                  // Push the edited text through the existing save
-                  // pipeline so it lands as a new docx on the backend
-                  // and version chain.
-                  queueSave(next);
-                }}
-              />
-            ) : (
-              <DocsEditor
-                text={content}
-                onChange={queueSave}
-                zoom={zoom}
-                documentId={document?.id ?? null}
-                title={displayName}
-              />
-            )
+            <DocsEditor
+              text={content}
+              onChange={queueSave}
+              zoom={zoom}
+              documentId={document?.id ?? null}
+              title={displayName}
+            />
           ) : surface === "text" ? (
             <TextSurface text={content} onChange={queueSave} />
           ) : (
@@ -481,7 +454,9 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
           )}
         </main>
 
-        <Inspector file={stored} surface={surface} content={content} />
+        {surface !== "document" && (
+          <Inspector file={stored} surface={surface} content={content} />
+        )}
       </div>
     </div>
   );
@@ -603,184 +578,6 @@ function ToolbarButton({
   );
 }
 
-/* ── Document layout (Google-Docs-style page model) ─────────────────────── */
-
-const PAGE_SIZES: Record<string, { name: string; widthIn: number; heightIn: number }> = {
-  letter:  { name: "Letter (8.5\" × 11\")",  widthIn: 8.5,  heightIn: 11 },
-  a4:      { name: "A4 (210 × 297 mm)",      widthIn: 8.27, heightIn: 11.69 },
-  legal:   { name: "Legal (8.5\" × 14\")",   widthIn: 8.5,  heightIn: 14 },
-  tabloid: { name: "Tabloid (11\" × 17\")",  widthIn: 11,   heightIn: 17 },
-  a5:      { name: "A5 (148 × 210 mm)",      widthIn: 5.83, heightIn: 8.27 },
-};
-
-const FONT_FAMILIES = [
-  { value: "'Inter', 'Arial', sans-serif",                  label: "Inter (sans)" },
-  { value: "'Merriweather', 'Georgia', serif",              label: "Merriweather (serif)" },
-  { value: "'Roboto', 'Arial', sans-serif",                 label: "Roboto" },
-  { value: "'Source Serif Pro', 'Georgia', serif",          label: "Source Serif" },
-  { value: "Georgia, 'Times New Roman', serif",             label: "Georgia" },
-  { value: "ui-monospace, SFMono-Regular, Menlo, monospace", label: "Mono" },
-];
-
-const FONT_SIZES = [10, 11, 12, 13, 14, 15, 16, 18, 20, 24, 28, 32, 40, 48, 60];
-
-interface DocLayout {
-  pageSize: keyof typeof PAGE_SIZES;
-  orientation: "portrait" | "landscape";
-  marginIn: number;
-  fontFamily: string;
-  fontSize: number;
-}
-
-const DEFAULT_LAYOUT: DocLayout = {
-  pageSize: "letter",
-  orientation: "portrait",
-  marginIn: 1,
-  fontFamily: FONT_FAMILIES[0].value,
-  fontSize: 14,
-};
-
-const PAGE_BREAK_MARK = '<hr data-page-break="1" />';
-
-/**
- * Google-Docs-style rich-text editor with real, multi-page rendering.
- * Pages are persisted as a single HTML string separated by
- * <hr data-page-break="1" /> markers. Each page is rendered as an
- * independent contentEditable on its own paper-sized sheet, so paging never
- * breaks a paragraph in half — the user explicitly inserts page breaks via
- * Ctrl+Enter or the "Insert page break" toolbar button.
- *
- * On overflow (content taller than the page), we scroll the page-card; the
- * user can split with a page break to push subsequent content to a new
- * sheet. This matches how Word/Docs feel without requiring intricate
- * pagination algorithms.
- */
-/**
- * Google-Docs-style rich text editor. A single contentEditable so
- * formatting commands work reliably across the whole document, with a
- * paginated *visual* layout via CSS (one tall column with page breaks
- * styled in). Toolbar buttons preserve selection by handling
- * `onMouseDown` with `preventDefault` instead of `onClick` — without
- * that, the editor loses focus before `execCommand` runs and every
- * command silently fails (this was the "actions are not working" bug).
- *
- * Coworker control: listens to `window.stack62:doc-command` events so
- * the AI can directly drive the editor — get content, insert at cursor,
- * apply formatting, replace selection. Each command can target a
- * specific documentId or fall through to the focused doc.
- */
-function DocsButton({
-  title,
-  onClick,
-  onAction,
-  active,
-  children,
-}: {
-  title: string;
-  onClick?: () => void;
-  /** Preferred handler for contentEditable-aware toolbars. Fires on
-   *  mousedown so the editor's selection is preserved across the
-   *  click. Use this when the action depends on selection state. */
-  onAction?: () => void;
-  active?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      onMouseDown={
-        onAction
-          ? (e) => {
-              e.preventDefault();
-              onAction();
-            }
-          : undefined
-      }
-      onClick={onAction ? undefined : onClick}
-      className={`grid h-8 w-8 place-items-center rounded transition ${
-        active
-          ? "bg-accent-soft text-accent"
-          : "text-app-muted hover:bg-app-overlay hover:text-app"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-function ToolbarDivider() {
-  return (
-    <span
-      className="mx-1 h-5 w-px"
-      style={{ backgroundColor: "var(--app-border-strong)" }}
-    />
-  );
-}
-function ToolbarSelect({
-  label,
-  value,
-  options,
-  onPick,
-}: {
-  label: string;
-  value?: string;
-  options: Array<{ value: string; label: string }>;
-  onPick: (value: string) => void;
-}) {
-  return (
-    <select
-      title={label}
-      value={value ?? ""}
-      onChange={(e) => onPick(e.target.value)}
-      className="h-7 max-w-[180px] rounded border border-app bg-app-elevated px-2 text-[11px] text-app hover:border-app-strong focus:border-cyan-400/50 focus:outline-none"
-    >
-      {value === undefined && (
-        <option value="" disabled>
-          {label}
-        </option>
-      )}
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-function isHtml(s: string) {
-  return /<\/?[a-z][\s\S]*>/i.test(s ?? "");
-}
-function escapeText(s: string) {
-  if (!s) return "";
-  const div = document.createElement("div");
-  div.textContent = s;
-  return div.innerHTML.replace(/\n/g, "<br/>");
-}
-
-/**
- * Sheets-style spreadsheet surface. Adds a formula bar, cell selection,
- * keyboard navigation (arrows / enter / tab), simple per-cell formatting
- * (bold, italic, alignment, background fill), and add-row/column controls.
- *
- * Storage shape stays CSV-compatible: we serialize values as the cell text;
- * formatting is stored alongside the values in a leading metadata line if
- * any cells are formatted, so plain-CSV ingest still works.
- */
-type CellFormat = {
-  bold?: boolean;
-  italic?: boolean;
-  align?: "left" | "center" | "right";
-  bg?: string;
-};
-type SheetState = {
-  data: string[][];
-  formats: Record<string, CellFormat>;
-};
-
-function cellKey(r: number, c: number) {
-  return `${r}:${c}`;
-}
 
 function TextSurface({ text, onChange }: { text: string; onChange: (next: string) => void }) {
   return (
@@ -910,171 +707,6 @@ function PdfSurface({ filename, url }: { filename: string; url: string }) {
         ref={containerRef}
         className="min-h-0 flex-1 overflow-auto bg-app-hover p-4"
       />
-    </div>
-  );
-}
-
-/**
- * DOCX surface — renders the original document with formatting
- * preserved (paragraphs, headings, tables, images) using docx-preview.
- * Replaces the previous "plain text in a textarea" view that lost all
- * structure.
- */
-/**
- * DOCX surface — renders the file with formatting preserved via
- * docx-preview, and toggles into an in-place editable mode.
- *
- * Edit mode: we make the rendered DOM contenteditable so the user
- * can type into headings/paragraphs/tables. Save serialises the
- * HTML through `onPersist` — the backend re-encodes that into a
- * docx server-side. Cancel reverts by re-rendering the original.
- */
-function DocxSurface({
-  url,
-  filename,
-  onPersist,
-}: {
-  url: string;
-  filename: string;
-  onPersist?: (htmlOrText: string) => void | Promise<void>;
-}) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  const renderOnce = useCallback(async () => {
-    const host = containerRef.current;
-    if (!host) return;
-    host.innerHTML = "";
-    setError(null);
-    setLoaded(false);
-    try {
-      const docx = await import("docx-preview");
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const buffer = await response.arrayBuffer();
-      await docx.renderAsync(buffer, host, undefined, {
-        className: "stack62-docx",
-        inWrapper: true,
-        ignoreWidth: false,
-        ignoreHeight: false,
-        breakPages: true,
-        experimental: false,
-        useBase64URL: true,
-      });
-      setLoaded(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, [url]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void renderOnce().then(() => {
-      if (cancelled) return;
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [renderOnce]);
-
-  const beginEdit = () => {
-    setEditing(true);
-    const host = containerRef.current;
-    if (host) host.contentEditable = "true";
-  };
-
-  const save = async () => {
-    if (!onPersist) {
-      // No persist hook (e.g. system-asset file viewed outside our save
-      // path) — just exit edit mode to avoid losing the user's work.
-      setEditing(false);
-      const host = containerRef.current;
-      if (host) host.contentEditable = "false";
-      return;
-    }
-    setSaving(true);
-    try {
-      const host = containerRef.current;
-      // Strip the .stack62-docx wrapper attributes that aren't real
-      // body content. The backend converts incoming HTML / plain text
-      // back into docx via its existing editable-content saver.
-      const plain =
-        host?.innerText?.trim() ?? host?.textContent?.trim() ?? "";
-      await onPersist(plain);
-      setEditing(false);
-      if (host) host.contentEditable = "false";
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const cancel = async () => {
-    setEditing(false);
-    const host = containerRef.current;
-    if (host) host.contentEditable = "false";
-    await renderOnce();
-  };
-
-  return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b border-app px-4 py-1.5 text-[11px] text-app-faint">
-        <span className="flex-1 truncate">
-          {error
-            ? `Could not render: ${error}`
-            : loaded
-              ? filename
-              : "Rendering document…"}
-        </span>
-        {loaded && !error && !editing && (
-          <button
-            type="button"
-            onClick={beginEdit}
-            className="rounded border border-app bg-app-surface px-2 py-0.5 text-[11px] text-app hover:bg-app-hover"
-            title="Edit document"
-          >
-            Edit
-          </button>
-        )}
-        {editing && (
-          <>
-            <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-300">
-              Editing
-            </span>
-            <button
-              type="button"
-              onClick={cancel}
-              disabled={saving}
-              className="rounded border border-app bg-app-surface px-2 py-0.5 text-[11px] text-app hover:bg-app-hover disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={save}
-              disabled={saving}
-              className="rounded bg-cyan-500 px-2 py-0.5 text-[11px] font-medium text-slate-950 hover:opacity-90 disabled:opacity-50"
-            >
-              {saving ? "Saving…" : "Save"}
-            </button>
-          </>
-        )}
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto bg-slate-200/40 p-4 dark:bg-slate-900/40">
-        <div
-          ref={containerRef}
-          className={`mx-auto bg-white text-slate-900 shadow-xl outline-none [&_.stack62-docx]:bg-white ${
-            editing ? "ring-2 ring-cyan-400" : ""
-          }`}
-          style={{ maxWidth: 920 }}
-          // suppressContentEditableWarning is set when we toggle the
-          // editable mode programmatically; we don't lock the DOM
-          // structure since users can paste rich content.
-          suppressContentEditableWarning
-        />
-      </div>
     </div>
   );
 }
