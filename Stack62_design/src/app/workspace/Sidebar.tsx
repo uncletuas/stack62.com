@@ -394,6 +394,33 @@ function ExplorerPanel() {
   const [documents, setDocuments] = useState<WorkspaceDocument[]>([]);
   const [openType, setOpenType] = useState("documents");
 
+  const load = useCallback(() => {
+    if (!currentOrganization) return;
+    void Promise.all([
+      listFiles({
+        organizationId: currentOrganization.id,
+        workspaceId: currentWorkspace?.id,
+      }).catch(() => []),
+      fetchDocuments({
+        organizationId: currentOrganization.id,
+        workspaceId: currentWorkspace?.id,
+      }).catch(() => []),
+    ]).then(([allFiles, allDocuments]) => {
+      setFiles(allFiles);
+      setDocuments(allDocuments);
+    });
+  }, [currentOrganization?.id, currentWorkspace?.id]);
+
+  useEffect(() => {
+    const handler = () => load();
+    window.addEventListener("stack62:files-changed", handler);
+    window.addEventListener("stack62:editor-refresh", handler);
+    return () => {
+      window.removeEventListener("stack62:files-changed", handler);
+      window.removeEventListener("stack62:editor-refresh", handler);
+    };
+  }, [load]);
+
   useEffect(() => {
     if (!currentOrganization) return;
     let live = true;
@@ -670,6 +697,16 @@ function DocumentsPanel({ query }: { query: string }) {
   }, [currentOrganization?.id, currentWorkspace?.id]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    const handler = () => load();
+    window.addEventListener("stack62:files-changed", handler);
+    window.addEventListener("stack62:editor-refresh", handler);
+    return () => {
+      window.removeEventListener("stack62:files-changed", handler);
+      window.removeEventListener("stack62:editor-refresh", handler);
+    };
+  }, [load]);
 
   const createNew = async () => {
     if (!currentOrganization || creating) return;

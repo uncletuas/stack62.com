@@ -145,6 +145,21 @@ export function FilesExplorerEditor() {
     void reload();
   }, [reload]);
 
+  // Refresh when something signals the editor (after coworker action,
+  // after a fresh upload elsewhere). Also poll on tab focus so files
+  // that arrived from another tab still appear here.
+  useEffect(() => {
+    const handler = () => void reload();
+    window.addEventListener("stack62:editor-refresh", handler);
+    window.addEventListener("stack62:files-changed", handler);
+    window.addEventListener("focus", handler);
+    return () => {
+      window.removeEventListener("stack62:editor-refresh", handler);
+      window.removeEventListener("stack62:files-changed", handler);
+      window.removeEventListener("focus", handler);
+    };
+  }, [reload]);
+
   // Clear selection on navigation.
   useEffect(() => {
     setSelection(new Set());
@@ -199,9 +214,18 @@ export function FilesExplorerEditor() {
         form.append("organizationId", orgId);
         form.append("scope", "document");
         if (parentId) form.append("folderId", parentId);
-        await apiRequest("/files/upload", { method: "POST", body: form });
+        try {
+          await apiRequest("/files/upload", { method: "POST", body: form });
+        } catch (err) {
+          await appDialog.alert({
+            title: `Upload failed: ${file.name}`,
+            description: err instanceof Error ? err.message : "Unknown error.",
+            tone: "destructive",
+          });
+        }
       }
-      void reload();
+      await reload();
+      window.dispatchEvent(new CustomEvent("stack62:files-changed"));
     } finally {
       setUploading(false);
     }
