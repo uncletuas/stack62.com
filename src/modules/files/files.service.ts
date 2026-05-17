@@ -63,11 +63,7 @@ export class FilesService {
     }
   }
 
-  /**
-   * Read raw bytes via the storage backend. Replaces the previous
-   * direct `fs.readFile(getAbsolutePath(file))` usage so the same code
-   * path works for local and S3.
-   */
+  /** Read raw bytes via the storage backend. Works for both local-disk and S3. */
   async getBuffer(file: FileEntity): Promise<Buffer> {
     return this.storage.getObjectBuffer(file.storagePath);
   }
@@ -253,19 +249,6 @@ export class FilesService {
     return file;
   }
 
-  /**
-   * @deprecated Local-disk only. New code should use `getBuffer(file)`
-   * which goes through the StorageBackend abstraction. Kept until the
-   * generated-runner module is fully migrated.
-   */
-  getAbsolutePath(file: FileEntity): string {
-    if (this.storage.name !== 'local-disk') {
-      throw new Error(
-        'getAbsolutePath is unavailable when STORAGE_BACKEND is not local-disk. Use getBuffer(file) instead.',
-      );
-    }
-    return path.join(this.storageRoot, file.storagePath);
-  }
 
   async read(fileId: string, actorUserId: string) {
     const file = await this.findOne(fileId, actorUserId);

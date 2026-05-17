@@ -3,13 +3,10 @@ import { AppBaseEntity } from '../../../shared/database/base.entity';
 
 /**
  * One row per Slack workspace connected to a Stack62 organization. The
- * bot access token here is what authenticates outbound posts (Stack62 →
- * Slack); inbound events are authenticated via SLACK_SIGNING_SECRET at
- * the webhook boundary.
- *
- * The token is stored as-is in this batch. Production should encrypt
- * it at rest (e.g. KMS-wrapped column or AES-GCM via JWT_SECRET-derived
- * key) — left as a TODO for the security-hardening pass.
+ * bot access token authenticates outbound posts (Stack62 → Slack);
+ * inbound events are authenticated via SLACK_SIGNING_SECRET at the
+ * webhook boundary. Tokens are encrypted at rest via SecretEncryptionService
+ * (AES-256-GCM) before being persisted by SlackOauthService.
  */
 @Entity({ name: 'slack_installations' })
 @Index(['organizationId'])
@@ -29,9 +26,7 @@ export class SlackInstallationEntity extends AppBaseEntity {
   @Column({ name: 'bot_user_id', type: 'varchar', length: 40 })
   botUserId!: string;
 
-  /**
-   * `xoxb-…` token returned by OAuth. Encrypt before launch.
-   */
+  /** `xoxb-…` token returned by OAuth, stored AES-256-GCM encrypted. */
   @Column({ name: 'bot_access_token', type: 'text' })
   botAccessToken!: string;
 

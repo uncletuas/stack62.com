@@ -1,0 +1,22 @@
+# Default owner for everything
+* @uncletuas
+
+# Backend core — AI engine and runtime require extra scrutiny
+src/modules/engine/ @uncletuas
+src/modules/ai/ @uncletuas
+src/modules/runner/ @uncletuas
+src/shared/ @uncletuas
+
+# Billing is always security-critical
+src/modules/billing/ @uncletuas
+
+# Auth and crypto
+src/modules/auth/ @uncletuas
+src/shared/crypto/ @uncletuas
+src/shared/security/ @uncletuas
+
+# CI/CD and deployment configs
+.github/ @uncletuas
+Dockerfile @uncletuas
+docker-compose.yml @uncletuas
+render.yaml @uncletuas

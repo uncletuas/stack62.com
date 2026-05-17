@@ -1,0 +1,62 @@
+name: Bug Report
+description: Something is broken
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Fill this out so we can reproduce it quickly.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - AI Engine / Coworker
+        - System Builder
+        - Records / Workflows
+        - Documents
+        - Billing
+        - Auth / Permissions
+        - Integrations (Slack, WhatsApp, etc.)
+        - Meeting Bot
+        - Frontend UI
+        - Deployment / Infra
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      placeholder: Describe the bug clearly.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to ...
+        2. Click ...
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Environment
+      placeholder: |
+        - Deployment: Render / Docker / local
+        - AI provider: Anthropic / OpenRouter / Ollama
+        - Browser (if UI): Chrome 124

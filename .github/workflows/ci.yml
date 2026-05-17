@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, author]
   pull_request:
 
 concurrency:
@@ -10,7 +10,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  backend:
+  backend-lint:
+    name: Backend (lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Lint
+        run: npm run lint:check
+
+  backend-typecheck:
     name: Backend (typecheck + build)
     runs-on: ubuntu-latest
     steps:
@@ -25,6 +39,27 @@ jobs:
         run: npx tsc --noEmit -p tsconfig.json
       - name: Build
         run: npm run build
+
+  backend-test:
+    name: Backend (unit tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Unit tests
+        run: npm run test:cov
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage
+          path: coverage/
+          retention-days: 7
 
   frontend:
     name: Frontend (typecheck + build)
