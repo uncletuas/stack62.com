@@ -23,7 +23,7 @@ export function PublicShell({ children }: { children: ReactNode }) {
             </span>
           </Link>
           <nav className="hidden md:flex items-center gap-7 text-sm text-slate-600 dark:text-slate-300">
-            <Link to="/#product" className="hover:text-slate-900 dark:hover:text-white transition">Product</Link>
+            <Link to="/#solutions" className="hover:text-slate-900 dark:hover:text-white transition">Solutions</Link>
             <Link to="/#how-it-works" className="hover:text-slate-900 dark:hover:text-white transition">How it works</Link>
             <Link to="/pricing" className="hover:text-slate-900 dark:hover:text-white transition">Pricing</Link>
             <Link to="/#faq" className="hover:text-slate-900 dark:hover:text-white transition">FAQ</Link>
@@ -61,14 +61,14 @@ export function PublicShell({ children }: { children: ReactNode }) {
               <span className="font-semibold">Stack62</span>
             </div>
             <p className="text-slate-500 dark:text-slate-400 leading-relaxed">
-              An AI-native operating layer for the systems that run your
-              business — built so you stay in control.
+              The AI-powered environment where your business runs — one
+              place for operations, decisions, and your whole team.
             </p>
           </div>
           <FooterCol
             heading="Product"
             links={[
-              { label: "Features", to: "/#product" },
+              { label: "Solutions", to: "/#solutions" },
               { label: "How it works", to: "/#how-it-works" },
               { label: "Pricing", to: "/pricing" },
             ]}
@@ -93,7 +93,7 @@ export function PublicShell({ children }: { children: ReactNode }) {
           <div className="max-w-7xl mx-auto px-6 py-6 flex flex-col md:flex-row items-center justify-between text-xs text-slate-500 dark:text-slate-400">
             <p>© {new Date().getFullYear()} Stack62. All rights reserved.</p>
             <p className="mt-2 md:mt-0">
-              Built for teams who want AI in the loop, not the cockpit.
+              Run smarter. Decide faster. Let your coworker handle the rest.
             </p>
           </div>
         </div>
