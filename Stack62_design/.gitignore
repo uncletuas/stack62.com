@@ -1,0 +1,29 @@
+# Local-only — the repo's root .gitignore already covers most of
+# this via **/-prefixed globs, but having one here means a developer
+# running `git status` from inside Stack62_design/ still sees a clean
+# tree without thinking the rules don't apply.
+
+node_modules/
+dist/
+.cache/
+coverage/
+
+# Vite logs
+*.log
+local-vite.log
+local-vite.err.log
+vite.log
+vite.err.log
+vite.dev.log
+vite.dev.err.log
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Env
+.env
+.env.local
+.env.*.local
