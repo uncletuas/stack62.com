@@ -498,6 +498,19 @@ export async function fetchDocument(documentId: string) {
   return apiRequest<WorkspaceDocument>(`/documents/${documentId}`);
 }
 
+export async function createDocument(payload: {
+  organizationId: string;
+  workspaceId?: string;
+  systemId?: string;
+  title: string;
+  content?: string;
+}) {
+  return apiRequest<WorkspaceDocument>('/documents', {
+    method: 'POST',
+    body: payload,
+  });
+}
+
 export async function updateDocument(
   documentId: string,
   payload: {

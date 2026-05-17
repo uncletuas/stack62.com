@@ -12,6 +12,7 @@ import {
   Database,
   Home,
   LineChart,
+  Plus,
   RefreshCw,
   Search,
   Settings,
@@ -27,6 +28,7 @@ import { useAppContext } from "../context/app-context";
 import {
   applyAiRequest,
   advanceWorkflowRun,
+  createDocument,
   fetchAiRequests,
   fetchActivity,
   fetchDeployments,
@@ -655,20 +657,38 @@ function DocumentsPanel({ query }: { query: string }) {
   const { currentOrganization, currentWorkspace } = useAppContext();
   const { navigate, activeTab } = useWorkspace();
   const [documents, setDocuments] = useState<WorkspaceDocument[]>([]);
+  const [creating, setCreating] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!currentOrganization) return;
-    let live = true;
     fetchDocuments({
       organizationId: currentOrganization.id,
       workspaceId: currentWorkspace?.id,
     })
-      .then((rows) => live && setDocuments(rows))
-      .catch(() => live && setDocuments([]));
-    return () => {
-      live = false;
-    };
+      .then((rows) => setDocuments(rows))
+      .catch(() => setDocuments([]));
   }, [currentOrganization?.id, currentWorkspace?.id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const createNew = async () => {
+    if (!currentOrganization || creating) return;
+    setCreating(true);
+    try {
+      const doc = await createDocument({
+        organizationId: currentOrganization.id,
+        workspaceId: currentWorkspace?.id,
+        title: "Untitled document",
+        content: "<p><br/></p>",
+      });
+      setDocuments((cur) => [doc, ...cur]);
+      navigate({ kind: "document", title: doc.title, refId: doc.id });
+    } catch {
+      /* surface failure silently for now — the chat will surface errors */
+    } finally {
+      setCreating(false);
+    }
+  };
 
   const filtered = documents.filter(
     (document) =>
@@ -677,8 +697,19 @@ function DocumentsPanel({ query }: { query: string }) {
 
   return (
     <div className="py-1">
+      <button
+        type="button"
+        onClick={createNew}
+        disabled={creating || !currentOrganization}
+        className="mx-2 mb-2 flex w-[calc(100%-1rem)] items-center justify-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-accent-fg hover:opacity-90 disabled:opacity-50 transition"
+      >
+        <Plus className="h-3.5 w-3.5" />
+        {creating ? "Creating…" : "New document"}
+      </button>
       {filtered.length === 0 && (
-        <p className="px-3 py-3 text-xs text-app-faint">No documents yet.</p>
+        <p className="px-3 py-3 text-xs text-app-faint">
+          {documents.length === 0 ? "No documents yet. Create one above." : "No matches."}
+        </p>
       )}
       {filtered.map((document) => (
         <Row
