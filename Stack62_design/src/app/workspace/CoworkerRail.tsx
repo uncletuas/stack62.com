@@ -1356,6 +1356,7 @@ export function CoworkerRail() {
           liveMode={liveMode}
           onToggleLive={() => toggleLiveMode()}
           onSend={() => void send()}
+          onSendText={(text) => void send(text)}
           onNewChat={newChat}
           onSwitchConversation={switchConversation}
           onOpenPlan={(req) =>
@@ -1378,6 +1379,15 @@ export function CoworkerRail() {
           attachments={attachments}
           onPickFiles={onPickFiles}
           onRemoveAttachment={removeAttachment}
+          defaultAutopilot={coworker?.defaultAutopilot ?? false}
+          onToggleAutopilot={async () => {
+            if (!orgId || !workspaceId) return;
+            const next = !(coworker?.defaultAutopilot ?? false);
+            try {
+              const updated = await updateCoworker({ organizationId: orgId, workspaceId, defaultAutopilot: next });
+              setCoworker(updated);
+            } catch { /* ignore */ }
+          }}
         />
       )}
 
@@ -1482,6 +1492,7 @@ interface GeniePanelProps {
   liveMode: boolean;
   onToggleLive: () => void;
   onSend: () => void;
+  onSendText: (text: string) => void;
   onNewChat: () => void;
   onSwitchConversation: (id: string) => void;
   onOpenPlan: (req: AiChangeRequest) => void;
@@ -1492,6 +1503,8 @@ interface GeniePanelProps {
   attachments: ChatAttachment[];
   onPickFiles: (files: FileList | null) => void;
   onRemoveAttachment: (id: string) => void;
+  defaultAutopilot: boolean;
+  onToggleAutopilot: () => void;
 }
 
 function GeniePanel({
@@ -1531,6 +1544,9 @@ function GeniePanel({
   attachments,
   onPickFiles,
   onRemoveAttachment,
+  defaultAutopilot,
+  onToggleAutopilot,
+  onSendText,
 }: GeniePanelProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   /** Meetings sub-view inside the Coworker tab. When true the body
@@ -1690,23 +1706,16 @@ function GeniePanel({
                 </p>
                 <button
                   type="button"
-                  title={coworker?.defaultAutopilot ? "Autopilot on — coworker acts without asking" : "Autopilot off — coworker asks before acting"}
-                  onClick={async () => {
-                    if (!orgId || !workspaceId) return;
-                    const next = !(coworker?.defaultAutopilot ?? false);
-                    try {
-                      const updated = await updateCoworker({ organizationId: orgId, workspaceId, defaultAutopilot: next });
-                      setCoworker(updated);
-                    } catch { /* ignore */ }
-                  }}
+                  title={defaultAutopilot ? "Autopilot on — coworker acts without asking" : "Autopilot off — coworker asks before acting"}
+                  onClick={onToggleAutopilot}
                   className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition ${
-                    coworker?.defaultAutopilot
+                    defaultAutopilot
                       ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
                       : "border-app bg-app text-app-muted hover:bg-app-hover"
                   }`}
                 >
                   <Zap className="h-3 w-3" />
-                  <span>{coworker?.defaultAutopilot ? "Autopilot" : "Manual"}</span>
+                  <span>{defaultAutopilot ? "Autopilot" : "Manual"}</span>
                 </button>
                 <button
                   type="button"
@@ -1747,10 +1756,7 @@ function GeniePanel({
                           <button
                             key={suggestion}
                             type="button"
-                            onClick={() => {
-                              setDraft(suggestion);
-                              setTimeout(() => void send(suggestion), 0);
-                            }}
+                            onClick={() => onSendText(suggestion)}
                             className="block w-full rounded-lg border border-app bg-app-hover px-3 py-2 text-left text-[11px] text-app-muted hover:border-accent/50 hover:bg-app-hover hover:text-app transition"
                           >
                             {suggestion}
