@@ -3,13 +3,17 @@ import {
   Bot,
   Calendar,
   FileText,
+  Files,
   GitBranch,
   History,
   Home,
   Inbox,
   Layers,
   LayoutTemplate,
+  LineChart,
   ListTodo,
+  MessageSquare,
+  Mic,
   Pin,
   PinOff,
   Rocket,
@@ -18,6 +22,7 @@ import {
   Sparkles,
   Table,
   Users,
+  Video,
   Workflow,
   Wrench,
   X,
@@ -46,6 +51,11 @@ const ICON: Record<EditorKind, LucideIcon> = {
   settings: Settings,
   job: Bot,
   flow: ListTodo,
+  report: LineChart,
+  "files-explorer": Files,
+  room: MessageSquare,
+  "streaming-doc": Sparkles,
+  "meeting-bot": Video,
 };
 
 const FULL_TAB_WIDTH = 160;
@@ -107,7 +117,8 @@ export function TabBar() {
     <>
       <div
         ref={containerRef}
-        className="flex h-9 shrink-0 items-end overflow-hidden border-b border-app bg-app-surface pl-1"
+        className="flex h-9 shrink-0 items-end overflow-x-auto overflow-y-hidden border-b border-app bg-app-surface pl-1 scrollbar-none"
+        style={{ scrollbarWidth: "none" }}
       >
         {tabs.map((tab) => {
           const Icon = ICON[tab.kind] ?? Sparkles;

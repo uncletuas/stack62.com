@@ -8,6 +8,7 @@ import {
 import {
   Bot,
   CalendarClock,
+  Zap,
   CheckCircle2,
   ChevronLeft,
   Edit3,
@@ -52,6 +53,7 @@ import {
   inviteOrganizationMember,
   removeMembership,
   scheduleMeetingBot,
+  updateCoworker,
   updateCoworkerMemory,
   uploadFile,
   userAvatarUrl,
@@ -1251,7 +1253,7 @@ export function CoworkerRail() {
           <span
             className={`absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full ring-2 ring-white ${
               pendingCount > 0 ? "bg-amber-400" : "bg-emerald-500"
-            }`}
+            } ${sending && !open ? "animate-pulse" : ""}`}
           />
           {pendingCount > 0 && (
             <span className="absolute -bottom-1 -right-1 grid h-5 min-w-[20px] place-items-center rounded-full bg-amber-400 px-1 text-[10px] font-bold text-amber-950 shadow-[0_0_10px_rgba(251,191,36,0.5)]">
@@ -1688,6 +1690,26 @@ function GeniePanel({
                 </p>
                 <button
                   type="button"
+                  title={coworker?.defaultAutopilot ? "Autopilot on — coworker acts without asking" : "Autopilot off — coworker asks before acting"}
+                  onClick={async () => {
+                    if (!orgId || !workspaceId) return;
+                    const next = !(coworker?.defaultAutopilot ?? false);
+                    try {
+                      const updated = await updateCoworker({ organizationId: orgId, workspaceId, defaultAutopilot: next });
+                      setCoworker(updated);
+                    } catch { /* ignore */ }
+                  }}
+                  className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition ${
+                    coworker?.defaultAutopilot
+                      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                      : "border-app bg-app text-app-muted hover:bg-app-hover"
+                  }`}
+                >
+                  <Zap className="h-3 w-3" />
+                  <span>{coworker?.defaultAutopilot ? "Autopilot" : "Manual"}</span>
+                </button>
+                <button
+                  type="button"
                   onClick={onNewChat}
                   className="flex items-center gap-1 rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-accent-fg"
                   title="New chat"
@@ -1710,11 +1732,32 @@ function GeniePanel({
                   className="min-h-0 flex-1 overflow-y-auto p-3 text-xs"
                 >
                   {messages.length === 0 ? (
-                    <p className="text-app-subtle">
-                      Hi — I'm <span className="text-app">{name}</span>.
-                      Ask me anything about this workspace, and I'll act using
-                      your connected tools.
-                    </p>
+                    <div className="space-y-3">
+                      <p className="text-xs text-app-subtle">
+                        Hi — I'm <span className="font-medium text-app">{name}</span>.
+                        Ask me anything, hand off a task, or connect me to your tools.
+                      </p>
+                      <div className="space-y-1.5">
+                        {[
+                          "What's the status of my workflows?",
+                          "Summarise what happened today",
+                          "Draft a weekly update email",
+                          "Show me tasks that are overdue",
+                        ].map((suggestion) => (
+                          <button
+                            key={suggestion}
+                            type="button"
+                            onClick={() => {
+                              setDraft(suggestion);
+                              setTimeout(() => void send(suggestion), 0);
+                            }}
+                            className="block w-full rounded-lg border border-app bg-app-hover px-3 py-2 text-left text-[11px] text-app-muted hover:border-accent/50 hover:bg-app-hover hover:text-app transition"
+                          >
+                            {suggestion}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   ) : (
                     <ul className="space-y-2">
                       {messages.map((msg) => (

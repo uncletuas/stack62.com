@@ -4,6 +4,7 @@ import type { DocumentFormat } from "../lib/resources";
 
 export type ActivityKey =
   | "home"
+  | "decisions"
   | "explorer"
   | "coworker"
   | "flow"
@@ -125,7 +126,10 @@ interface WorkspaceContextValue {
    */
   navigate: (route: EditorRoute, opts?: NavigateOptions) => EditorTab;
 
+  /** Close a tab. If the tab is dirty, shows a confirmation dialog first. */
   closeTab: (id: string) => void;
+  /** Force-close a tab without dirty check (used after user confirms). */
+  forceCloseTab: (id: string) => void;
   setActiveTab: (id: string) => void;
   /** Patch the *current route* of the given tab (title, refId, dirty, etc.). */
   updateTab: (id: string, patch: Partial<EditorTab>) => void;
@@ -315,7 +319,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [activeTabId, openTab],
   );
 
-  const closeTab = useCallback((id: string) => {
+  const forceCloseTab = useCallback((id: string) => {
     setStates((cur) => {
       if (cur.length === 1) return cur;
       const next = cur.filter((s) => s.id !== id);
@@ -337,6 +341,40 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       return next;
     });
   }, []);
+
+  const closeTab = useCallback((id: string) => {
+    setStates((cur) => {
+      const tab = cur.find((s) => s.id === id);
+      if (tab?.dirty) {
+        // Defer the confirm dialog outside of the state update.
+        setTimeout(() => {
+          if (window.confirm("You have unsaved changes. Discard and close this tab?")) {
+            forceCloseTab(id);
+          }
+        }, 0);
+        return cur;
+      }
+      if (cur.length === 1) return cur;
+      const next = cur.filter((s) => s.id !== id);
+      setActiveTabId((curId) =>
+        curId === id ? next[next.length - 1]?.id ?? null : curId,
+      );
+      return next;
+    });
+    setConversations((cur) => {
+      const tab = cur; // will clean up in forceCloseTab if dirty
+      if (!tab[id]) return cur;
+      const next = { ...cur };
+      delete next[id];
+      return next;
+    });
+    setFileDrafts((cur) => {
+      if (!cur[id]) return cur;
+      const next = { ...cur };
+      delete next[id];
+      return next;
+    });
+  }, [forceCloseTab]);
 
   const setActiveTab = useCallback((id: string) => setActiveTabId(id), []);
 
@@ -550,6 +588,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openTab,
       navigate,
       closeTab,
+      forceCloseTab,
       setActiveTab,
       updateTab,
       back,
@@ -584,6 +623,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openTab,
       navigate,
       closeTab,
+      forceCloseTab,
       setActiveTab,
       updateTab,
       back,

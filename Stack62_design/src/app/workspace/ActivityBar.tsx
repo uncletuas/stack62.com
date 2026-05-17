@@ -1,41 +1,45 @@
 import {
+  Bell,
   CalendarDays,
-  ClipboardList,
   Files,
-  Layers,
+  Home,
   LineChart,
   Settings,
+  Users,
+  Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useWorkspace, type ActivityKey } from "./workspace-context";
 
-// Trimmed: Records and Explorer removed (duplicated Files); the Rooms
-// entry folded into Coworker — chat surface now has Coworker/Team/Rooms
-// tabs internally so it's one click instead of two top-level destinations.
-// Coworker isn't a top-level activity — the floating CoworkerRail
-// (right side, always reachable) is the chat surface. Putting it here
-// duplicated the same destination twice in different places.
 const TOP: Array<{ key: ActivityKey; label: string; icon: LucideIcon }> = [
-  { key: "systems", label: "Systems", icon: Layers },
-  { key: "files", label: "Files", icon: Files },
-  { key: "tasks", label: "Tasks", icon: ClipboardList },
-  { key: "schedules", label: "Schedules", icon: CalendarDays },
-  { key: "reports", label: "Reports", icon: LineChart },
+  { key: "home",      label: "Home",       icon: Home },
+  { key: "decisions", label: "Decisions",  icon: Bell },
+  { key: "systems",   label: "Operations", icon: Zap },
+  { key: "tasks",     label: "Tasks",      icon: CalendarDays },
+  { key: "reports",   label: "Reports",    icon: LineChart },
+  { key: "files",     label: "Files",      icon: Files },
+  { key: "teams",     label: "Team",       icon: Users },
 ];
 
-export function ActivityBar() {
+export function ActivityBar({
+  decisionCount = 0,
+}: {
+  decisionCount?: number;
+}) {
   const { activity, setActivity, sidebarOpen, setSidebarOpen, navigate } =
     useWorkspace();
 
   const click = (key: ActivityKey) => {
-    // Files opens its grid editor directly — no sidebar duplication
-    // of the same filter chips. Force the sidebar closed on entry so
-    // the grid gets the full canvas. Other activities keep the
-    // sidebar toggle.
     if (key === "files") {
       setActivity(key);
       setSidebarOpen(false);
       navigate({ kind: "files-explorer", title: "Files" });
+      return;
+    }
+    if (key === "home") {
+      setActivity(key);
+      setSidebarOpen(false);
+      navigate({ kind: "welcome", title: "Home" });
       return;
     }
     if (activity === key) setSidebarOpen(!sidebarOpen);
@@ -56,6 +60,7 @@ export function ActivityBar() {
     >
       {TOP.map(({ key, label, icon: Icon }) => {
         const active = activity === key;
+        const showBadge = key === "decisions" && decisionCount > 0;
         return (
           <button
             key={key}
@@ -69,8 +74,14 @@ export function ActivityBar() {
                 : "text-app-subtle hover:bg-app-hover hover:text-app"
             }`}
           >
-            <Icon className="h-4 w-4" aria-hidden />
-            {/* Labels hidden on very small screens to keep the rail compact. */}
+            <span className="relative">
+              <Icon className="h-4 w-4" aria-hidden />
+              {showBadge && (
+                <span className="absolute -right-1.5 -top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-rose-500 text-[8px] font-bold text-white">
+                  {decisionCount > 9 ? "9+" : decisionCount}
+                </span>
+              )}
+            </span>
             <span className="hidden leading-none sm:inline">{label}</span>
           </button>
         );

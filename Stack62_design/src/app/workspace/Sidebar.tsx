@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
+  Bell,
   Bot,
   Calendar,
   CheckCircle2,
@@ -10,17 +12,21 @@ import {
   Database,
   Home,
   LineChart,
+  RefreshCw,
   Search,
   Settings,
   ShieldCheck,
   Users,
   Wrench,
+  XCircle,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Input } from "../components/ui/input";
 import { EmptyState } from "../components/EmptyState";
 import { useAppContext } from "../context/app-context";
 import {
+  applyAiRequest,
+  advanceWorkflowRun,
   fetchAiRequests,
   fetchActivity,
   fetchDeployments,
@@ -31,7 +37,9 @@ import {
   fetchSchedules,
   fetchSystems,
   fetchTasks,
+  fetchWorkflowRuns,
   listFiles,
+  rejectAiRequest,
   type AiChangeRequest,
   type ActivityLog,
   type CoworkerJob,
@@ -42,7 +50,9 @@ import {
   type SystemDeployment,
   type SystemSummary,
   type Task,
+  type WorkflowRun,
   type WorkspaceDocument,
+  type WorkspaceDashboard,
 } from "../lib/resources";
 import { AssistantDock } from "./AssistantDock";
 import { useWorkspace, type ActivityKey } from "./workspace-context";
@@ -55,10 +65,11 @@ const TOOL_PANELS: Array<{ id: string; label: string; icon: LucideIcon }> = [
 
 const TITLES: Record<ActivityKey, string> = {
   home: "Home",
+  decisions: "Decisions",
   explorer: "Explorer",
   coworker: "Coworker",
   flow: "Flow",
-  systems: "Systems",
+  systems: "Operations",
   documents: "Documents",
   files: "Files",
   records: "Records",
@@ -67,25 +78,27 @@ const TITLES: Record<ActivityKey, string> = {
   reports: "Reports",
   templates: "Templates",
   tools: "Tools",
-  teams: "Teams",
+  teams: "Team",
   settings: "Settings",
 };
 
-export function Sidebar() {
+export function Sidebar({ dashboard }: { dashboard?: WorkspaceDashboard | null }) {
   const { activity, navigate } = useWorkspace();
   const { currentOrganization, currentWorkspace } = useAppContext();
   const [query, setQuery] = useState("");
 
   if (activity === "coworker") return <AssistantDock />;
 
+  const hideSearch = activity === "files" || activity === "decisions" || activity === "home";
+
   return (
     <div className="flex h-full flex-col bg-app-surface">
       <div className="flex items-center justify-between px-4 pt-4 pb-2">
         <h2 className="text-base font-semibold text-app">
-          {TITLES[activity]}
+          {TITLES[activity] ?? activity}
         </h2>
       </div>
-      {activity !== "files" && (
+      {!hideSearch && (
         <div className="px-3 pb-3">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-app-faint" />
@@ -103,6 +116,8 @@ export function Sidebar() {
           <div className="p-3 text-xs text-app-faint">Select a workspace.</div>
         ) : activity === "home" ? (
           <HomePanel />
+        ) : activity === "decisions" ? (
+          <DecisionsPanel />
         ) : activity === "files" ? (
           <ExplorerPanel />
         ) : activity === "flow" ? (
@@ -143,6 +158,189 @@ function HomePanel() {
         label="Recent activity"
         onClick={() => navigate({ kind: "flow", title: "Flow" })}
       />
+    </div>
+  );
+}
+
+function DecisionsPanel() {
+  const { currentOrganization, currentWorkspace } = useAppContext();
+  const [aiRequests, setAiRequests] = useState<AiChangeRequest[]>([]);
+  const [workflowRuns, setWorkflowRuns] = useState<WorkflowRun[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [acting, setActing] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    if (!currentOrganization) return;
+    setLoading(true);
+    setError(false);
+    Promise.all([
+      fetchAiRequests({
+        organizationId: currentOrganization.id,
+        workspaceId: currentWorkspace?.id,
+        status: "queued",
+      }).catch(() => []),
+      fetchWorkflowRuns({
+        organizationId: currentOrganization.id,
+        workspaceId: currentWorkspace?.id,
+        status: "active",
+      }).catch(() => []),
+    ])
+      .then(([reqs, runs]) => {
+        setAiRequests(reqs);
+        setWorkflowRuns(runs);
+        setLoading(false);
+      })
+      .catch(() => {
+        setError(true);
+        setLoading(false);
+      });
+  }, [currentOrganization?.id, currentWorkspace?.id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleApprove = async (requestId: string) => {
+    setActing(requestId);
+    try { await applyAiRequest(requestId); } catch { /* ignore */ }
+    setActing(null);
+    load();
+  };
+
+  const handleReject = async (requestId: string) => {
+    setActing(requestId);
+    try { await rejectAiRequest(requestId); } catch { /* ignore */ }
+    setActing(null);
+    load();
+  };
+
+  const handleAdvance = async (runId: string, action: "approve" | "reject") => {
+    setActing(runId);
+    try { await advanceWorkflowRun(runId, { action }); } catch { /* ignore */ }
+    setActing(null);
+    load();
+  };
+
+  if (loading) {
+    return (
+      <div className="space-y-2 p-3">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="animate-pulse rounded-lg border border-app bg-app-hover p-3 space-y-2">
+            <div className="h-3 w-3/4 rounded bg-app-faint/30" />
+            <div className="h-2 w-1/2 rounded bg-app-faint/20" />
+            <div className="flex gap-2 pt-1">
+              <div className="h-6 w-16 rounded bg-app-faint/20" />
+              <div className="h-6 w-16 rounded bg-app-faint/20" />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center gap-3 p-6 text-center">
+        <AlertTriangle className="h-8 w-8 text-app-faint" />
+        <p className="text-sm text-app-muted">Could not load decisions.</p>
+        <button
+          onClick={load}
+          className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent-soft transition"
+        >
+          <RefreshCw className="h-3.5 w-3.5" />
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  const total = aiRequests.length + workflowRuns.length;
+
+  if (total === 0) {
+    return (
+      <EmptyState
+        compact
+        icon={Bell}
+        title="All clear"
+        description="No pending approvals. Your coworker is on top of things."
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-2 p-3">
+      {aiRequests.map((req) => {
+        const risk = req.riskLevel ?? "low";
+        const riskColor =
+          risk === "high" ? "text-rose-400 bg-rose-500/10 border-rose-500/30" :
+          risk === "medium" ? "text-amber-400 bg-amber-500/10 border-amber-500/30" :
+          "text-emerald-400 bg-emerald-500/10 border-emerald-500/30";
+        const isActing = acting === req.id;
+        return (
+          <div key={req.id} className="rounded-lg border border-app bg-app p-3 space-y-2">
+            <div className="flex items-start gap-2">
+              <span className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase border ${riskColor}`}>
+                {risk}
+              </span>
+              <p className="text-xs font-medium text-app leading-snug">
+                {req.summary ?? req.intent ?? req.prompt.slice(0, 80)}
+              </p>
+            </div>
+            <p className="text-[10px] text-app-faint">AI change request · queued</p>
+            <div className="flex gap-2 pt-0.5">
+              <button
+                disabled={isActing}
+                onClick={() => handleApprove(req.id)}
+                className="flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-emerald-500 disabled:opacity-50 transition"
+              >
+                <CheckCircle2 className="h-3 w-3" />
+                Approve
+              </button>
+              <button
+                disabled={isActing}
+                onClick={() => handleReject(req.id)}
+                className="flex items-center gap-1 rounded-md border border-app px-2.5 py-1 text-[11px] font-medium text-app-muted hover:bg-app-hover hover:text-app disabled:opacity-50 transition"
+              >
+                <XCircle className="h-3 w-3" />
+                Reject
+              </button>
+            </div>
+          </div>
+        );
+      })}
+      {workflowRuns.map((run) => {
+        const isActing = acting === run.id;
+        return (
+          <div key={run.id} className="rounded-lg border border-app bg-app p-3 space-y-2">
+            <div className="flex items-start gap-2">
+              <span className="mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase border text-blue-400 bg-blue-500/10 border-blue-500/30">
+                workflow
+              </span>
+              <p className="text-xs font-medium text-app leading-snug">
+                Step: {run.currentStepKey ?? "pending"}
+              </p>
+            </div>
+            <p className="text-[10px] text-app-faint">Workflow run · awaiting action</p>
+            <div className="flex gap-2 pt-0.5">
+              <button
+                disabled={isActing}
+                onClick={() => handleAdvance(run.id, "approve")}
+                className="flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-emerald-500 disabled:opacity-50 transition"
+              >
+                <CheckCircle2 className="h-3 w-3" />
+                Approve
+              </button>
+              <button
+                disabled={isActing}
+                onClick={() => handleAdvance(run.id, "reject" as const)}
+                className="flex items-center gap-1 rounded-md border border-app px-2.5 py-1 text-[11px] font-medium text-app-muted hover:bg-app-hover hover:text-app disabled:opacity-50 transition"
+              >
+                <XCircle className="h-3 w-3" />
+                Reject
+              </button>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

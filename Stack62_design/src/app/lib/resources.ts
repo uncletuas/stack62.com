@@ -471,6 +471,20 @@ export async function fetchActivity(query: {
   return apiRequest<ActivityLog[]>('/activity', { query });
 }
 
+export interface WorkspaceDashboard {
+  pendingAiRequests: number;
+  activeWorkflowRuns: number;
+  aiHandledToday: number;
+  recentActivity: ActivityLog[];
+}
+
+export async function fetchDashboard(query: {
+  organizationId?: string;
+  workspaceId?: string;
+}) {
+  return apiRequest<WorkspaceDashboard>('/activity/dashboard', { query });
+}
+
 export async function fetchDocuments(query: {
   organizationId?: string;
   workspaceId?: string;

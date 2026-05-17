@@ -4,9 +4,17 @@ import { ActivityController } from './activity.controller';
 import { ActivityService } from './activity.service';
 import { AuditRetentionCron } from './audit-retention.cron';
 import { ActivityLogEntity } from './entities/activity-log.entity';
+import { AiChangeRequestEntity } from '../ai/entities/ai-change-request.entity';
+import { WorkflowRunEntity } from '../workflows/entities/workflow-run.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ActivityLogEntity])],
+  imports: [
+    TypeOrmModule.forFeature([
+      ActivityLogEntity,
+      AiChangeRequestEntity,
+      WorkflowRunEntity,
+    ]),
+  ],
   controllers: [ActivityController],
   providers: [ActivityService, AuditRetentionCron],
   exports: [ActivityService],
