@@ -1763,9 +1763,10 @@ function GeniePanel({
                         <MessageBubble key={msg.id} msg={msg} />
                       ))}
                       {sending && (
-                        <li className="flex items-center gap-2 text-[11px] text-app-subtle">
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                          {name} is thinking...
+                        <li className="flex items-center gap-1 px-1">
+                          <span className="flex h-1.5 w-1.5 animate-bounce rounded-full bg-app-muted" style={{ animationDelay: "0ms" }} />
+                          <span className="flex h-1.5 w-1.5 animate-bounce rounded-full bg-app-muted" style={{ animationDelay: "150ms" }} />
+                          <span className="flex h-1.5 w-1.5 animate-bounce rounded-full bg-app-muted" style={{ animationDelay: "300ms" }} />
                         </li>
                       )}
                     </ul>
