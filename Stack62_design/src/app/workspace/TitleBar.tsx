@@ -23,7 +23,6 @@ import {
   Printer,
   Search,
   Sparkles,
-  Terminal,
   Upload,
   User as UserIcon,
 } from "lucide-react";
@@ -47,8 +46,6 @@ export function TitleBar() {
     setActivity,
     sidebarOpen,
     setSidebarOpen,
-    runOpen,
-    setRunOpen,
     appendRunLog,
     back,
     forward,
@@ -232,12 +229,6 @@ export function TitleBar() {
       icon: PanelLeft,
       shortcut: "Ctrl+B",
       onSelect: () => setSidebarOpen(!sidebarOpen),
-    },
-    {
-      label: runOpen ? "Hide output panel" : "Show output panel",
-      icon: Terminal,
-      shortcut: "Ctrl+J",
-      onSelect: () => setRunOpen(!runOpen),
     },
     {
       label: "Command palette",

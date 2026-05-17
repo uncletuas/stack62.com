@@ -8,7 +8,6 @@ import {
 import {
   Bot,
   CalendarClock,
-  Zap,
   CheckCircle2,
   ChevronLeft,
   Edit3,
@@ -53,7 +52,6 @@ import {
   inviteOrganizationMember,
   removeMembership,
   scheduleMeetingBot,
-  updateCoworker,
   updateCoworkerMemory,
   uploadFile,
   userAvatarUrl,
@@ -1088,12 +1086,15 @@ export function CoworkerRail() {
     };
     setMessages((prev) => [...prev, optimistic]);
     setAttachments([]);
+    const ctx = activeTabContext(activeTab);
     try {
       const result = await coworkerChat({
         organizationId: orgId,
         workspaceId,
         prompt: fullPrompt,
         conversationId,
+        ...(ctx.systemId ? { systemId: ctx.systemId } : {}),
+        ...(ctx.hint ? { systemHint: ctx.hint } : {}),
       });
       // Server returns the canonical conversationId — adopt it (matters when
       // we just created a "new chat" with a temporary client-side id).
@@ -1379,15 +1380,11 @@ export function CoworkerRail() {
           attachments={attachments}
           onPickFiles={onPickFiles}
           onRemoveAttachment={removeAttachment}
-          defaultAutopilot={coworker?.defaultAutopilot ?? false}
-          onToggleAutopilot={async () => {
-            if (!orgId || !workspaceId) return;
-            const next = !(coworker?.defaultAutopilot ?? false);
-            try {
-              const updated = await updateCoworker({ organizationId: orgId, workspaceId, defaultAutopilot: next });
-              setCoworker(updated);
-            } catch { /* ignore */ }
-          }}
+          contextLabel={
+            activeTab && activeTab.kind !== "welcome" && activeTab.kind !== "files-explorer"
+              ? activeTab.title
+              : null
+          }
         />
       )}
 
@@ -1503,8 +1500,9 @@ interface GeniePanelProps {
   attachments: ChatAttachment[];
   onPickFiles: (files: FileList | null) => void;
   onRemoveAttachment: (id: string) => void;
-  defaultAutopilot: boolean;
-  onToggleAutopilot: () => void;
+  /** Label shown in the chat header indicating which workspace tab the
+   *  coworker has context on. e.g. "Looking at: Operations Report" */
+  contextLabel: string | null;
 }
 
 function GeniePanel({
@@ -1544,9 +1542,8 @@ function GeniePanel({
   attachments,
   onPickFiles,
   onRemoveAttachment,
-  defaultAutopilot,
-  onToggleAutopilot,
   onSendText,
+  contextLabel,
 }: GeniePanelProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   /** Meetings sub-view inside the Coworker tab. When true the body
@@ -1706,19 +1703,6 @@ function GeniePanel({
                 </p>
                 <button
                   type="button"
-                  title={defaultAutopilot ? "Autopilot on — coworker acts without asking" : "Autopilot off — coworker asks before acting"}
-                  onClick={onToggleAutopilot}
-                  className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition ${
-                    defaultAutopilot
-                      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                      : "border-app bg-app text-app-muted hover:bg-app-hover"
-                  }`}
-                >
-                  <Zap className="h-3 w-3" />
-                  <span>{defaultAutopilot ? "Autopilot" : "Manual"}</span>
-                </button>
-                <button
-                  type="button"
                   onClick={onNewChat}
                   className="flex items-center gap-1 rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-accent-fg"
                   title="New chat"
@@ -1727,6 +1711,15 @@ function GeniePanel({
                   <span>New</span>
                 </button>
               </div>
+
+              {contextLabel && !showHistory && (
+                <div className="flex shrink-0 items-center gap-1.5 border-b border-app bg-accent-soft/30 px-3 py-1 text-[10px] text-accent">
+                  <Sparkles className="h-3 w-3 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">
+                    Aware of: <span className="font-medium">{contextLabel}</span>
+                  </span>
+                </div>
+              )}
 
               {showHistory ? (
                 <ChatHistory
@@ -2717,6 +2710,48 @@ function pickFlashMessage(
   }
   if (pool.length === 0) return null;
   return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/**
+ * Derive coworker context from the active workspace tab so the LLM
+ * knows what the user is looking at. Returns systemId when the tab is
+ * a system (so the backend can scope tool calls), and a free-form
+ * systemHint string describing the surface for any other tab kind.
+ */
+function activeTabContext(
+  tab: EditorTab | null | undefined,
+): { systemId?: string; hint?: string } {
+  if (!tab) return {};
+  const refId = tab.refId;
+  switch (tab.kind) {
+    case "system":
+    case "module":
+    case "preview":
+    case "history":
+      return refId
+        ? { systemId: refId, hint: `User is viewing system "${tab.title}".` }
+        : { hint: `User is viewing system "${tab.title}".` };
+    case "document":
+      return { hint: `User is viewing document "${tab.title}" (id: ${refId ?? "n/a"}).` };
+    case "file":
+      return { hint: `User is viewing file "${tab.title}" (id: ${refId ?? "n/a"}).` };
+    case "task":
+      return { hint: `User is viewing task "${tab.title}" (id: ${refId ?? "n/a"}).` };
+    case "schedule":
+      return { hint: `User is viewing schedule "${tab.title}" (id: ${refId ?? "n/a"}).` };
+    case "report":
+      return { hint: `User is viewing report "${tab.title}" (id: ${refId ?? "n/a"}).` };
+    case "record":
+      return { hint: `User is viewing record "${tab.title}" (id: ${refId ?? "n/a"}).` };
+    case "workflow":
+      return { hint: `User is viewing workflow run "${tab.title}" (id: ${refId ?? "n/a"}).` };
+    case "plan":
+      return { hint: `User is viewing AI plan "${tab.title}" (id: ${refId ?? "n/a"}).` };
+    case "room":
+      return { hint: `User is in chat room "${tab.title}".` };
+    default:
+      return {};
+  }
 }
 
 function timeAgo(iso: string) {

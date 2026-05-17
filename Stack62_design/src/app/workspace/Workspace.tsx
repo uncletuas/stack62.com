@@ -5,7 +5,6 @@ import { CoworkerRail } from "./CoworkerRail";
 import { EditorSurface } from "./editors";
 import { SettingsDialog } from "./editors/SettingsEditor";
 import { EmailComposer } from "./EmailComposer";
-import { RunPanel } from "./RunPanel";
 import { Sidebar } from "./Sidebar";
 import { StatusBar } from "./StatusBar";
 import { TabBar } from "./TabBar";
@@ -95,7 +94,6 @@ function Inner() {
           <main className="min-h-0 flex-1 overflow-hidden">
             <EditorSurface />
           </main>
-          <RunPanel />
         </div>
         <CoworkerRail />
       </div>

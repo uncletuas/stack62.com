@@ -1,12 +1,10 @@
-import { Cloud, GitBranch, Terminal, Zap } from "lucide-react";
+import { Cloud, GitBranch, Zap } from "lucide-react";
 import { useAppContext } from "../context/app-context";
 import { useWorkspace } from "./workspace-context";
 
 export function StatusBar() {
   const { currentOrganization, currentWorkspace, user } = useAppContext();
-  const { autopilot, runOpen, setRunOpen, tabs, runLog } = useWorkspace();
-  const errors = runLog.filter((e) => e.level === "error").length;
-  const warns = runLog.filter((e) => e.level === "warn").length;
+  const { autopilot, tabs } = useWorkspace();
 
   return (
     <footer className="flex h-6 shrink-0 items-center gap-3 border-t border-cyan-950/70 bg-app px-3 text-[11px] text-app-subtle">
@@ -37,16 +35,6 @@ export function StatusBar() {
         <Zap className="h-3 w-3" />
         {tabs.length} tab{tabs.length === 1 ? "" : "s"}
       </span>
-      <button
-        onClick={() => setRunOpen(!runOpen)}
-        className={`flex items-center gap-1 rounded px-2 py-0.5 hover:bg-white/10 ${
-          errors ? "text-rose-300" : warns ? "text-amber-300" : ""
-        }`}
-      >
-        <Terminal className="h-3 w-3" />
-        Output
-        {errors ? ` · ${errors} err` : warns ? ` · ${warns} warn` : ""}
-      </button>
       <span className="ml-auto truncate">{user?.email ?? ""}</span>
     </footer>
   );

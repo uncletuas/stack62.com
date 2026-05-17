@@ -6,8 +6,6 @@ export function useGlobalShortcuts() {
     setPaletteOpen,
     setSidebarOpen,
     sidebarOpen,
-    setRunOpen,
-    runOpen,
     activeTabId,
     closeTab,
     tabs,
@@ -35,11 +33,6 @@ export function useGlobalShortcuts() {
       if (mod && e.key.toLowerCase() === "b") {
         e.preventDefault();
         setSidebarOpen(!sidebarOpen);
-        return;
-      }
-      if (mod && e.key.toLowerCase() === "j") {
-        e.preventDefault();
-        setRunOpen(!runOpen);
         return;
       }
       if (mod && e.key.toLowerCase() === "w") {
@@ -113,8 +106,6 @@ export function useGlobalShortcuts() {
     setPaletteOpen,
     setSidebarOpen,
     sidebarOpen,
-    setRunOpen,
-    runOpen,
     activeTabId,
     closeTab,
     tabs,

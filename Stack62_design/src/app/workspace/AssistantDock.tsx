@@ -201,7 +201,6 @@ export function AssistantDock() {
     navigate,
     updateTab,
     appendRunLog,
-    setRunOpen,
     conversations,
     ensureConversation,
     appendMessage,
@@ -583,7 +582,6 @@ export function AssistantDock() {
       return;
     }
     setFileDraft(tabId, { generating: true });
-    setRunOpen(true);
     appendRunLog({
       level: "info",
       text: `Generating ${draft.format.toUpperCase()} · ${draft.title}`,
@@ -630,7 +628,6 @@ export function AssistantDock() {
       .map((m) => `${m.role === "user" ? "USER" : "ASSISTANT"}: ${m.text}`)
       .join("\n");
     setBusy(true);
-    setRunOpen(true);
     try {
       if (mode.intent === "system") {
         appendRunLog({

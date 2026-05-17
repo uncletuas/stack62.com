@@ -39,7 +39,7 @@ const STATUS_COLOR: Record<DeploymentStatus, string> = {
 
 export function PreviewEditor({ tab }: { tab: EditorTab }) {
   const { currentOrganization, currentWorkspace } = useAppContext();
-  const { appendRunLog, setRunOpen } = useWorkspace();
+  const { appendRunLog } = useWorkspace();
   const systemId = tab.refId;
   const [systemName, setSystemName] = useState("");
   const [deployments, setDeployments] = useState<SystemDeployment[]>([]);
@@ -134,7 +134,6 @@ export function PreviewEditor({ tab }: { tab: EditorTab }) {
   const deploy = async () => {
     if (!currentOrganization || !systemId) return;
     setBusy("deploy");
-    setRunOpen(true);
     appendRunLog({ level: "info", text: "Deploying…", source: "runner" });
     try {
       const dep = await deploySystem({
