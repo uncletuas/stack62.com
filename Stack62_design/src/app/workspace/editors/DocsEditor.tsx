@@ -158,17 +158,18 @@ export function DocsEditor({
   const restoreSelection = useCallback(() => {
     const el = editorRef.current;
     if (!el) return;
+    // CRITICAL: focus BEFORE restoring the range. Calling el.focus() after
+    // sel.addRange() silently clears the restored selection in Chrome/Edge.
+    el.focus();
     const range = savedRangeRef.current;
     if (range && el.contains(range.commonAncestorContainer)) {
       const sel = window.getSelection();
       sel?.removeAllRanges();
       sel?.addRange(range);
-      el.focus();
       return;
     }
     // No saved range — place caret at end so commands have somewhere
     // to insert. This is what happens on the first toolbar click.
-    el.focus();
     const sel = window.getSelection();
     const fresh = document.createRange();
     fresh.selectNodeContents(el);
@@ -410,7 +411,10 @@ export function DocsEditor({
   const padPx = layout.marginIn * 96 * scale;
 
   return (
-    <div className="flex h-full flex-col bg-doc-canvas">
+    <div
+      className="flex h-full flex-col"
+      style={{ background: "var(--doc-canvas-bg, #e5e7eb)" }}
+    >
       {!readOnly && (
         <DocsToolbar
           layout={layout}
@@ -434,7 +438,7 @@ export function DocsEditor({
       <div className="min-h-0 flex-1 overflow-auto">
         <div className="py-8 px-4">
           <div
-            className="mx-auto rounded-sm bg-doc-paper shadow-doc"
+            className="mx-auto rounded-sm"
             style={{
               width: pxW,
               minHeight: pxW * 1.3,
@@ -442,6 +446,8 @@ export function DocsEditor({
               fontFamily: layout.fontFamily,
               fontSize: layout.fontSize,
               color: "#111827",
+              background: "#ffffff",
+              boxShadow: "0 6px 24px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.05)",
             }}
           >
             <div

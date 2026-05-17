@@ -95,30 +95,6 @@ export function WelcomeEditor() {
           )}
         </header>
 
-        {/* Live stats row */}
-        {!loading && dashboard && (
-          <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatTile
-              label="Pending decisions"
-              value={pendingDecisions}
-              accent={pendingDecisions > 0}
-              onClick={openDecisions}
-            />
-            <StatTile
-              label="Coworker actions today"
-              value={dashboard.aiHandledToday}
-            />
-            <StatTile
-              label="Active runs"
-              value={dashboard.activeWorkflowRuns}
-            />
-            <StatTile
-              label="AI queue"
-              value={dashboard.pendingAiRequests}
-            />
-          </div>
-        )}
-
         {/* Pick up where you left off */}
         {!loading && recent && (
           <section className="mb-8">
@@ -244,37 +220,6 @@ export function WelcomeEditor() {
         )}
       </div>
     </div>
-  );
-}
-
-function StatTile({
-  label,
-  value,
-  accent,
-  onClick,
-}: {
-  label: string;
-  value: number;
-  accent?: boolean;
-  onClick?: () => void;
-}) {
-  const Tag = onClick ? "button" : "div";
-  return (
-    <Tag
-      onClick={onClick}
-      className={`rounded-xl border p-4 text-left transition ${
-        accent
-          ? "border-rose-500/40 bg-rose-500/5 hover:bg-rose-500/10 cursor-pointer"
-          : onClick
-            ? "border-app bg-app-elevated hover:bg-app-hover cursor-pointer"
-            : "border-app bg-app-elevated"
-      }`}
-    >
-      <p className={`text-2xl font-bold tabular-nums ${accent ? "text-rose-400" : "text-app"}`}>
-        {value}
-      </p>
-      <p className="mt-0.5 text-[11px] text-app-muted leading-snug">{label}</p>
-    </Tag>
   );
 }
 
