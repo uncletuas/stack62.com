@@ -412,16 +412,18 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
 
   return (
     <div className="flex h-full flex-col bg-app text-app">
-      <FileWorkbenchHeader
-        file={stored}
-        title={displayName}
-        saving={saving}
-        surface={surface}
-        zoom={zoom}
-        setZoom={setZoom}
-        onDelete={removeFile}
-        onOpenGoogle={openGoogle}
-      />
+      {surface !== "document" && (
+        <FileWorkbenchHeader
+          file={stored}
+          title={displayName}
+          saving={saving}
+          surface={surface}
+          zoom={zoom}
+          setZoom={setZoom}
+          onDelete={removeFile}
+          onOpenGoogle={openGoogle}
+        />
+      )}
 
       <div className="flex min-h-0 flex-1">
         <main className="min-w-0 flex-1 overflow-auto bg-[#111827]">

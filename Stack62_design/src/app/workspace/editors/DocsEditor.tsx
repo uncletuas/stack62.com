@@ -416,6 +416,20 @@ export function DocsEditor({
       style={{ background: "var(--doc-canvas-bg, #e5e7eb)" }}
     >
       {!readOnly && (
+        <DocsTitleBar title={title ?? "Untitled document"} />
+      )}
+      {!readOnly && (
+        <DocsMenuBar
+          onExec={exec}
+          onBlock={setBlock}
+          onLink={promptAndInsertLink}
+          onImage={promptAndInsertImage}
+          onTable={promptAndInsertTable}
+          onPageBreak={() => insertHtml('<hr class="docs-pagebreak" /><p><br/></p>')}
+          onHr={() => insertHtml('<hr />')}
+        />
+      )}
+      {!readOnly && (
         <DocsToolbar
           layout={layout}
           setLayout={setLayout}
@@ -710,6 +724,173 @@ function ColorButton({
   );
 }
 
+/* ───────────── Title bar (Google-Docs-style) ──────────────────────── */
+
+const DOCS_BUILD_TAG = "Docs v3 · 2026-05-18";
+
+function DocsTitleBar({ title }: { title: string }) {
+  return (
+    <div
+      className="flex shrink-0 items-center gap-3 border-b border-app px-4 py-2"
+      style={{ background: "#ffffff", color: "#1f2937" }}
+    >
+      {/* Blue document tile, mimics the Google Docs icon. */}
+      <div
+        className="grid h-8 w-8 shrink-0 place-items-center rounded"
+        style={{ background: "#4285F4", color: "#ffffff" }}
+        title={DOCS_BUILD_TAG}
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+          <path d="M6 2h9l5 5v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Zm8 1.5V8h4.5L14 3.5ZM8 12h8v1.5H8V12Zm0 3h8v1.5H8V15Zm0 3h5v1.5H8V18Z" />
+        </svg>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-semibold" style={{ color: "#1f2937" }}>
+          {title}
+        </div>
+        <div className="flex items-center gap-2 text-[11px]" style={{ color: "#5f6368" }}>
+          <span>File</span><span>Edit</span><span>View</span><span>Insert</span>
+          <span>Format</span><span>Tools</span><span>Extensions</span><span>Help</span>
+        </div>
+      </div>
+      <span
+        className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+        style={{ background: "#e8f0fe", color: "#1967d2" }}
+      >
+        {DOCS_BUILD_TAG}
+      </span>
+    </div>
+  );
+}
+
+/* ───────────── Menu bar (File / Edit / View / Insert / Format / Tools) ──── */
+
+function DocsMenuBar({
+  onExec,
+  onBlock,
+  onLink,
+  onImage,
+  onTable,
+  onPageBreak,
+  onHr,
+}: {
+  onExec: (cmd: string, value?: string) => void;
+  onBlock: (tag: string) => void;
+  onLink: () => void;
+  onImage: () => void;
+  onTable: () => void;
+  onPageBreak: () => void;
+  onHr: () => void;
+}) {
+  const print = () => window.print();
+  const items: Array<{ label: string; entries: Array<{ label: string; onClick?: () => void }> }> = [
+    {
+      label: "File",
+      entries: [
+        { label: "New document", onClick: () => window.dispatchEvent(new CustomEvent("stack62:new-document")) },
+        { label: "Print…", onClick: print },
+      ],
+    },
+    {
+      label: "Edit",
+      entries: [
+        { label: "Undo  ⌘Z", onClick: () => onExec("undo") },
+        { label: "Redo  ⌘Y", onClick: () => onExec("redo") },
+        { label: "Cut", onClick: () => onExec("cut") },
+        { label: "Copy", onClick: () => onExec("copy") },
+        { label: "Paste", onClick: () => onExec("paste") },
+        { label: "Select all  ⌘A", onClick: () => onExec("selectAll") },
+      ],
+    },
+    {
+      label: "Insert",
+      entries: [
+        { label: "Link  ⌘K", onClick: onLink },
+        { label: "Image", onClick: onImage },
+        { label: "Table", onClick: onTable },
+        { label: "Horizontal rule", onClick: onHr },
+        { label: "Page break", onClick: onPageBreak },
+      ],
+    },
+    {
+      label: "Format",
+      entries: [
+        { label: "Bold  ⌘B", onClick: () => onExec("bold") },
+        { label: "Italic  ⌘I", onClick: () => onExec("italic") },
+        { label: "Underline  ⌘U", onClick: () => onExec("underline") },
+        { label: "Heading 1  ⌘⇧1", onClick: () => onBlock("h1") },
+        { label: "Heading 2  ⌘⇧2", onClick: () => onBlock("h2") },
+        { label: "Heading 3  ⌘⇧3", onClick: () => onBlock("h3") },
+        { label: "Quote", onClick: () => onBlock("blockquote") },
+        { label: "Code block", onClick: () => onBlock("pre") },
+        { label: "Clear formatting  ⌘\\", onClick: () => onExec("removeFormat") },
+      ],
+    },
+  ];
+  return (
+    <div
+      className="flex shrink-0 items-center gap-1 border-b px-4 py-1 text-[12px]"
+      style={{ background: "#f8f9fa", borderColor: "#dadce0", color: "#3c4043" }}
+    >
+      {items.map((menu) => (
+        <DocsMenuButton key={menu.label} label={menu.label} entries={menu.entries} />
+      ))}
+    </div>
+  );
+}
+
+function DocsMenuButton({
+  label,
+  entries,
+}: {
+  label: string;
+  entries: Array<{ label: string; onClick?: () => void }>;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="rounded px-2 py-1 hover:bg-black/5"
+        style={{ color: "#3c4043" }}
+      >
+        {label}
+      </button>
+      {open && (
+        <div
+          className="absolute left-0 z-30 mt-1 min-w-[200px] rounded-md border py-1 shadow-lg"
+          style={{ background: "#ffffff", borderColor: "#dadce0" }}
+        >
+          {entries.map((entry) => (
+            <button
+              key={entry.label}
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                entry.onClick?.();
+              }}
+              className="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-black/5"
+              style={{ color: "#3c4043" }}
+            >
+              {entry.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ───────────── Status bar ─────────────────────────────────────────── */
 
 function DocsStatusBar({
@@ -722,7 +903,7 @@ function DocsStatusBar({
     <div className="flex shrink-0 items-center justify-between border-t border-app bg-app-elevated px-4 py-1 text-[11px] text-app-faint">
       <span className="truncate">{title ?? "Untitled"}</span>
       <span className="tabular-nums">
-        {stats.words} word{stats.words === 1 ? "" : "s"} · {stats.chars} char{stats.chars === 1 ? "" : "s"}
+        {stats.words} word{stats.words === 1 ? "" : "s"} · {stats.chars} char{stats.chars === 1 ? "" : "s"} · {DOCS_BUILD_TAG}
       </span>
     </div>
   );
