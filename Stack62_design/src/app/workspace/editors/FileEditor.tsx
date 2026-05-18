@@ -129,24 +129,49 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
         if (!file) return;
 
         if (file.mimeType.startsWith("image/")) {
-          const url = await fetchFileBlobUrl(file.id).catch(() => null);
-          revoked = url;
-          if (live && url) setImageUrl(url);
+          try {
+            const url = await fetchFileBlobUrl(file.id);
+            revoked = url;
+            if (live) setImageUrl(url);
+          } catch (err) {
+            appendRunLog({
+              level: "error",
+              text: `Couldn't load image ${file.filename}: ${(err as Error).message}`,
+              source: "files",
+            });
+          }
           return;
         }
 
         if (file.mimeType === "application/pdf" || /\.pdf$/i.test(file.filename)) {
-          const url = await fetchFileBlobUrl(file.id).catch(() => null);
-          revoked = url;
-          if (live && url) setPdfUrl(url);
+          try {
+            const url = await fetchFileBlobUrl(file.id);
+            revoked = url;
+            if (live) setPdfUrl(url);
+          } catch (err) {
+            appendRunLog({
+              level: "error",
+              text: `Couldn't load PDF ${file.filename}: ${(err as Error).message}`,
+              source: "files",
+            });
+          }
           return;
         }
 
         // Real spreadsheet path: parse xlsx/xls binaries client-side with
         // SheetJS so we get every sheet, every row, types intact.
         if (/\.(xlsx|xls)$/i.test(file.filename)) {
-          const url = await fetchFileBlobUrl(file.id).catch(() => null);
-          revoked = url;
+          let url: string | null = null;
+          try {
+            url = await fetchFileBlobUrl(file.id);
+            revoked = url;
+          } catch (err) {
+            appendRunLog({
+              level: "error",
+              text: `Couldn't download spreadsheet ${file.filename}: ${(err as Error).message}`,
+              source: "files",
+            });
+          }
           if (live && url) {
             try {
               const buf = await fetch(url).then((r) => r.arrayBuffer());
@@ -189,11 +214,40 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
         }
 
         if (EDITABLE_RE.test(file.filename)) {
-          const doc = await fetchFileContent(file.id).catch(() => null);
-          if (live && doc) {
-            setEditableContent(doc);
-            setContent(doc.text);
-            setSaving("saved");
+          // Don't swallow errors here — a failed extraction is the
+          // #1 cause of "I uploaded a doc and it won't open". The
+          // run log shows the actual reason instead of a blank
+          // editor.
+          try {
+            const doc = await fetchFileContent(file.id);
+            if (live && doc) {
+              setEditableContent(doc);
+              setContent(doc.text);
+              setSaving("saved");
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            appendRunLog({
+              level: "error",
+              text: `Couldn't read ${file.filename}: ${msg}`,
+              source: "files",
+            });
+            // Set an empty editable shell so the user still gets the
+            // header + can re-upload or download. Better than a blank
+            // canvas with no UI affordance.
+            if (live) {
+              setEditableContent({
+                fileId: file.id,
+                filename: file.filename,
+                mimeType: file.mimeType,
+                editable: false,
+                format: "text",
+                text: `[Couldn't read this file: ${msg}]\n\nTry: downloading it, re-uploading, or asking the Coworker to extract its contents.`,
+              });
+              setContent(
+                `[Couldn't read this file: ${msg}]\n\nTry: downloading it, re-uploading, or asking the Coworker to extract its contents.`,
+              );
+            }
           }
         }
       })
