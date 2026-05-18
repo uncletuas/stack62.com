@@ -1,16 +1,30 @@
+import { useEffect } from "react";
 import type { ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
 import { Button } from "../components/ui/button";
 import { useAppContext } from "../context/app-context";
+import { useTheme } from "../context/theme-context";
 
 /**
  * Header + footer shared across the public marketing pages
  * (landing, pricing, sign-in, sign-up, invite). Authed users see a
  * "Go to app" CTA in place of "Sign in / Get started".
+ *
+ * Public pages are dark-only — the design is built around a dark hero
+ * gradient and the brand tokens look thin in light mode. We force the
+ * theme to dark while this shell is mounted, then release the override
+ * on unmount so the user's saved in-app preference returns as soon as
+ * they cross into /app.
  */
 export function PublicShell({ children }: { children: ReactNode }) {
   const { isAuthenticated } = useAppContext();
   const navigate = useNavigate();
+  const { forceResolved } = useTheme();
+
+  useEffect(() => {
+    forceResolved("dark");
+    return () => forceResolved(null);
+  }, [forceResolved]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-50 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900 text-slate-900 dark:text-slate-50">

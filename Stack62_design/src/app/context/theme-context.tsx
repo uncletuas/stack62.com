@@ -13,10 +13,21 @@ export type ThemeMode = "light" | "dark" | "system";
 interface ThemeContextValue {
   /** What the user picked: light / dark / system. */
   mode: ThemeMode;
-  /** What's currently rendered (system → resolves to light/dark). */
+  /** What's currently rendered. If a force override is active (e.g. the
+   *  marketing pages forcing dark) this reflects the override; otherwise
+   *  it reflects the user's saved preference. */
   resolved: "light" | "dark";
   setMode: (next: ThemeMode) => void;
   toggle: () => void;
+  /** Force a theme regardless of the user's saved preference. The
+   *  preference is still persisted (so when the override is cleared the
+   *  user's choice comes back). Pass `null` to release. Used by the
+   *  public/landing shell to lock dark mode without disturbing the
+   *  in-app toggle. */
+  forceResolved: (next: "light" | "dark" | null) => void;
+  /** True when an override is currently active (so UI like the
+   *  Appearance picker can hide or disable itself if it likes). */
+  isForced: boolean;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -47,28 +58,33 @@ function resolve(mode: ThemeMode): "light" | "dark" {
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [mode, setModeState] = useState<ThemeMode>(() => readStoredMode());
-  const [resolved, setResolved] = useState<"light" | "dark">(() =>
+  const [userResolved, setUserResolved] = useState<"light" | "dark">(() =>
     resolve(readStoredMode()),
   );
+  // Override applied by ForceTheme/PublicShell — takes precedence over
+  // the user's saved preference but is NOT persisted to localStorage.
+  const [forced, setForced] = useState<"light" | "dark" | null>(null);
+
+  const effective: "light" | "dark" = forced ?? userResolved;
 
   // Apply the .dark class on <html> so Tailwind's existing `.dark` selector
   // and our --app-* token overrides take effect.
   useEffect(() => {
     const root = document.documentElement;
-    if (resolved === "dark") root.classList.add("dark");
+    if (effective === "dark") root.classList.add("dark");
     else root.classList.remove("dark");
-    root.dataset.theme = resolved;
-    root.style.colorScheme = resolved;
-  }, [resolved]);
+    root.dataset.theme = effective;
+    root.style.colorScheme = effective;
+  }, [effective]);
 
   // React to system changes when in "system" mode.
   useEffect(() => {
     if (mode !== "system") {
-      setResolved(mode);
+      setUserResolved(mode);
       return;
     }
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const update = () => setResolved(mq.matches ? "dark" : "light");
+    const update = () => setUserResolved(mq.matches ? "dark" : "light");
     update();
     mq.addEventListener("change", update);
     return () => mq.removeEventListener("change", update);
@@ -81,16 +97,27 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     } catch {
       /* ignore */
     }
-    if (next !== "system") setResolved(next);
+    if (next !== "system") setUserResolved(next);
   }, []);
 
   const toggle = useCallback(() => {
-    setMode(resolved === "dark" ? "light" : "dark");
-  }, [resolved, setMode]);
+    setMode(effective === "dark" ? "light" : "dark");
+  }, [effective, setMode]);
+
+  const forceResolved = useCallback((next: "light" | "dark" | null) => {
+    setForced(next);
+  }, []);
 
   const value = useMemo<ThemeContextValue>(
-    () => ({ mode, resolved, setMode, toggle }),
-    [mode, resolved, setMode, toggle],
+    () => ({
+      mode,
+      resolved: effective,
+      setMode,
+      toggle,
+      forceResolved,
+      isForced: forced !== null,
+    }),
+    [mode, effective, setMode, toggle, forceResolved, forced],
   );
 
   return (
