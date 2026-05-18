@@ -1,31 +1,30 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  KeyboardEvent as ReactKeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   AlignCenter,
   AlignJustify,
   AlignLeft,
   AlignRight,
   Bold,
-  Code,
   Eraser,
-  Heading1,
-  Heading2,
-  Heading3,
   Highlighter,
   Image as ImageIcon,
-  Indent,
   Italic,
   Link2,
   List,
   ListOrdered,
   Minus,
-  Outdent,
   Palette,
   Quote,
   Redo2,
   Strikethrough,
-  Subscript,
-  Superscript,
-  Table2,
+  Table as TableIcon,
   Underline,
   Undo2,
 } from "lucide-react";
@@ -33,55 +32,76 @@ import type { LucideIcon } from "lucide-react";
 import { appDialog } from "../../components/app-dialog";
 
 /**
- * Google-Docs-style document editor. Built from scratch with three
- * principles that make formatting actually work:
+ * Stack62 Docs — Google-Docs-style rich-text editor.
  *
- * 1. The toolbar container catches mousedown and calls
- *    `preventDefault()` — this is the critical Docs/Gmail trick that
- *    prevents the editor from losing focus when you click a button.
- *    With focus retained, the user's selection survives the click and
- *    `execCommand` (or our manual fallback) has a real Range to work on.
+ * Rewritten 2026-05 with the goal of being predictable rather than
+ * comprehensive. Three rules drive the design:
  *
- * 2. CSS uses `.docs-editor` selectors with class-specific rules that
- *    override Tailwind preflight resets. Lists, headings, blockquote,
- *    code, tables, links — all explicitly styled so formatting is
- *    *visible* the moment it's applied.
+ *   1. **One source of truth.** The DOM inside the contentEditable
+ *      element is the document. We render initial HTML once on mount
+ *      and on external content changes; user typing never round-trips
+ *      through React state. Reducing React's involvement in the hot
+ *      path is what makes selection-based formatting actually work.
  *
- * 3. `styleWithCSS=true` mode at init time so execCommand emits
- *    `style="font-weight:bold"` instead of the legacy `<b>` tags, which
- *    nest cleaner and survive selection re-wrapping.
+ *   2. **Toolbar mousedown preventDefault.** This is the single trick
+ *      that makes Docs/Word/Notion-style toolbars work. Clicking a
+ *      formatting button would normally pull focus away from the
+ *      editor, collapsing the selection. We catch mousedown at the
+ *      toolbar root and call preventDefault, so the selection
+ *      survives and execCommand has a real Range to apply to.
  *
- * Coworker control: listens on `stack62:doc-command` for the AI to
- * drive the editor (get-content, replace-all, insert, exec, etc.).
+ *   3. **execCommand + styleWithCSS.** Yes the API is "deprecated".
+ *      No there is no production replacement that handles every edge
+ *      case across Chrome/Safari/Firefox. styleWithCSS=true makes the
+ *      browser emit `<span style="...">` instead of legacy `<b>`
+ *      tags, which compose better when overlapping styles are applied.
+ *
+ * The Coworker drives this editor by dispatching `stack62:doc-command`
+ * window events. See handleCommand() below for the verb list.
  */
 
-export type DocsLayout = {
-  pageSize: "letter" | "a4" | "legal" | "tabloid" | "a5";
-  orientation: "portrait" | "landscape";
+const FONT_FAMILIES = [
+  { value: "'Inter', 'Arial', sans-serif", label: "Inter" },
+  { value: "Arial, Helvetica, sans-serif", label: "Arial" },
+  { value: "Georgia, 'Times New Roman', serif", label: "Georgia" },
+  { value: "'Times New Roman', Times, serif", label: "Times New Roman" },
+  { value: "'Courier New', Courier, monospace", label: "Courier New" },
+  { value: "ui-monospace, SFMono-Regular, Menlo, monospace", label: "Mono" },
+];
+
+const FONT_SIZES = [
+  9, 10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 36, 48, 60, 72,
+];
+
+const BLOCK_STYLES = [
+  { value: "p", label: "Normal text" },
+  { value: "h1", label: "Heading 1" },
+  { value: "h2", label: "Heading 2" },
+  { value: "h3", label: "Heading 3" },
+  { value: "h4", label: "Heading 4" },
+  { value: "blockquote", label: "Quote" },
+  { value: "pre", label: "Code block" },
+];
+
+const PAGE_SIZES: Record<
+  PageSize,
+  { name: string; widthIn: number; heightIn: number }
+> = {
+  letter: { name: "Letter", widthIn: 8.5, heightIn: 11 },
+  a4: { name: "A4", widthIn: 8.27, heightIn: 11.69 },
+  legal: { name: "Legal", widthIn: 8.5, heightIn: 14 },
+};
+
+type PageSize = "letter" | "a4" | "legal";
+type Orientation = "portrait" | "landscape";
+
+interface DocsLayout {
+  pageSize: PageSize;
+  orientation: Orientation;
   marginIn: number;
   fontFamily: string;
   fontSize: number;
-};
-
-const PAGE_SIZES: Record<DocsLayout["pageSize"], { name: string; widthIn: number; heightIn: number }> = {
-  letter:  { name: "Letter",  widthIn: 8.5,  heightIn: 11 },
-  a4:      { name: "A4",      widthIn: 8.27, heightIn: 11.69 },
-  legal:   { name: "Legal",   widthIn: 8.5,  heightIn: 14 },
-  tabloid: { name: "Tabloid", widthIn: 11,   heightIn: 17 },
-  a5:      { name: "A5",      widthIn: 5.83, heightIn: 8.27 },
-};
-
-const FONT_FAMILIES: Array<{ value: string; label: string }> = [
-  { value: "'Inter', 'Arial', sans-serif",                  label: "Inter" },
-  { value: "Arial, Helvetica, sans-serif",                  label: "Arial" },
-  { value: "'Roboto', 'Arial', sans-serif",                 label: "Roboto" },
-  { value: "Georgia, 'Times New Roman', serif",             label: "Georgia" },
-  { value: "'Times New Roman', Times, serif",               label: "Times New Roman" },
-  { value: "'Courier New', Courier, monospace",             label: "Courier New" },
-  { value: "ui-monospace, SFMono-Regular, Menlo, monospace", label: "Monospace" },
-];
-
-const FONT_SIZES = [9, 10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 36, 48, 60, 72];
+}
 
 const DEFAULT_LAYOUT: DocsLayout = {
   pageSize: "letter",
@@ -90,6 +110,25 @@ const DEFAULT_LAYOUT: DocsLayout = {
   fontFamily: FONT_FAMILIES[0].value,
   fontSize: 14,
 };
+
+interface DocCommandEvent {
+  /** Optional document id to target. When omitted the active editor
+   *  responds; this is useful when only one DocsEditor is mounted. */
+  documentId?: string | null;
+  /** Verb. See handleCommand for the supported set. */
+  verb:
+    | "get-content"
+    | "get-text"
+    | "replace-all"
+    | "append"
+    | "insert"
+    | "exec"
+    | "find-replace";
+  /** Verb-specific payload. */
+  payload?: Record<string, unknown>;
+  /** Reply channel — the editor posts back here. */
+  replyId?: string;
+}
 
 export function DocsEditor({
   text,
@@ -115,18 +154,20 @@ export function DocsEditor({
   const [active, setActive] = useState<Record<string, boolean>>({});
   const [currentBlock, setCurrentBlock] = useState<string>("p");
 
-  /** Switch execCommand to CSS-style output once the editor mounts.
-   *  Browsers default to producing legacy `<b>`/`<i>` tags; CSS-style
-   *  produces `<span style="...">` which composes more cleanly. */
+  // ── Initial styleWithCSS setup ─────────────────────────────────
   useEffect(() => {
     try {
       document.execCommand("styleWithCSS", false, "true");
       document.execCommand("defaultParagraphSeparator", false, "p");
-    } catch { /* ignore */ }
+    } catch {
+      // Safari refuses some of these; the editor still works.
+    }
   }, []);
 
-  /** Hydrate when text changes externally. We compare against the
-   *  last value we emitted so user typing isn't clobbered. */
+  // ── Hydrate when external `text` changes ───────────────────────
+  // We compare against the last value we emitted so the user's
+  // typing doesn't get clobbered when the parent passes the same
+  // string back after autosave.
   useEffect(() => {
     const el = editorRef.current;
     if (!el) return;
@@ -136,225 +177,122 @@ export function DocsEditor({
     setStats(computeStats(el));
   }, [text]);
 
+  // ── Selection tracking — drives active-style indicators ─────────
+  const refreshSelectionState = useCallback(() => {
+    if (!editorRef.current) return;
+    try {
+      const next: Record<string, boolean> = {};
+      for (const cmd of [
+        "bold",
+        "italic",
+        "underline",
+        "strikeThrough",
+        "insertUnorderedList",
+        "insertOrderedList",
+        "justifyLeft",
+        "justifyCenter",
+        "justifyRight",
+        "justifyFull",
+      ]) {
+        try {
+          next[cmd] = document.queryCommandState(cmd);
+        } catch {
+          next[cmd] = false;
+        }
+      }
+      setActive(next);
+
+      // Detect current block element by walking up from the selection.
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        let node: Node | null = sel.getRangeAt(0).startContainer;
+        while (node && node !== editorRef.current) {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            const tag = (node as Element).tagName.toLowerCase();
+            if (
+              tag === "h1" ||
+              tag === "h2" ||
+              tag === "h3" ||
+              tag === "h4" ||
+              tag === "blockquote" ||
+              tag === "pre"
+            ) {
+              setCurrentBlock(tag);
+              return;
+            }
+          }
+          node = node.parentNode;
+        }
+        setCurrentBlock("p");
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    const onSelectionChange = () => {
+      const el = editorRef.current;
+      if (!el) return;
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0 && el.contains(sel.anchorNode)) {
+        savedRangeRef.current = sel.getRangeAt(0).cloneRange();
+        refreshSelectionState();
+      }
+    };
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () =>
+      document.removeEventListener("selectionchange", onSelectionChange);
+  }, [refreshSelectionState]);
+
+  // ── Restore selection (used after toolbar interactions) ─────────
+  const restoreSelection = useCallback(() => {
+    const range = savedRangeRef.current;
+    if (!range) return;
+    const sel = window.getSelection();
+    if (!sel) return;
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }, []);
+
+  // ── Emit current content upward ────────────────────────────────
   const emit = useCallback(() => {
     const el = editorRef.current;
     if (!el) return;
     const html = el.innerHTML;
     lastEmittedRef.current = html;
-    onChange(html);
     setStats(computeStats(el));
+    onChange(html);
   }, [onChange]);
 
-  const saveSelection = useCallback(() => {
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return;
-    const range = sel.getRangeAt(0);
-    const el = editorRef.current;
-    if (!el || !el.contains(range.commonAncestorContainer)) return;
-    savedRangeRef.current = range.cloneRange();
-    updateActiveState();
-  }, []);
-
-  const restoreSelection = useCallback(() => {
-    const el = editorRef.current;
-    if (!el) return;
-    // CRITICAL: focus BEFORE restoring the range. Calling el.focus() after
-    // sel.addRange() silently clears the restored selection in Chrome/Edge.
-    el.focus();
-    const range = savedRangeRef.current;
-    if (range && el.contains(range.commonAncestorContainer)) {
-      const sel = window.getSelection();
-      sel?.removeAllRanges();
-      sel?.addRange(range);
-      return;
-    }
-    // No saved range — place caret at end so commands have somewhere
-    // to insert. This is what happens on the first toolbar click.
-    const sel = window.getSelection();
-    const fresh = document.createRange();
-    fresh.selectNodeContents(el);
-    fresh.collapse(false);
-    sel?.removeAllRanges();
-    sel?.addRange(fresh);
-  }, []);
-
-  const updateActiveState = useCallback(() => {
-    if (typeof document.queryCommandState !== "function") return;
-    const next: Record<string, boolean> = {};
-    const checks: Array<[string, string]> = [
-      ["bold", "bold"],
-      ["italic", "italic"],
-      ["underline", "underline"],
-      ["strikeThrough", "strike"],
-      ["subscript", "sub"],
-      ["superscript", "sup"],
-      ["insertUnorderedList", "ul"],
-      ["insertOrderedList", "ol"],
-      ["justifyLeft", "left"],
-      ["justifyCenter", "center"],
-      ["justifyRight", "right"],
-      ["justifyFull", "justify"],
-    ];
-    for (const [cmd, key] of checks) {
-      try { next[key] = document.queryCommandState(cmd); } catch { /* ignore */ }
-    }
-    setActive(next);
-    // Detect current block tag
-    try {
-      const blockTag = (document.queryCommandValue("formatBlock") || "p")
-        .toString()
-        .toLowerCase()
-        .replace(/[<>]/g, "");
-      setCurrentBlock(blockTag || "p");
-    } catch { /* ignore */ }
-  }, []);
-
+  // ── Toolbar primitives ─────────────────────────────────────────
   const exec = useCallback(
     (command: string, value?: string) => {
+      const el = editorRef.current;
+      if (!el || readOnly) return;
       restoreSelection();
       try {
-        document.execCommand("styleWithCSS", false, "true");
         document.execCommand(command, false, value);
-      } catch { /* ignore */ }
-      saveSelection();
+      } catch {
+        /* ignore */
+      }
+      el.focus();
+      refreshSelectionState();
       emit();
     },
-    [emit, restoreSelection, saveSelection],
+    [emit, readOnly, refreshSelectionState, restoreSelection],
   );
 
   const setBlock = useCallback(
-    (tag: string) => exec("formatBlock", `<${tag}>`),
+    (tag: string) => {
+      if (tag === "p") exec("formatBlock", "<p>");
+      else exec("formatBlock", `<${tag}>`);
+    },
     [exec],
   );
 
-  const insertHtml = useCallback(
-    (html: string) => {
-      restoreSelection();
-      try {
-        document.execCommand("insertHTML", false, html);
-      } catch { /* ignore */ }
-      saveSelection();
-      emit();
-    },
-    [emit, restoreSelection, saveSelection],
-  );
-
-  // ── Coworker command bridge ───────────────────────────────────────
-  // Lets the AI (or any caller) drive the editor through a window
-  // event. Each command optionally includes a documentId — if it
-  // doesn't match this editor, we ignore.
-  useEffect(() => {
-    const handler = (event: Event) => {
-      const ev = event as CustomEvent<{
-        documentId?: string | null;
-        action: string;
-        html?: string;
-        text?: string;
-        command?: string;
-        value?: string;
-        find?: string;
-        replace?: string;
-        requestId?: string;
-      }>;
-      const detail = ev.detail ?? ({} as Record<string, unknown>);
-      if (detail.documentId && documentId && detail.documentId !== documentId) return;
-
-      const reply = (payload: Record<string, unknown>) => {
-        if (!detail.requestId) return;
-        window.dispatchEvent(new CustomEvent("stack62:doc-command-reply", {
-          detail: { requestId: detail.requestId, ...payload },
-        }));
-      };
-
-      const el = editorRef.current;
-      switch (detail.action) {
-        case "get-content":
-          reply({ documentId, html: el?.innerHTML ?? "", text: el?.innerText ?? "" });
-          return;
-        case "get-selection": {
-          const sel = window.getSelection();
-          reply({ documentId, text: sel ? sel.toString() : "" });
-          return;
-        }
-        case "replace-all":
-          if (el) {
-            const next = looksLikeHtml(detail.html ?? "") ? (detail.html ?? "") : textToHtml(detail.text ?? detail.html ?? "");
-            el.innerHTML = next;
-            lastEmittedRef.current = next;
-            onChange(next);
-            setStats(computeStats(el));
-          }
-          reply({ ok: true });
-          return;
-        case "append":
-          if (el) {
-            const fragment = looksLikeHtml(detail.html ?? "") ? (detail.html ?? "") : textToHtml(detail.text ?? detail.html ?? "");
-            el.insertAdjacentHTML("beforeend", fragment);
-            const html = el.innerHTML;
-            lastEmittedRef.current = html;
-            onChange(html);
-            setStats(computeStats(el));
-          }
-          reply({ ok: true });
-          return;
-        case "insert":
-          insertHtml(looksLikeHtml(detail.html ?? "") ? (detail.html ?? "") : textToHtml(detail.text ?? detail.html ?? ""));
-          reply({ ok: true });
-          return;
-        case "exec":
-          if (detail.command) exec(detail.command, detail.value);
-          reply({ ok: true });
-          return;
-        case "find-replace": {
-          if (!el || !detail.find) { reply({ ok: false }); return; }
-          const before = el.innerHTML;
-          const escaped = detail.find.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          const re = new RegExp(escaped, "g");
-          const after = before.replace(re, detail.replace ?? "");
-          if (after !== before) {
-            el.innerHTML = after;
-            lastEmittedRef.current = after;
-            onChange(after);
-            setStats(computeStats(el));
-          }
-          reply({ ok: true, replaced: (before.match(re) ?? []).length });
-          return;
-        }
-        default:
-          reply({ ok: false, error: "unknown action" });
-      }
-    };
-    window.addEventListener("stack62:doc-command", handler);
-    return () => window.removeEventListener("stack62:doc-command", handler);
-  }, [documentId, emit, exec, insertHtml, onChange]);
-
-  // ── Keyboard shortcuts ────────────────────────────────────────────
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (readOnly) { e.preventDefault(); return; }
-    const mod = e.metaKey || e.ctrlKey;
-    if (!mod) return;
-    const k = e.key.toLowerCase();
-    const map: Record<string, () => void> = {
-      b: () => exec("bold"),
-      i: () => exec("italic"),
-      u: () => exec("underline"),
-      "1": () => setBlock("h1"),
-      "2": () => setBlock("h2"),
-      "3": () => setBlock("h3"),
-      "0": () => setBlock("p"),
-      "\\": () => exec("removeFormat"),
-      z: () => (e.shiftKey ? exec("redo") : exec("undo")),
-      y: () => exec("redo"),
-      k: () => { void promptAndInsertLink(); },
-    };
-    const handler = map[k];
-    if (handler) {
-      e.preventDefault();
-      handler();
-    }
-  };
-
-  const promptAndInsertLink = async () => {
+  // ── Insert link ────────────────────────────────────────────────
+  const insertLink = useCallback(async () => {
     const url = await appDialog.prompt({
       title: "Insert link",
       placeholder: "https://example.com",
@@ -362,15 +300,11 @@ export function DocsEditor({
       confirmLabel: "Insert",
     });
     if (!url) return;
-    const sel = window.getSelection();
-    if (sel && sel.toString().length > 0) {
-      exec("createLink", url.trim());
-    } else {
-      insertHtml(`<a href="${escapeAttr(url.trim())}" target="_blank" rel="noreferrer">${escapeHtml(url.trim())}</a>`);
-    }
-  };
+    exec("createLink", url.startsWith("http") ? url : `https://${url}`);
+  }, [exec]);
 
-  const promptAndInsertImage = async () => {
+  // ── Insert image ───────────────────────────────────────────────
+  const insertImage = useCallback(async () => {
     const url = await appDialog.prompt({
       title: "Insert image",
       placeholder: "https://example.com/image.png",
@@ -378,512 +312,541 @@ export function DocsEditor({
       confirmLabel: "Insert",
     });
     if (!url) return;
-    insertHtml(`<img src="${escapeAttr(url.trim())}" alt="" />`);
-  };
+    exec("insertImage", url);
+  }, [exec]);
 
-  const promptAndInsertTable = async () => {
+  // ── Insert table ───────────────────────────────────────────────
+  const insertTable = useCallback(async () => {
     const rowsStr = await appDialog.prompt({
-      title: "Insert table — rows",
-      initialValue: "3", inputType: "number", confirmLabel: "Next",
+      title: "Insert table",
+      description: "Rows?",
+      initialValue: "3",
+      inputType: "number",
+      confirmLabel: "Next",
     });
     if (!rowsStr) return;
     const colsStr = await appDialog.prompt({
-      title: "Insert table — columns",
-      initialValue: "3", inputType: "number", confirmLabel: "Insert",
+      title: "Insert table",
+      description: "Columns?",
+      initialValue: "3",
+      inputType: "number",
+      confirmLabel: "Insert",
     });
     if (!colsStr) return;
     const rows = Math.max(1, Math.min(20, Number(rowsStr) || 3));
     const cols = Math.max(1, Math.min(20, Number(colsStr) || 3));
-    let html = '<table>';
-    for (let r = 0; r < rows; r += 1) {
-      html += '<tr>';
-      for (let c = 0; c < cols; c += 1) html += '<td>&nbsp;</td>';
-      html += '</tr>';
+    let html = '<table class="s62-table"><tbody>';
+    for (let r = 0; r < rows; r++) {
+      html += "<tr>";
+      for (let c = 0; c < cols; c++) html += "<td>&nbsp;</td>";
+      html += "</tr>";
     }
-    html += '</table><p><br /></p>';
-    insertHtml(html);
+    html += "</tbody></table><p></p>";
+    exec("insertHTML", html);
+  }, [exec]);
+
+  // ── Coworker command bridge ────────────────────────────────────
+  // The Coworker (or any feature) can dispatch `stack62:doc-command`
+  // window events. Each verb returns synchronously via a reply event.
+  const handleCommand = useCallback(
+    (detail: DocCommandEvent) => {
+      const el = editorRef.current;
+      if (!el) return;
+      if (detail.documentId && documentId && detail.documentId !== documentId)
+        return;
+
+      const reply = (output: unknown) => {
+        if (!detail.replyId) return;
+        window.dispatchEvent(
+          new CustomEvent("stack62:doc-command-reply", {
+            detail: { replyId: detail.replyId, output },
+          }),
+        );
+      };
+
+      switch (detail.verb) {
+        case "get-content": {
+          reply({ html: el.innerHTML, text: el.innerText });
+          break;
+        }
+        case "get-text": {
+          reply({ text: el.innerText });
+          break;
+        }
+        case "replace-all": {
+          const next = String(detail.payload?.html ?? detail.payload?.text ?? "");
+          el.innerHTML = looksLikeHtml(next) ? next : textToHtml(next);
+          emit();
+          reply({ ok: true });
+          break;
+        }
+        case "append": {
+          const next = String(detail.payload?.html ?? detail.payload?.text ?? "");
+          const block = document.createElement("div");
+          block.innerHTML = looksLikeHtml(next) ? next : textToHtml(next);
+          while (block.firstChild) el.appendChild(block.firstChild);
+          emit();
+          reply({ ok: true });
+          break;
+        }
+        case "insert": {
+          const html = String(detail.payload?.html ?? "");
+          restoreSelection();
+          try {
+            document.execCommand("insertHTML", false, html);
+          } catch {
+            el.innerHTML = el.innerHTML + html;
+          }
+          emit();
+          reply({ ok: true });
+          break;
+        }
+        case "exec": {
+          const command = String(detail.payload?.command ?? "");
+          const value = detail.payload?.value as string | undefined;
+          if (command) exec(command, value);
+          reply({ ok: true });
+          break;
+        }
+        case "find-replace": {
+          const find = String(detail.payload?.find ?? "");
+          const replace = String(detail.payload?.replace ?? "");
+          if (!find) {
+            reply({ ok: false, error: "find is required" });
+            break;
+          }
+          const re = new RegExp(escapeRegex(find), "g");
+          const before = el.innerHTML;
+          el.innerHTML = before.replace(re, escapeHtml(replace));
+          emit();
+          reply({ ok: true, replacements: (before.match(re) ?? []).length });
+          break;
+        }
+      }
+    },
+    [documentId, emit, exec, restoreSelection],
+  );
+
+  useEffect(() => {
+    const listener = (event: Event) => {
+      const ev = event as CustomEvent<DocCommandEvent>;
+      if (!ev.detail) return;
+      handleCommand(ev.detail);
+    };
+    window.addEventListener("stack62:doc-command", listener);
+    return () =>
+      window.removeEventListener("stack62:doc-command", listener);
+  }, [handleCommand]);
+
+  // ── Page geometry ──────────────────────────────────────────────
+  const pageStyle = useMemo(() => {
+    const size = PAGE_SIZES[layout.pageSize];
+    const portrait = layout.orientation === "portrait";
+    const widthIn = portrait ? size.widthIn : size.heightIn;
+    const heightIn = portrait ? size.heightIn : size.widthIn;
+    return {
+      width: `${widthIn}in`,
+      minHeight: `${heightIn}in`,
+      padding: `${layout.marginIn}in`,
+      fontFamily: layout.fontFamily,
+      fontSize: `${layout.fontSize}px`,
+    } as const;
+  }, [layout]);
+
+  // ── Keyboard shortcuts inside the editor ───────────────────────
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const cmd = e.ctrlKey || e.metaKey;
+    if (!cmd) return;
+    const k = e.key.toLowerCase();
+    if (k === "b") {
+      e.preventDefault();
+      exec("bold");
+    } else if (k === "i") {
+      e.preventDefault();
+      exec("italic");
+    } else if (k === "u") {
+      e.preventDefault();
+      exec("underline");
+    } else if (k === "k") {
+      e.preventDefault();
+      void insertLink();
+    } else if (k === "z" && !e.shiftKey) {
+      e.preventDefault();
+      exec("undo");
+    } else if ((k === "z" && e.shiftKey) || k === "y") {
+      e.preventDefault();
+      exec("redo");
+    }
   };
 
-  const scale = zoom / 100;
-  const sizeIn = PAGE_SIZES[layout.pageSize];
-  const isLandscape = layout.orientation === "landscape";
-  const pxW = (isLandscape ? sizeIn.heightIn : sizeIn.widthIn) * 96 * scale;
-  const padPx = layout.marginIn * 96 * scale;
-
   return (
-    <div
-      className="flex h-full flex-col"
-      style={{ background: "var(--doc-canvas-bg, #e5e7eb)" }}
-    >
-      {!readOnly && (
-        <DocsTitleBar title={title ?? "Untitled document"} />
-      )}
-      {!readOnly && (
-        <DocsMenuBar
-          onExec={exec}
-          onBlock={setBlock}
-          onLink={promptAndInsertLink}
-          onImage={promptAndInsertImage}
-          onTable={promptAndInsertTable}
-          onPageBreak={() => insertHtml('<hr class="docs-pagebreak" /><p><br/></p>')}
-          onHr={() => insertHtml('<hr />')}
-        />
-      )}
-      {!readOnly && (
-        <DocsToolbar
-          layout={layout}
-          setLayout={setLayout}
-          active={active}
-          currentBlock={currentBlock}
-          onExec={exec}
-          onBlock={setBlock}
-          onLink={promptAndInsertLink}
-          onImage={promptAndInsertImage}
-          onTable={promptAndInsertTable}
-          onPageBreak={() => insertHtml('<hr class="docs-pagebreak" /><p><br/></p>')}
-          onHr={() => insertHtml('<hr />')}
-          onTextColor={(c) => exec("foreColor", c)}
-          onHighlight={(c) => exec("hiliteColor", c)}
-          onFontFamily={(f) => exec("fontName", f)}
-          onFontSize={(s) => { exec("fontSize", "7"); applyInlineFontSize(s); }}
-        />
+    <div className="flex h-full flex-col bg-[#f1f3f4] text-[#1f1f1f]">
+      {/* Title strip */}
+      {title && (
+        <div className="border-b border-app bg-app-surface px-4 py-1.5 text-xs text-app-muted">
+          {title}
+        </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-auto">
-        <div className="py-8 px-4">
-          <div
-            className="mx-auto rounded-sm"
-            style={{
-              width: pxW,
-              minHeight: pxW * 1.3,
-              padding: padPx,
-              fontFamily: layout.fontFamily,
-              fontSize: layout.fontSize,
-              color: "#111827",
-              background: "#ffffff",
-              boxShadow: "0 6px 24px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.05)",
-            }}
+      {/* Toolbar — see "Toolbar mousedown preventDefault" note above */}
+      <div
+        className="flex flex-wrap items-center gap-0.5 border-b border-app bg-app-surface px-2 py-1 text-[12px] text-app"
+        onMouseDown={(e) => {
+          // Anything other than an input loses focus = collapsed
+          // selection. Intercept here so toolbar clicks don't fight
+          // the contentEditable.
+          if (
+            e.target instanceof HTMLElement &&
+            !["INPUT", "SELECT", "TEXTAREA"].includes(e.target.tagName)
+          ) {
+            e.preventDefault();
+          }
+        }}
+      >
+        <ToolbarButton icon={Undo2} label="Undo (⌘Z)" onClick={() => exec("undo")} />
+        <ToolbarButton icon={Redo2} label="Redo (⌘⇧Z)" onClick={() => exec("redo")} />
+        <Divider />
+
+        <select
+          value={currentBlock}
+          onChange={(e) => setBlock(e.target.value)}
+          className="h-7 rounded border border-app bg-app px-1 text-[11px] focus:outline-none"
+          title="Paragraph style"
+        >
+          {BLOCK_STYLES.map((s) => (
+            <option key={s.value} value={s.value}>
+              {s.label}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={layout.fontFamily}
+          onChange={(e) => {
+            setLayout((cur) => ({ ...cur, fontFamily: e.target.value }));
+            exec("fontName", e.target.value);
+          }}
+          className="ml-1 h-7 rounded border border-app bg-app px-1 text-[11px] focus:outline-none"
+          title="Font"
+        >
+          {FONT_FAMILIES.map((f) => (
+            <option key={f.value} value={f.value}>
+              {f.label}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={layout.fontSize}
+          onChange={(e) => {
+            const size = Number(e.target.value);
+            setLayout((cur) => ({ ...cur, fontSize: size }));
+            // execCommand fontSize is 1..7. We use a custom span instead.
+            wrapSelection(`font-size:${size}px`);
+            emit();
+          }}
+          className="ml-1 h-7 w-14 rounded border border-app bg-app px-1 text-[11px] focus:outline-none"
+          title="Font size"
+        >
+          {FONT_SIZES.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+
+        <Divider />
+
+        <ToolbarButton
+          icon={Bold}
+          label="Bold (⌘B)"
+          active={active.bold}
+          onClick={() => exec("bold")}
+        />
+        <ToolbarButton
+          icon={Italic}
+          label="Italic (⌘I)"
+          active={active.italic}
+          onClick={() => exec("italic")}
+        />
+        <ToolbarButton
+          icon={Underline}
+          label="Underline (⌘U)"
+          active={active.underline}
+          onClick={() => exec("underline")}
+        />
+        <ToolbarButton
+          icon={Strikethrough}
+          label="Strikethrough"
+          active={active.strikeThrough}
+          onClick={() => exec("strikeThrough")}
+        />
+
+        <ColorPicker
+          icon={Palette}
+          label="Text color"
+          onPick={(color) => exec("foreColor", color)}
+        />
+        <ColorPicker
+          icon={Highlighter}
+          label="Highlight"
+          onPick={(color) => exec("hiliteColor", color)}
+        />
+
+        <Divider />
+
+        <ToolbarButton
+          icon={AlignLeft}
+          label="Align left"
+          active={active.justifyLeft}
+          onClick={() => exec("justifyLeft")}
+        />
+        <ToolbarButton
+          icon={AlignCenter}
+          label="Align center"
+          active={active.justifyCenter}
+          onClick={() => exec("justifyCenter")}
+        />
+        <ToolbarButton
+          icon={AlignRight}
+          label="Align right"
+          active={active.justifyRight}
+          onClick={() => exec("justifyRight")}
+        />
+        <ToolbarButton
+          icon={AlignJustify}
+          label="Justify"
+          active={active.justifyFull}
+          onClick={() => exec("justifyFull")}
+        />
+
+        <Divider />
+
+        <ToolbarButton
+          icon={List}
+          label="Bulleted list"
+          active={active.insertUnorderedList}
+          onClick={() => exec("insertUnorderedList")}
+        />
+        <ToolbarButton
+          icon={ListOrdered}
+          label="Numbered list"
+          active={active.insertOrderedList}
+          onClick={() => exec("insertOrderedList")}
+        />
+        <ToolbarButton
+          icon={Quote}
+          label="Quote"
+          onClick={() => setBlock("blockquote")}
+        />
+
+        <Divider />
+
+        <ToolbarButton
+          icon={Link2}
+          label="Insert link (⌘K)"
+          onClick={() => void insertLink()}
+        />
+        <ToolbarButton
+          icon={ImageIcon}
+          label="Insert image"
+          onClick={() => void insertImage()}
+        />
+        <ToolbarButton
+          icon={TableIcon}
+          label="Insert table"
+          onClick={() => void insertTable()}
+        />
+        <ToolbarButton
+          icon={Minus}
+          label="Horizontal rule"
+          onClick={() => exec("insertHorizontalRule")}
+        />
+
+        <Divider />
+
+        <ToolbarButton
+          icon={Eraser}
+          label="Clear formatting"
+          onClick={() => exec("removeFormat")}
+        />
+
+        <div className="ml-auto flex items-center gap-2 pr-1">
+          <select
+            value={layout.pageSize}
+            onChange={(e) =>
+              setLayout((cur) => ({
+                ...cur,
+                pageSize: e.target.value as PageSize,
+              }))
+            }
+            className="h-7 rounded border border-app bg-app px-1 text-[11px]"
+            title="Page size"
           >
-            <div
-              ref={editorRef}
-              contentEditable={!readOnly}
-              suppressContentEditableWarning
-              spellCheck
-              data-doc-id={documentId ?? ""}
-              onInput={() => { emit(); saveSelection(); }}
-              onBlur={emit}
-              onMouseUp={saveSelection}
-              onKeyUp={saveSelection}
-              onKeyDown={handleKeyDown}
-              onPaste={(e) => {
-                if (readOnly) return;
-                const txt = e.clipboardData.getData("text/plain");
-                if (!txt) return;
-                e.preventDefault();
-                insertHtml(escapeHtml(txt).replace(/\r?\n/g, "<br/>"));
-              }}
-              className="docs-editor"
-              style={{ lineHeight: 1.55, minHeight: "60vh", outline: "none" }}
-            />
-          </div>
+            <option value="letter">Letter</option>
+            <option value="a4">A4</option>
+            <option value="legal">Legal</option>
+          </select>
+          <span className="text-[10px] text-app-faint">
+            {stats.words} words · {stats.chars} chars
+          </span>
         </div>
       </div>
 
-      <DocsStatusBar stats={stats} title={title} />
-
-      <style>{docsCss}</style>
-    </div>
-  );
-}
-
-/* ───────────── Toolbar ────────────────────────────────────────────── */
-
-function DocsToolbar({
-  layout,
-  setLayout,
-  active,
-  currentBlock,
-  onExec,
-  onBlock,
-  onLink,
-  onImage,
-  onTable,
-  onPageBreak,
-  onHr,
-  onTextColor,
-  onHighlight,
-  onFontFamily,
-  onFontSize,
-}: {
-  layout: DocsLayout;
-  setLayout: (next: DocsLayout) => void;
-  active: Record<string, boolean>;
-  currentBlock: string;
-  onExec: (cmd: string, value?: string) => void;
-  onBlock: (tag: string) => void;
-  onLink: () => void;
-  onImage: () => void;
-  onTable: () => void;
-  onPageBreak: () => void;
-  onHr: () => void;
-  onTextColor: (c: string) => void;
-  onHighlight: (c: string) => void;
-  onFontFamily: (f: string) => void;
-  onFontSize: (s: number) => void;
-}) {
-  return (
-    // CRITICAL: onMouseDown preventDefault on the WHOLE toolbar
-    // container — this is the trick that keeps the editor focused
-    // and its selection alive. Without it, every click here would
-    // blur the editor before the click handler runs.
-    <div
-      className="sticky top-0 z-20 shrink-0 border-b border-app bg-app-elevated text-app-muted shadow-sm"
-      onMouseDown={(e) => e.preventDefault()}
-    >
-      <div className="flex flex-wrap items-center gap-1 border-b border-app-soft px-3 py-1.5 text-[11px]">
-        <Select
-          label="Page"
-          value={layout.pageSize}
-          options={Object.entries(PAGE_SIZES).map(([k, v]) => ({ value: k, label: v.name }))}
-          onPick={(v) => setLayout({ ...layout, pageSize: v as DocsLayout["pageSize"] })}
-        />
-        <Select
-          label="Orientation"
-          value={layout.orientation}
-          options={[
-            { value: "portrait", label: "Portrait" },
-            { value: "landscape", label: "Landscape" },
-          ]}
-          onPick={(v) => setLayout({ ...layout, orientation: v as DocsLayout["orientation"] })}
-        />
-        <Select
-          label="Margins"
-          value={String(layout.marginIn)}
-          options={[
-            { value: "0.5", label: "Narrow" },
-            { value: "1", label: "Normal" },
-            { value: "1.25", label: "Moderate" },
-            { value: "1.5", label: "Wide" },
-          ]}
-          onPick={(v) => setLayout({ ...layout, marginIn: Number(v) || 1 })}
-        />
-        <Divider />
-        <Select
-          label="Font"
-          value={layout.fontFamily}
-          options={FONT_FAMILIES}
-          onPick={(f) => { setLayout({ ...layout, fontFamily: f }); onFontFamily(f); }}
-        />
-        <Select
-          label="Size"
-          value={String(layout.fontSize)}
-          options={FONT_SIZES.map((n) => ({ value: String(n), label: String(n) }))}
-          onPick={(v) => {
-            const n = Number(v) || 14;
-            setLayout({ ...layout, fontSize: n });
-            onFontSize(n);
+      {/* Canvas */}
+      <div className="min-h-0 flex-1 overflow-auto py-6">
+        <div
+          className="mx-auto bg-white text-[#1f1f1f] shadow-[0_2px_8px_rgba(0,0,0,0.15)]"
+          style={{
+            ...pageStyle,
+            transform: `scale(${Math.max(0.5, zoom / 100)})`,
+            transformOrigin: "top center",
           }}
-        />
+        >
+          <div
+            ref={editorRef}
+            contentEditable={!readOnly}
+            suppressContentEditableWarning
+            spellCheck
+            onInput={emit}
+            onKeyDown={onKeyDown}
+            onBlur={emit}
+            className="docs-editor outline-none"
+            style={{
+              minHeight: "100%",
+              fontFamily: layout.fontFamily,
+              fontSize: `${layout.fontSize}px`,
+              lineHeight: 1.6,
+            }}
+          />
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-0.5 px-3 py-1.5">
-        <Select
-          label="Style"
-          value={normalizeBlock(currentBlock)}
-          options={[
-            { value: "p", label: "Normal text" },
-            { value: "h1", label: "Heading 1" },
-            { value: "h2", label: "Heading 2" },
-            { value: "h3", label: "Heading 3" },
-            { value: "blockquote", label: "Quote" },
-            { value: "pre", label: "Code block" },
-          ]}
-          onPick={(t) => onBlock(t)}
-        />
-        <Divider />
-        <Btn title="Heading 1" onPress={() => onBlock("h1")}><Heading1 className="h-4 w-4" /></Btn>
-        <Btn title="Heading 2" onPress={() => onBlock("h2")}><Heading2 className="h-4 w-4" /></Btn>
-        <Btn title="Heading 3" onPress={() => onBlock("h3")}><Heading3 className="h-4 w-4" /></Btn>
-        <Btn title="Bold (Ctrl+B)" active={active.bold} onPress={() => onExec("bold")}><Bold className="h-4 w-4" /></Btn>
-        <Btn title="Italic (Ctrl+I)" active={active.italic} onPress={() => onExec("italic")}><Italic className="h-4 w-4" /></Btn>
-        <Btn title="Underline (Ctrl+U)" active={active.underline} onPress={() => onExec("underline")}><Underline className="h-4 w-4" /></Btn>
-        <Btn title="Strikethrough" active={active.strike} onPress={() => onExec("strikeThrough")}><Strikethrough className="h-4 w-4" /></Btn>
-        <Btn title="Subscript" active={active.sub} onPress={() => onExec("subscript")}><Subscript className="h-4 w-4" /></Btn>
-        <Btn title="Superscript" active={active.sup} onPress={() => onExec("superscript")}><Superscript className="h-4 w-4" /></Btn>
-        <ColorButton title="Text color" icon={Palette} onPick={onTextColor} defaultColor="#1f2937" />
-        <ColorButton title="Highlight" icon={Highlighter} onPick={onHighlight} defaultColor="#fff59d" />
-        <Divider />
-        <Btn title="Bulleted list" active={active.ul} onPress={() => onExec("insertUnorderedList")}><List className="h-4 w-4" /></Btn>
-        <Btn title="Numbered list" active={active.ol} onPress={() => onExec("insertOrderedList")}><ListOrdered className="h-4 w-4" /></Btn>
-        <Btn title="Quote" onPress={() => onBlock("blockquote")}><Quote className="h-4 w-4" /></Btn>
-        <Btn title="Code block" onPress={() => onBlock("pre")}><Code className="h-4 w-4" /></Btn>
-        <Btn title="Indent" onPress={() => onExec("indent")}><Indent className="h-4 w-4" /></Btn>
-        <Btn title="Outdent" onPress={() => onExec("outdent")}><Outdent className="h-4 w-4" /></Btn>
-        <Divider />
-        <Btn title="Align left" active={active.left} onPress={() => onExec("justifyLeft")}><AlignLeft className="h-4 w-4" /></Btn>
-        <Btn title="Align center" active={active.center} onPress={() => onExec("justifyCenter")}><AlignCenter className="h-4 w-4" /></Btn>
-        <Btn title="Align right" active={active.right} onPress={() => onExec("justifyRight")}><AlignRight className="h-4 w-4" /></Btn>
-        <Btn title="Justify" active={active.justify} onPress={() => onExec("justifyFull")}><AlignJustify className="h-4 w-4" /></Btn>
-        <Divider />
-        <Btn title="Insert link (Ctrl+K)" onPress={onLink}><Link2 className="h-4 w-4" /></Btn>
-        <Btn title="Insert image" onPress={onImage}><ImageIcon className="h-4 w-4" /></Btn>
-        <Btn title="Insert table" onPress={onTable}><Table2 className="h-4 w-4" /></Btn>
-        <Btn title="Horizontal rule" onPress={onHr}><Minus className="h-4 w-4" /></Btn>
-        <Btn title="Page break" onPress={onPageBreak}><span className="text-[10px] font-semibold">PB</span></Btn>
-        <Divider />
-        <Btn title="Undo (Ctrl+Z)" onPress={() => onExec("undo")}><Undo2 className="h-4 w-4" /></Btn>
-        <Btn title="Redo (Ctrl+Y)" onPress={() => onExec("redo")}><Redo2 className="h-4 w-4" /></Btn>
-        <Btn title="Clear formatting (Ctrl+\\)" onPress={() => onExec("removeFormat")}><Eraser className="h-4 w-4" /></Btn>
-      </div>
+      <style>{`
+        .docs-editor h1 { font-size: 2em; font-weight: 700; margin: 0.6em 0 0.3em; }
+        .docs-editor h2 { font-size: 1.5em; font-weight: 700; margin: 0.6em 0 0.3em; }
+        .docs-editor h3 { font-size: 1.25em; font-weight: 600; margin: 0.6em 0 0.3em; }
+        .docs-editor h4 { font-size: 1.1em; font-weight: 600; margin: 0.6em 0 0.3em; }
+        .docs-editor p { margin: 0.4em 0; }
+        .docs-editor ul, .docs-editor ol { padding-left: 1.6em; margin: 0.4em 0; }
+        .docs-editor li { margin: 0.15em 0; }
+        .docs-editor blockquote {
+          border-left: 3px solid #c4c7c5;
+          padding: 0.2em 0.8em;
+          margin: 0.6em 0;
+          color: #5f6368;
+        }
+        .docs-editor pre {
+          background: #f1f3f4;
+          padding: 0.8em;
+          border-radius: 4px;
+          font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+          font-size: 0.9em;
+          margin: 0.6em 0;
+          overflow-x: auto;
+        }
+        .docs-editor a { color: #1a73e8; text-decoration: underline; }
+        .docs-editor img { max-width: 100%; height: auto; }
+        .docs-editor table.s62-table {
+          border-collapse: collapse;
+          margin: 0.6em 0;
+          min-width: 50%;
+        }
+        .docs-editor table.s62-table td {
+          border: 1px solid #d0d4d8;
+          padding: 0.4em 0.6em;
+          min-width: 50px;
+          vertical-align: top;
+        }
+        .docs-editor hr {
+          border: none;
+          border-top: 1px solid #d0d4d8;
+          margin: 1em 0;
+        }
+      `}</style>
     </div>
   );
 }
 
-function Btn({
-  title, onPress, active, children,
+// ── Helpers ──────────────────────────────────────────────────────
+
+function ToolbarButton({
+  icon: Icon,
+  label,
+  active,
+  onClick,
 }: {
-  title: string;
-  onPress: () => void;
+  icon: LucideIcon;
+  label: string;
   active?: boolean;
-  children: React.ReactNode;
+  onClick: () => void;
 }) {
   return (
     <button
       type="button"
-      title={title}
-      onClick={onPress}
-      className={`grid h-8 w-8 place-items-center rounded transition ${
+      title={label}
+      aria-label={label}
+      onClick={onClick}
+      className={`grid h-7 w-7 place-items-center rounded transition ${
         active
           ? "bg-accent-soft text-accent"
-          : "text-app-muted hover:bg-app-overlay hover:text-app"
+          : "text-app-muted hover:bg-app-hover"
       }`}
     >
-      {children}
+      <Icon className="h-3.5 w-3.5" />
     </button>
   );
 }
 
 function Divider() {
-  return <span className="mx-1 h-5 w-px bg-app-border" style={{ backgroundColor: "var(--app-border-strong, #e5e7eb)" }} />;
+  return <div className="mx-1 h-5 w-px bg-app" />;
 }
 
-function Select({
-  label, value, options, onPick,
-}: {
-  label: string;
-  value?: string;
-  options: Array<{ value: string; label: string }>;
-  onPick: (value: string) => void;
-}) {
-  return (
-    <select
-      title={label}
-      value={value ?? ""}
-      onChange={(e) => onPick(e.target.value)}
-      // Selects need their own mousedown to not be eaten by the toolbar
-      // wrapper's preventDefault (otherwise the dropdown won't open).
-      onMouseDown={(e) => e.stopPropagation()}
-      className="h-7 max-w-[160px] rounded border border-app bg-app-elevated px-2 text-[11px] text-app hover:border-app-strong focus:border-cyan-400/50 focus:outline-none"
-    >
-      {value === undefined && <option value="" disabled>{label}</option>}
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>{o.label}</option>
-      ))}
-    </select>
-  );
-}
-
-function ColorButton({
-  title, icon: Icon, onPick, defaultColor,
-}: {
-  title: string;
-  icon: LucideIcon;
-  onPick: (value: string) => void;
-  defaultColor: string;
-}) {
-  const id = useMemo(() => `cb-${Math.random().toString(36).slice(2, 8)}`, []);
-  return (
-    <label
-      htmlFor={id}
-      title={title}
-      className="relative grid h-8 w-8 cursor-pointer place-items-center rounded text-app-muted hover:bg-app-overlay hover:text-app"
-    >
-      <Icon className="h-4 w-4" />
-      <input
-        id={id}
-        type="color"
-        defaultValue={defaultColor}
-        onChange={(e) => onPick(e.target.value)}
-        // Re-enable native pointer events on the input itself so the
-        // browser color picker opens — the toolbar wrapper's
-        // preventDefault would otherwise swallow this click.
-        onMouseDown={(e) => e.stopPropagation()}
-        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-      />
-    </label>
-  );
-}
-
-/* ───────────── Title bar (Google-Docs-style) ──────────────────────── */
-
-const DOCS_BUILD_TAG = "Docs v3 · 2026-05-18";
-
-function DocsTitleBar({ title }: { title: string }) {
-  return (
-    <div
-      className="flex shrink-0 items-center gap-3 border-b border-app px-4 py-2"
-      style={{ background: "#ffffff", color: "#1f2937" }}
-    >
-      {/* Blue document tile, mimics the Google Docs icon. */}
-      <div
-        className="grid h-8 w-8 shrink-0 place-items-center rounded"
-        style={{ background: "#4285F4", color: "#ffffff" }}
-        title={DOCS_BUILD_TAG}
-      >
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
-          <path d="M6 2h9l5 5v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Zm8 1.5V8h4.5L14 3.5ZM8 12h8v1.5H8V12Zm0 3h8v1.5H8V15Zm0 3h5v1.5H8V18Z" />
-        </svg>
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-semibold" style={{ color: "#1f2937" }}>
-          {title}
-        </div>
-        <div className="flex items-center gap-2 text-[11px]" style={{ color: "#5f6368" }}>
-          <span>File</span><span>Edit</span><span>View</span><span>Insert</span>
-          <span>Format</span><span>Tools</span><span>Extensions</span><span>Help</span>
-        </div>
-      </div>
-      <span
-        className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
-        style={{ background: "#e8f0fe", color: "#1967d2" }}
-      >
-        {DOCS_BUILD_TAG}
-      </span>
-    </div>
-  );
-}
-
-/* ───────────── Menu bar (File / Edit / View / Insert / Format / Tools) ──── */
-
-function DocsMenuBar({
-  onExec,
-  onBlock,
-  onLink,
-  onImage,
-  onTable,
-  onPageBreak,
-  onHr,
-}: {
-  onExec: (cmd: string, value?: string) => void;
-  onBlock: (tag: string) => void;
-  onLink: () => void;
-  onImage: () => void;
-  onTable: () => void;
-  onPageBreak: () => void;
-  onHr: () => void;
-}) {
-  const print = () => window.print();
-  const items: Array<{ label: string; entries: Array<{ label: string; onClick?: () => void }> }> = [
-    {
-      label: "File",
-      entries: [
-        { label: "New document", onClick: () => window.dispatchEvent(new CustomEvent("stack62:new-document")) },
-        { label: "Print…", onClick: print },
-      ],
-    },
-    {
-      label: "Edit",
-      entries: [
-        { label: "Undo  ⌘Z", onClick: () => onExec("undo") },
-        { label: "Redo  ⌘Y", onClick: () => onExec("redo") },
-        { label: "Cut", onClick: () => onExec("cut") },
-        { label: "Copy", onClick: () => onExec("copy") },
-        { label: "Paste", onClick: () => onExec("paste") },
-        { label: "Select all  ⌘A", onClick: () => onExec("selectAll") },
-      ],
-    },
-    {
-      label: "Insert",
-      entries: [
-        { label: "Link  ⌘K", onClick: onLink },
-        { label: "Image", onClick: onImage },
-        { label: "Table", onClick: onTable },
-        { label: "Horizontal rule", onClick: onHr },
-        { label: "Page break", onClick: onPageBreak },
-      ],
-    },
-    {
-      label: "Format",
-      entries: [
-        { label: "Bold  ⌘B", onClick: () => onExec("bold") },
-        { label: "Italic  ⌘I", onClick: () => onExec("italic") },
-        { label: "Underline  ⌘U", onClick: () => onExec("underline") },
-        { label: "Heading 1  ⌘⇧1", onClick: () => onBlock("h1") },
-        { label: "Heading 2  ⌘⇧2", onClick: () => onBlock("h2") },
-        { label: "Heading 3  ⌘⇧3", onClick: () => onBlock("h3") },
-        { label: "Quote", onClick: () => onBlock("blockquote") },
-        { label: "Code block", onClick: () => onBlock("pre") },
-        { label: "Clear formatting  ⌘\\", onClick: () => onExec("removeFormat") },
-      ],
-    },
-  ];
-  return (
-    <div
-      className="flex shrink-0 items-center gap-1 border-b px-4 py-1 text-[12px]"
-      style={{ background: "#f8f9fa", borderColor: "#dadce0", color: "#3c4043" }}
-    >
-      {items.map((menu) => (
-        <DocsMenuButton key={menu.label} label={menu.label} entries={menu.entries} />
-      ))}
-    </div>
-  );
-}
-
-function DocsMenuButton({
+function ColorPicker({
+  icon: Icon,
   label,
-  entries,
+  onPick,
 }: {
+  icon: LucideIcon;
   label: string;
-  entries: Array<{ label: string; onClick?: () => void }>;
+  onPick: (color: string) => void;
 }) {
+  const COLORS = [
+    "#1f1f1f",
+    "#5f6368",
+    "#ea4335",
+    "#fbbc04",
+    "#34a853",
+    "#1a73e8",
+    "#a142f4",
+    "#ffffff",
+    "#fef7e0",
+    "#e8f5e8",
+    "#e8f0fe",
+    "#fce8e6",
+  ];
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [open]);
   return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="rounded px-2 py-1 hover:bg-black/5"
-        style={{ color: "#3c4043" }}
-      >
-        {label}
-      </button>
+    <div className="relative">
+      <ToolbarButton icon={Icon} label={label} onClick={() => setOpen((v) => !v)} />
       {open && (
         <div
-          className="absolute left-0 z-30 mt-1 min-w-[200px] rounded-md border py-1 shadow-lg"
-          style={{ background: "#ffffff", borderColor: "#dadce0" }}
+          className="absolute left-0 top-full z-40 mt-1 grid w-32 grid-cols-6 gap-0.5 rounded border border-app bg-app-elevated p-1 shadow-lg"
+          onMouseDown={(e) => e.preventDefault()}
         >
-          {entries.map((entry) => (
+          {COLORS.map((c) => (
             <button
-              key={entry.label}
+              key={c}
               type="button"
               onClick={() => {
+                onPick(c);
                 setOpen(false);
-                entry.onClick?.();
               }}
-              className="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-black/5"
-              style={{ color: "#3c4043" }}
-            >
-              {entry.label}
-            </button>
+              className="h-5 w-5 rounded border border-app"
+              style={{ backgroundColor: c }}
+              aria-label={c}
+              title={c}
+            />
           ))}
         </div>
       )}
@@ -891,146 +854,66 @@ function DocsMenuButton({
   );
 }
 
-/* ───────────── Status bar ─────────────────────────────────────────── */
-
-function DocsStatusBar({
-  stats, title,
-}: {
-  stats: { words: number; chars: number };
-  title?: string;
-}) {
-  return (
-    <div className="flex shrink-0 items-center justify-between border-t border-app bg-app-elevated px-4 py-1 text-[11px] text-app-faint">
-      <span className="truncate">{title ?? "Untitled"}</span>
-      <span className="tabular-nums">
-        {stats.words} word{stats.words === 1 ? "" : "s"} · {stats.chars} char{stats.chars === 1 ? "" : "s"} · {DOCS_BUILD_TAG}
-      </span>
-    </div>
-  );
+/** Wrap the current selection with a span carrying the given style.
+ *  Used for font-size because execCommand's fontSize takes a 1..7
+ *  legacy scale, which we don't want to map. */
+function wrapSelection(style: string) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  const range = sel.getRangeAt(0);
+  if (range.collapsed) return;
+  const span = document.createElement("span");
+  span.setAttribute("style", style);
+  try {
+    span.appendChild(range.extractContents());
+    range.insertNode(span);
+    // Reselect the inserted content so further edits target it.
+    const next = document.createRange();
+    next.selectNodeContents(span);
+    sel.removeAllRanges();
+    sel.addRange(next);
+  } catch {
+    /* ignore */
+  }
 }
 
-/* ───────────── Helpers ────────────────────────────────────────────── */
-
 function computeStats(el: HTMLElement): { words: number; chars: number } {
-  const text = (el.innerText ?? "").trim();
-  return {
-    chars: text.length,
-    words: text ? text.split(/\s+/).filter(Boolean).length : 0,
-  };
+  const text = el.innerText ?? "";
+  const trimmed = text.trim();
+  const words = trimmed ? trimmed.split(/\s+/).length : 0;
+  return { words, chars: text.length };
 }
 
 function looksLikeHtml(s: string): boolean {
-  return /<\/?[a-z][\s\S]*>/i.test(s ?? "");
+  if (!s) return false;
+  return /<\/?(p|div|span|h[1-6]|ul|ol|li|table|tr|td|a|br|hr|strong|em|b|i)\b/i.test(
+    s,
+  );
 }
 
 function textToHtml(s: string): string {
-  if (!s) return "";
-  return s.split(/\r?\n\r?\n/).map((para) => {
-    const inner = escapeHtml(para).replace(/\r?\n/g, "<br/>");
-    return `<p>${inner || "<br/>"}</p>`;
-  }).join("");
+  if (!s) return "<p></p>";
+  return s
+    .split(/\n{2,}/)
+    .map(
+      (para) =>
+        `<p>${para
+          .split(/\n/)
+          .map((line) => escapeHtml(line))
+          .join("<br>")}</p>`,
+    )
+    .join("");
 }
 
 function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
-function escapeAttr(s: string): string {
-  return escapeHtml(s).replace(/"/g, "&quot;");
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
-
-function normalizeBlock(tag: string): string {
-  const t = tag.toLowerCase();
-  if (["h1", "h2", "h3", "h4", "h5", "h6", "p", "blockquote", "pre", "div"].includes(t)) {
-    return t === "div" ? "p" : t;
-  }
-  return "p";
-}
-
-/** execCommand("fontSize") only accepts values 1..7 (legacy HTML).
- *  After invoking it with a sentinel, we sweep the editor for the
- *  resulting <font size="7"> nodes and apply a real CSS font-size. */
-function applyInlineFontSize(px: number): void {
-  try {
-    const fonts = document.querySelectorAll<HTMLElement>('font[size="7"]');
-    fonts.forEach((f) => {
-      f.removeAttribute("size");
-      f.style.fontSize = `${px}px`;
-    });
-  } catch { /* ignore */ }
-}
-
-/* ───────────── Styles ─────────────────────────────────────────────── */
-
-const docsCss = `
-  /* Override Tailwind preflight so lists, headings, and blockquotes
-     render properly inside the editor. Class-level specificity + !important
-     to defeat any utility classes that would otherwise wipe the styling. */
-  .docs-editor { font-family: inherit; }
-  .docs-editor:focus { outline: none; }
-  .docs-editor h1 { font-size: 1.85em !important; font-weight: 700 !important; margin: 18px 0 8px !important; line-height: 1.2 !important; color: inherit; }
-  .docs-editor h2 { font-size: 1.45em !important; font-weight: 700 !important; margin: 16px 0 6px !important; line-height: 1.25 !important; color: inherit; }
-  .docs-editor h3 { font-size: 1.20em !important; font-weight: 600 !important; margin: 14px 0 6px !important; line-height: 1.3 !important; color: inherit; }
-  .docs-editor h4 { font-size: 1.10em !important; font-weight: 600 !important; margin: 12px 0 4px !important; }
-  .docs-editor p  { margin: 6px 0 !important; }
-  .docs-editor ul { list-style: disc !important; padding-left: 28px !important; margin: 8px 0 !important; }
-  .docs-editor ol { list-style: decimal !important; padding-left: 28px !important; margin: 8px 0 !important; }
-  .docs-editor ul ul { list-style: circle !important; }
-  .docs-editor ul ul ul { list-style: square !important; }
-  .docs-editor li { margin: 2px 0 !important; display: list-item !important; }
-  .docs-editor blockquote {
-    margin: 12px 0 !important; padding: 6px 14px !important;
-    border-left: 4px solid #d1d5db !important;
-    color: #4b5563 !important; background: #f9fafb !important;
-    border-radius: 0 4px 4px 0 !important;
-  }
-  .docs-editor a { color: #2563eb !important; text-decoration: underline !important; }
-  .docs-editor code {
-    background: #f3f4f6 !important; padding: 1px 5px !important; border-radius: 3px !important;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important;
-    font-size: 0.92em !important; color: #be185d !important;
-  }
-  .docs-editor pre {
-    background: #f3f4f6 !important; padding: 12px 14px !important; border-radius: 6px !important;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important;
-    font-size: 0.92em !important; overflow-x: auto !important; color: #1f2937 !important;
-    margin: 8px 0 !important;
-  }
-  .docs-editor table { border-collapse: collapse !important; margin: 12px 0 !important; }
-  .docs-editor table td, .docs-editor table th {
-    border: 1px solid #d1d5db !important; padding: 6px 10px !important;
-    min-width: 60px !important; vertical-align: top !important;
-  }
-  .docs-editor table th { background: #f9fafb !important; font-weight: 600 !important; }
-  .docs-editor img { max-width: 100% !important; height: auto !important; border-radius: 2px; }
-  .docs-editor hr {
-    border: none !important; border-top: 1px solid #d1d5db !important;
-    margin: 14px 0 !important; height: 0 !important;
-  }
-  .docs-editor hr.docs-pagebreak {
-    border-top: 2px dashed #9ca3af !important;
-    margin: 28px 0 !important;
-    page-break-after: always; break-after: page;
-  }
-  .docs-editor strong, .docs-editor b { font-weight: 700 !important; }
-  .docs-editor em, .docs-editor i { font-style: italic !important; }
-  .docs-editor u { text-decoration: underline !important; }
-  .docs-editor s, .docs-editor strike, .docs-editor del { text-decoration: line-through !important; }
-  .docs-editor:empty::before {
-    content: "Start typing — your changes save automatically.";
-    color: #9ca3af; font-style: italic; pointer-events: none;
-  }
-
-  /* Paper canvas */
-  .bg-doc-paper { background: #ffffff; color: #111827; }
-  .bg-doc-canvas { background: #e5e7eb; }
-  .shadow-doc { box-shadow: 0 6px 24px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.05); }
-  [data-app-theme='dark'] .bg-doc-paper { background: #1f2937; color: #f3f4f6; }
-  [data-app-theme='dark'] .bg-doc-canvas { background: #0f172a; }
-  [data-app-theme='dark'] .docs-editor blockquote { background: rgba(255,255,255,0.04) !important; color: #d1d5db !important; border-left-color: #4b5563 !important; }
-  [data-app-theme='dark'] .docs-editor code { background: rgba(255,255,255,0.06) !important; color: #fda4af !important; }
-  [data-app-theme='dark'] .docs-editor pre { background: rgba(255,255,255,0.06) !important; color: #f3f4f6 !important; }
-  [data-app-theme='dark'] .docs-editor table th { background: rgba(255,255,255,0.04) !important; }
-  [data-app-theme='dark'] .docs-editor table td, [data-app-theme='dark'] .docs-editor table th { border-color: rgba(255,255,255,0.12) !important; }
-  [data-app-theme='dark'] .docs-editor hr { border-top-color: rgba(255,255,255,0.18) !important; }
-`;

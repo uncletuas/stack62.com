@@ -38,6 +38,7 @@ import { IntegrationTools } from './tools/integration.tools';
 import { JobTools } from './tools/job.tools';
 import { MeetingsTools } from './tools/meetings.tools';
 import { MemoryTools } from './tools/memory.tools';
+import { OfficeTools } from './tools/office.tools';
 import { PlanTools } from './tools/plan.tools';
 import { RunnerTools } from './tools/runner.tools';
 import { SchedulesTools } from './tools/schedules.tools';
@@ -90,6 +91,7 @@ import { CoworkerRuntimeService } from './coworker-runtime.service';
     CommandTools,
     MemoryTools,
     MeetingsTools,
+    OfficeTools,
     SchedulesTools,
     EngineRuntimeService,
     ToolRegistry,
