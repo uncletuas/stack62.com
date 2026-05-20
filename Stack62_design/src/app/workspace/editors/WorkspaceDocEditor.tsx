@@ -113,6 +113,13 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
   const [docTitle, setDocTitle] = useState<string>(tab.title ?? "Untitled");
   // Activity panel toggle (closed by default — it's a side rail).
   const [showActivity, setShowActivity] = useState(false);
+  // Page size — controls visual page-break boundaries in the doc
+  // canvas. Letter is the US default; A4 covers the rest of the world.
+  // The editor's content flows naturally; we draw horizontal break
+  // lines every page-height to give the visual feel of pages.
+  const [pageSize, setPageSize] = useState<"letter" | "a4" | "legal">(
+    "letter",
+  );
   // "Coworker just edited" badge state. Set when the activity panel
   // reports the latest action was by a coworker within the last 15s.
   const [aiBadge, setAiBadge] = useState<{ occurredAt: string } | null>(null);
@@ -282,10 +289,40 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
         />
       );
     }
-    // Default: document → TipTap
+    // Default: document → TipTap with visual page breaks
     return (
-      <div className="min-h-0 flex-1 overflow-auto py-6">
-        <div className="mx-auto max-w-3xl rounded-md bg-white px-12 py-12 shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
+      <div className="min-h-0 flex-1 overflow-auto bg-[#f1f3f4] py-6">
+        <div
+          className="mx-auto bg-white shadow-[0_2px_8px_rgba(0,0,0,0.12)]"
+          data-page-size={pageSize}
+          style={{
+            // Page width in CSS inches — browsers map this to the
+            // user's effective DPI. Looks like a piece of paper at
+            // any zoom.
+            width: pageSize === "a4" ? "8.27in" : "8.5in",
+            // Minimum height of one page; content can flow past
+            // this and the visual page-break gradient marks the
+            // boundary between pages.
+            minHeight:
+              pageSize === "a4"
+                ? "11.69in"
+                : pageSize === "legal"
+                  ? "14in"
+                  : "11in",
+            padding: "1in 1in",
+            // Repeating linear-gradient draws a 24px-tall light-gray
+            // strip every page-height to simulate the gap between
+            // physical pages. Doesn't break the editor's contiguous
+            // contenteditable — content still flows freely.
+            backgroundImage:
+              pageSize === "a4"
+                ? "repeating-linear-gradient(to bottom, transparent 0, transparent calc(11.69in - 2px), #d0d4d8 calc(11.69in - 2px), #d0d4d8 calc(11.69in + 2px), #f1f3f4 calc(11.69in + 2px), #f1f3f4 calc(11.69in + 22px), transparent calc(11.69in + 22px))"
+                : pageSize === "legal"
+                  ? "repeating-linear-gradient(to bottom, transparent 0, transparent calc(14in - 2px), #d0d4d8 calc(14in - 2px), #d0d4d8 calc(14in + 2px), #f1f3f4 calc(14in + 2px), #f1f3f4 calc(14in + 22px), transparent calc(14in + 22px))"
+                  : "repeating-linear-gradient(to bottom, transparent 0, transparent calc(11in - 2px), #d0d4d8 calc(11in - 2px), #d0d4d8 calc(11in + 2px), #f1f3f4 calc(11in + 2px), #f1f3f4 calc(11in + 22px), transparent calc(11in + 22px))",
+            backgroundRepeat: "repeat-y",
+          }}
+        >
           <EditorContent editor={editor} />
         </div>
       </div>
@@ -302,7 +339,9 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
         activityOpen={showActivity}
         onToggleActivity={() => setShowActivity((v) => !v)}
       />
-      {docKind === "document" && editor && <Toolbar editor={editor} />}
+      {docKind === "document" && editor && (
+        <Toolbar editor={editor} pageSize={pageSize} setPageSize={setPageSize} />
+      )}
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">{body}</div>
         <WorkspaceActivityPanel
@@ -462,7 +501,15 @@ function Header({
 
 // ── Toolbar ──────────────────────────────────────────────────────
 
-function Toolbar({ editor }: { editor: NonNullable<ReturnType<typeof useEditor>> }) {
+function Toolbar({
+  editor,
+  pageSize,
+  setPageSize,
+}: {
+  editor: NonNullable<ReturnType<typeof useEditor>>;
+  pageSize: "letter" | "a4" | "legal";
+  setPageSize: (size: "letter" | "a4" | "legal") => void;
+}) {
   // The toolbar mounts inside the same chrome strip as the header.
   return (
     <div
@@ -587,6 +634,21 @@ function Toolbar({ editor }: { editor: NonNullable<ReturnType<typeof useEditor>>
           else editor.chain().focus().setLink({ href: url }).run();
         }}
       />
+
+      <div className="ml-auto flex items-center gap-2 pr-1">
+        <select
+          value={pageSize}
+          onChange={(e) =>
+            setPageSize(e.target.value as "letter" | "a4" | "legal")
+          }
+          className="h-7 rounded border border-app bg-app px-1 text-[11px]"
+          title="Page size"
+        >
+          <option value="letter">Letter</option>
+          <option value="a4">A4</option>
+          <option value="legal">Legal</option>
+        </select>
+      </div>
     </div>
   );
 }

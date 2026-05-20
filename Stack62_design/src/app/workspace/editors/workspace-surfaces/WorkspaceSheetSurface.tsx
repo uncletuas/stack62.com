@@ -202,14 +202,18 @@ export function WorkspaceSheetSurface({
 
   if (!activeSheet) {
     return (
-      <div className="grid h-full place-items-center text-sm text-app-faint">
+      <div className="grid h-full place-items-center bg-[#f6f8fa] text-sm text-[#57606a]">
         Loading sheet…
       </div>
     );
   }
 
   return (
-    <div className="flex h-full flex-col bg-app">
+    // Always render the spreadsheet on a light surface — Excel and
+    // Sheets are unconditionally light because dark text on white
+    // cells is the only thing the eye expects in a grid. We don't
+    // let the user's app-wide dark theme bleed in here.
+    <div className="flex h-full flex-col bg-[#f6f8fa] text-[#1f1f1f]">
       {/* Formula bar */}
       <FormulaBar
         ydoc={ydoc}
@@ -256,7 +260,7 @@ export function WorkspaceSheetSurface({
 
       {/* Sheet tabs */}
       {sheets.length > 1 && (
-        <div className="flex shrink-0 items-center gap-0.5 border-t border-app bg-app-surface px-2 py-1 text-[11px]">
+        <div className="flex shrink-0 items-center gap-0.5 border-t border-[#d0d7de] bg-white px-2 py-1 text-[11px]">
           {sheets.map((s) => (
             <button
               key={s.id}
@@ -264,8 +268,8 @@ export function WorkspaceSheetSurface({
               onClick={() => setActiveSheetId(s.id)}
               className={`rounded px-2 py-0.5 transition ${
                 s.id === activeSheet.id
-                  ? "bg-accent text-accent-fg"
-                  : "text-app-muted hover:bg-app-hover"
+                  ? "bg-[#2da44e] text-white"
+                  : "text-[#57606a] hover:bg-[#f6f8fa]"
               }`}
             >
               {s.name}
@@ -315,8 +319,8 @@ function FormulaBar({
   }, [ydoc, sheetId]);
 
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b border-app bg-app-surface px-2 py-1 text-xs">
-      <span className="grid h-6 w-12 place-items-center rounded border border-app bg-app font-mono text-[11px] text-app-muted">
+    <div className="flex shrink-0 items-center gap-2 border-b border-[#d0d7de] bg-white px-2 py-1 text-xs">
+      <span className="grid h-6 w-12 place-items-center rounded border border-[#d0d7de] bg-[#f6f8fa] font-mono text-[11px] text-[#57606a]">
         {focus ? `${colLabel(focus.col)}${focus.row + 1}` : "—"}
       </span>
       <input
@@ -330,7 +334,7 @@ function FormulaBar({
         }}
         placeholder={focus ? "Type a value or =FORMULA" : "Select a cell"}
         disabled={!focus}
-        className="h-6 flex-1 rounded border border-app bg-app px-2 font-mono text-[11px] focus:outline-none focus:ring-1 focus:ring-accent"
+        className="h-6 flex-1 rounded border border-[#d0d7de] bg-white px-2 font-mono text-[11px] text-[#1f1f1f] focus:outline-none focus:ring-1 focus:ring-[#2da44e]"
       />
     </div>
   );

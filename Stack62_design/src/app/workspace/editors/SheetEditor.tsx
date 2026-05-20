@@ -357,7 +357,27 @@ export function SheetEditor({
   const activeCell = cellOf(sheet, anchor.r, anchor.c);
 
   return (
-    <div className="flex h-full flex-col bg-app text-app">
+    // Spreadsheets are unconditionally light, like Excel + Sheets.
+    // Override the theme CSS vars locally so every `bg-app` /
+    // `text-app` / `border-app` descendant renders against light
+    // values even when the user's app theme is dark.
+    <div
+      className="flex h-full flex-col bg-app text-app"
+      style={
+        {
+          "--app-bg": "#ffffff",
+          "--app-surface": "#f6f8fa",
+          "--app-elevated": "#ffffff",
+          "--app-hover": "#f6f8fa",
+          "--app-text": "#1f1f1f",
+          "--app-text-muted": "#57606a",
+          "--app-text-faint": "#8b949e",
+          "--app-text-subtle": "#57606a",
+          "--app-border": "#d0d7de",
+          "--doc-canvas": "#ffffff",
+        } as Record<string, string>
+      }
+    >
       {/* Toolbar */}
       <div
         className="sticky top-0 z-20 flex shrink-0 flex-wrap items-center gap-0.5 border-b border-app bg-app-elevated px-3 py-1.5"

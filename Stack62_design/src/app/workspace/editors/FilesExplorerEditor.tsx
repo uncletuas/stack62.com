@@ -7,12 +7,14 @@ import {
   useState,
 } from "react";
 import {
+  ChevronDown,
   ChevronRight,
   Clock,
   ClipboardCopy,
   Copy,
   Download,
   Edit3,
+  FileText,
   FolderPlus,
   FolderInput,
   HardDrive,
@@ -20,9 +22,12 @@ import {
   Loader2,
   MoreVertical,
   Move,
+  Plus,
+  Presentation,
   Scissors,
   Search,
   Share2,
+  Sheet as SheetIcon,
   Sparkles,
   Square,
   SquareCheck,
@@ -49,10 +54,12 @@ import {
   bulkDeleteFiles,
   bulkMoveFiles,
   copyFile,
+  createWorkspaceDoc,
   deleteFile,
   fetchFileBlobUrl,
   fileDownloadUrl,
   updateFile,
+  type WorkspaceDocKind,
 } from "../../lib/resources";
 import { useAppContext } from "../../context/app-context";
 import { useWorkspace } from "../workspace-context";
@@ -90,9 +97,10 @@ interface ClipboardState {
  *     browser-native popups
  */
 export function FilesExplorerEditor() {
-  const { currentOrganization } = useAppContext();
-  const { openTab } = useWorkspace();
+  const { currentOrganization, currentWorkspace } = useAppContext();
+  const { openTab, appendRunLog } = useWorkspace();
   const orgId = currentOrganization?.id ?? "";
+  const workspaceId = currentWorkspace?.id ?? "";
 
   const openInTab = useCallback(
     (fileId: string, filename: string) => {
@@ -119,6 +127,63 @@ export function FilesExplorerEditor() {
     fileId: string;
   } | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const [showNewMenu, setShowNewMenu] = useState(false);
+  const [creating, setCreating] = useState<WorkspaceDocKind | null>(null);
+
+  // Create a new workspace document/sheet/slides via the
+  // workspace-actions pipeline, then open it in a new tab. The
+  // Coworker can then drive it via office.dispatch_action; the
+  // user can edit it directly too. Same shared state.
+  const onCreateWorkspaceDoc = async (
+    kind: WorkspaceDocKind,
+    defaultTitle: string,
+  ) => {
+    if (!orgId || !workspaceId) {
+      await appDialog.alert({
+        title: "Workspace required",
+        description:
+          "Select an organization and workspace before creating a doc.",
+        tone: "destructive",
+      });
+      return;
+    }
+    setShowNewMenu(false);
+    const title = await appDialog.prompt({
+      title: `New ${kind === "document" ? "document" : kind === "sheet" ? "spreadsheet" : "presentation"}`,
+      description: "Give it a name. You can rename later.",
+      placeholder: defaultTitle,
+      initialValue: defaultTitle,
+      confirmLabel: "Create",
+    });
+    if (!title?.trim()) return;
+    setCreating(kind);
+    try {
+      const result = await createWorkspaceDoc({
+        organizationId: orgId,
+        workspaceId,
+        kind,
+        title: title.trim(),
+      });
+      openTab({
+        kind: "workspace-doc",
+        title: title.trim(),
+        refId: result.action.docId,
+      });
+      appendRunLog({
+        level: "ok",
+        text: `Created ${kind}: ${title.trim()}`,
+        source: "files",
+      });
+    } catch (err) {
+      await appDialog.alert({
+        title: "Couldn't create",
+        description: err instanceof Error ? err.message : "Unknown error.",
+        tone: "destructive",
+      });
+    } finally {
+      setCreating(null);
+    }
+  };
 
   const reload = useCallback(async () => {
     if (!orgId) return;
@@ -552,6 +617,14 @@ export function FilesExplorerEditor() {
     return () => window.removeEventListener("click", onDoc);
   }, [contextMenu]);
 
+  // Close the "New" dropdown when clicking elsewhere.
+  useEffect(() => {
+    if (!showNewMenu) return;
+    const onDoc = () => setShowNewMenu(false);
+    window.addEventListener("click", onDoc);
+    return () => window.removeEventListener("click", onDoc);
+  }, [showNewMenu]);
+
   return (
     <div className="flex h-full overflow-hidden">
       <div
@@ -577,6 +650,53 @@ export function FilesExplorerEditor() {
               placeholder="Search by meaning, not just name…"
               className="w-72 rounded-md border border-app bg-app pl-8 pr-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-accent"
             />
+          </div>
+          {/* "Create new" — workspace doc/sheet/slides */}
+          <div className="relative">
+            <button
+              onClick={() => setShowNewMenu((v) => !v)}
+              disabled={creating !== null || !workspaceId}
+              className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm text-accent-fg shadow-sm hover:opacity-90 disabled:opacity-60"
+              title={
+                workspaceId
+                  ? "Create a new workspace document, sheet, or slide deck"
+                  : "Select a workspace first"
+              }
+            >
+              {creating ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Plus className="size-4" />
+              )}
+              New
+              <ChevronDown className="size-3 opacity-70" />
+            </button>
+            {showNewMenu && (
+              <div
+                role="menu"
+                className="absolute left-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-md border border-app bg-app-elevated shadow-lg"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <NewMenuItem
+                  icon={FileText}
+                  label="Document"
+                  description="Collaborative rich text"
+                  onClick={() => void onCreateWorkspaceDoc("document", "Untitled document")}
+                />
+                <NewMenuItem
+                  icon={SheetIcon}
+                  label="Spreadsheet"
+                  description="Cells, formulas, multi-sheet"
+                  onClick={() => void onCreateWorkspaceDoc("sheet", "Untitled spreadsheet")}
+                />
+                <NewMenuItem
+                  icon={Presentation}
+                  label="Presentation"
+                  description="Slides, shapes, present mode"
+                  onClick={() => void onCreateWorkspaceDoc("slides", "Untitled presentation")}
+                />
+              </div>
+            )}
           </div>
           <button
             onClick={() => void onCreateFolder()}
@@ -1910,6 +2030,33 @@ function LocalFolderButton() {
         </button>
       )}
     </div>
+  );
+}
+
+function NewMenuItem({
+  icon: Icon,
+  label,
+  description,
+  onClick,
+}: {
+  icon: typeof FileText;
+  label: string;
+  description: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      role="menuitem"
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center gap-3 px-3 py-2 text-left transition hover:bg-app-hover"
+    >
+      <Icon className="size-4 shrink-0 text-app-muted" />
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium text-app">{label}</div>
+        <div className="text-[11px] text-app-faint">{description}</div>
+      </div>
+    </button>
   );
 }
 
