@@ -30,9 +30,14 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { getStoredToken } from "../../lib/api";
-import { getWorkspaceRealtimeUrl } from "../../lib/resources";
+import {
+  fetchWorkspaceDoc,
+  getWorkspaceRealtimeUrl,
+  type WorkspaceDocKind,
+} from "../../lib/resources";
 import { useAppContext } from "../../context/app-context";
 import { useWorkspace, type EditorTab } from "../workspace-context";
+import { WorkspaceSheetSurface } from "./workspace-surfaces/WorkspaceSheetSurface";
 
 /**
  * The collaborative, AI-native document editor.
@@ -55,10 +60,42 @@ import { useWorkspace, type EditorTab } from "../workspace-context";
  * user didn't make. StarterKit's history is opted out below.
  */
 export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
-  const { user } = useAppContext();
+  const { user, currentOrganization, currentWorkspace } = useAppContext();
   const { appendRunLog, updateTab } = useWorkspace();
 
   const docId = tab.refId;
+
+  // Fetch the doc's kind so we can route to the right surface
+  // (document → TipTap, sheet → AG Grid, slides → Konva next turn).
+  // We start as null and switch when the fetch resolves; until then
+  // the editor shows a connecting state inside whatever surface we
+  // can guess from the tab title heuristic ("Sheet" / "Presentation").
+  const [docKind, setDocKind] = useState<WorkspaceDocKind | null>(null);
+  useEffect(() => {
+    if (!docId) return;
+    let alive = true;
+    void fetchWorkspaceDoc(docId)
+      .then((d) => {
+        if (alive) setDocKind(d.kind);
+      })
+      .catch(() => {
+        // Fall back to inferring from the tab title — set in
+        // openIntentToRoute when the chat chip is clicked.
+        if (alive) {
+          const t = (tab.title ?? "").toLowerCase();
+          setDocKind(
+            t.includes("sheet") || t.includes("spreadsheet")
+              ? "sheet"
+              : t.includes("presentation") || t.includes("slide")
+                ? "slides"
+                : "document",
+          );
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [docId, tab.title]);
 
   // The Y.Doc lives for the lifetime of the tab. `useMemo` with a
   // tab.id-keyed reset means switching docs gets a fresh Y.Doc; the
@@ -190,6 +227,57 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
     );
   }
 
+  // ── Kind-router ───────────────────────────────────────────────
+  // The header + provider lifecycle are shared. The body switches
+  // between TipTap (document), AG Grid (sheet), and a placeholder
+  // for slides until turn 5 ships the Konva surface.
+  const body = (() => {
+    if (!docKind) {
+      return (
+        <div className="grid h-full place-items-center text-sm text-app-faint">
+          <Loader2 className="h-4 w-4 animate-spin" />
+        </div>
+      );
+    }
+    if (docKind === "sheet") {
+      return (
+        <WorkspaceSheetSurface
+          docId={docId}
+          ydoc={ydoc}
+          provider={providerRef.current}
+          organizationId={currentOrganization?.id ?? ""}
+          workspaceId={currentWorkspace?.id ?? ""}
+        />
+      );
+    }
+    if (docKind === "slides") {
+      return (
+        <div className="grid h-full place-items-center px-6 text-center text-sm text-app-faint">
+          <div className="max-w-md space-y-2">
+            <p className="font-medium text-app-muted">
+              Collaborative slide editor coming in turn 5.
+            </p>
+            <p className="text-[11px]">
+              The slides exist in the same Y.Doc — when the Konva
+              surface ships, this tab will surface them. For now you
+              can still ask the Coworker to add/remove slides via{" "}
+              <code>slides.add_slide</code> dispatches; they're being
+              persisted.
+            </p>
+          </div>
+        </div>
+      );
+    }
+    // Default: document → TipTap
+    return (
+      <div className="min-h-0 flex-1 overflow-auto py-6">
+        <div className="mx-auto max-w-3xl rounded-md bg-white px-12 py-12 shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
+          <EditorContent editor={editor} />
+        </div>
+      </div>
+    );
+  })();
+
   return (
     <div className="flex h-full flex-col bg-[#f8f9fa] text-[#1f1f1f]">
       <Header
@@ -197,12 +285,8 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
         providerStatus={providerStatus}
         peerCount={peerCount}
       />
-      {editor && <Toolbar editor={editor} />}
-      <div className="min-h-0 flex-1 overflow-auto py-6">
-        <div className="mx-auto max-w-3xl rounded-md bg-white px-12 py-12 shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
-          <EditorContent editor={editor} />
-        </div>
-      </div>
+      {docKind === "document" && editor && <Toolbar editor={editor} />}
+      {body}
       <style>{`
         .workspace-doc-prose { font-size: 14px; line-height: 1.65; color: #1f1f1f; min-height: 60vh; }
         .workspace-doc-prose h1 { font-size: 1.75em; font-weight: 700; margin: 0.6em 0 0.3em; }
