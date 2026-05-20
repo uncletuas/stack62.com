@@ -20,6 +20,7 @@ import { SemanticSearchModule } from '../semantic-search/semantic-search.module'
 import { SystemsModule } from '../systems/systems.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { WorkflowsModule } from '../workflows/workflows.module';
+import { WorkspaceStateModule } from '../workspace-state/workspace-state.module';
 import { AnthropicClient } from './anthropic.client';
 import { ToolCallLogEntity } from './entities/tool-call-log.entity';
 import { EngineController } from './engine.controller';
@@ -69,6 +70,7 @@ import { CoworkerRuntimeService } from './coworker-runtime.service';
     ActivityModule,
     AuditModule,
     OrganizationsModule,
+    WorkspaceStateModule,
     forwardRef(() => CoworkerModule),
   ],
   controllers: [EngineController],

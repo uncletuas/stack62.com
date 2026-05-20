@@ -28,6 +28,7 @@ import { TasksModule } from './modules/tasks/tasks.module';
 import { UsersModule } from './modules/users/users.module';
 import { WorkflowsModule } from './modules/workflows/workflows.module';
 import { WorkspacesModule } from './modules/workspaces/workspaces.module';
+import { WorkspaceStateModule } from './modules/workspace-state/workspace-state.module';
 import { DocumentExtractionModule } from './modules/document-extraction/document-extraction.module';
 import { FileSharingModule } from './modules/file-sharing/file-sharing.module';
 import { FilesModule } from './modules/files/files.module';
@@ -131,6 +132,7 @@ import { BillingModule } from './modules/billing/billing.module';
     AuthModule,
     OrganizationsModule,
     WorkspacesModule,
+    WorkspaceStateModule,
     MembershipsModule,
     SystemsModule,
     PermissionsModule,

@@ -3,6 +3,12 @@ import { DocumentsService } from '../../documents/documents.service';
 import { FilesService } from '../../files/files.service';
 import { RecordsService } from '../../records/records.service';
 import { SystemsService } from '../../systems/systems.service';
+import { WorkspaceStateService } from '../../workspace-state/workspace-state.service';
+import {
+  WORKSPACE_ACTION_VERBS,
+  type WorkspaceActionInput,
+  type WorkspaceDocKind,
+} from '../../../shared/workspace-actions';
 import { tool, type ToolDefinition } from './types';
 import type { DocumentSpecBlock } from '../../documents/dto/generate-document.dto';
 
@@ -37,11 +43,168 @@ export class OfficeTools {
     private readonly filesService: FilesService,
     private readonly recordsService: RecordsService,
     private readonly systemsService: SystemsService,
+    private readonly workspaceState: WorkspaceStateService,
   ) {}
 
   build(): ToolDefinition[] {
     return [
-      // ── Docs ───────────────────────────────────────────────────
+      // ── AI-native workspace surface (state-first, action-based) ──
+      tool(
+        'office.workspace_create',
+        "Create a new AI-native workspace document, spreadsheet, or presentation. The doc lives in shared Yjs state (after phase 2) and every subsequent edit — by either you or the user — flows through office.dispatch_action. Returns the new docId.",
+        {
+          properties: {
+            kind: {
+              type: 'string',
+              enum: ['document', 'sheet', 'slides'],
+              description: 'document = TipTap-based rich text. sheet = AG Grid spreadsheet. slides = Konva slide deck.',
+            },
+            title: {
+              type: 'string',
+              description: 'Display title.',
+            },
+            initial: {
+              description:
+                'Optional initial state. For documents: TipTap JSON. For sheets: 2D array of values. For slides: array of slide specs. If omitted, the doc starts empty.',
+            },
+          },
+          required: ['kind', 'title'],
+        },
+        async (input, ctx) => {
+          if (!ctx.workspaceId)
+            throw new BadRequestException('workspaceId required.');
+          const result = await this.workspaceState.dispatch(
+            {
+              docId: '00000000-0000-0000-0000-000000000000', // placeholder — service creates fresh
+              verb: 'workspace.create_doc',
+              kind: input.kind as WorkspaceDocKind,
+              title: String(input.title),
+              initial: input.initial,
+            },
+            {
+              organizationId: ctx.organizationId,
+              workspaceId: ctx.workspaceId,
+              actorUserId: ctx.actorUserId,
+              coworkerId: ctx.actor?.coworkerId ?? null,
+            },
+          );
+          return {
+            output: {
+              docId: result.action.docId,
+              version: result.version,
+            },
+            summary: `Created ${input.kind}: "${input.title}".`,
+          };
+        },
+        { actionLevel: 2 },
+      ),
+
+      tool(
+        'office.dispatch_action',
+        "Dispatch a single typed mutation to an AI-native workspace doc. This is THE way you edit Stack62 documents, sheets, and presentations — never UI clicks. Provide a verb (e.g. 'doc.insert_block', 'sheet.set_cell', 'slides.add_element') and the matching payload. See docs/AI_NATIVE_WORKSPACE.md for the full action schema. Returns the new version number; the editor surfaces the change to any connected human user automatically.",
+        {
+          properties: {
+            docId: {
+              type: 'string',
+              description: 'Target workspace doc id (from office.workspace_create or office.workspace_list).',
+            },
+            verb: {
+              type: 'string',
+              enum: [...WORKSPACE_ACTION_VERBS],
+              description: 'Action verb. The payload shape depends on this.',
+            },
+            payload: {
+              description:
+                'Verb-specific payload. e.g. for sheet.set_cell: { sheetId, row, col, value, formula?, format? }. Validated server-side against the workspace-actions Zod schema; you get an error if the shape is wrong.',
+            },
+          },
+          required: ['docId', 'verb'],
+        },
+        async (input, ctx) => {
+          if (!ctx.workspaceId)
+            throw new BadRequestException('workspaceId required.');
+          const payload = (input.payload as Record<string, unknown>) ?? {};
+          // Merge into the action input shape the service expects.
+          const actionInput = {
+            docId: String(input.docId),
+            verb: input.verb,
+            ...payload,
+          } as unknown as WorkspaceActionInput;
+          const result = await this.workspaceState.dispatch(actionInput, {
+            organizationId: ctx.organizationId,
+            workspaceId: ctx.workspaceId,
+            actorUserId: ctx.actorUserId,
+            coworkerId: ctx.actor?.coworkerId ?? null,
+          });
+          return {
+            output: {
+              docId: result.action.docId,
+              version: result.version,
+              actionId: result.action.id,
+            },
+            summary: `Applied ${input.verb}.`,
+          };
+        },
+        { actionLevel: 2 },
+      ),
+
+      tool(
+        'office.workspace_read',
+        'Read the current state of an AI-native workspace doc. Returns the doc kind, title, version, and the structured state (TipTap JSON / sheet cells / slide elements). Use this when you need to know what is in a doc before mutating it.',
+        {
+          properties: {
+            docId: { type: 'string' },
+          },
+          required: ['docId'],
+        },
+        async (input, ctx) => {
+          const result = await this.workspaceState.readState(
+            String(input.docId),
+            ctx.actorUserId,
+          );
+          return {
+            output: result,
+            summary: `Read ${result.kind} "${result.title}" v${result.currentVersion}.`,
+          };
+        },
+        { actionLevel: 1 },
+      ),
+
+      tool(
+        'office.workspace_list',
+        "List AI-native workspace docs in the current organization. Filter by kind ('document' | 'sheet' | 'slides') if you need a specific kind.",
+        {
+          properties: {
+            kind: {
+              type: 'string',
+              enum: ['document', 'sheet', 'slides'],
+            },
+          },
+        },
+        async (input, ctx) => {
+          const docs = await this.workspaceState.list(
+            ctx.organizationId,
+            ctx.actorUserId,
+            {
+              workspaceId: ctx.workspaceId ?? undefined,
+              kind: input.kind as WorkspaceDocKind | undefined,
+            },
+          );
+          return {
+            output: docs.map((d) => ({
+              id: d.id,
+              kind: d.kind,
+              title: d.title,
+              currentVersion: d.currentVersion,
+              updatedAt: d.updatedAt,
+            })),
+            summary: `${docs.length} workspace doc(s).`,
+          };
+        },
+        { actionLevel: 1 },
+      ),
+
+      // ── Legacy file-based docs (existing) ───────────────────────
       tool(
         'office.create_doc',
         "Create a new Stack62 Docs document (.docx) with a title and structured content. Returns a fileId the Coworker should pair with workspace.open to surface it to the user. Use this for any 'draft me a doc / write a summary / create a report' request.",
