@@ -19,6 +19,13 @@ import {
 } from '../../shared/workspace-actions';
 import { WorkspaceActionLogEntity } from './entities/workspace-action-log.entity';
 import { WorkspaceDocEntity } from './entities/workspace-doc.entity';
+import {
+  applyActionToDoc,
+  decodeDoc,
+  encodeDoc,
+  makeFreshDoc,
+  snapshotDoc,
+} from './yjs-state';
 
 interface DispatchActor {
   organizationId: string;
@@ -254,27 +261,26 @@ export class WorkspaceStateService {
   // ── State mutation ─────────────────────────────────────────────
 
   /**
-   * Phase 1 stub. Decode the current state, apply the action to a
-   * JSON shape, re-encode. Phase 2 will replace this with an actual
-   * Y.Doc transaction (apply update bytes, encode update). The
-   * boundaries (input action + output buffer) stay identical so
-   * callers don't change.
+   * Phase 2 (turn 2): real Y.Doc transaction. We decode the persisted
+   * Yjs update bytes into a fresh Y.Doc, apply the action inside a
+   * `doc.transact()` (so observers see one atomic change rather than
+   * a partial state), and re-encode the whole thing back to bytes.
+   *
+   * Once Hocuspocus is up, this same Y.Doc state is what gets
+   * broadcast to connected browsers. The service stays the only path
+   * that writes; Hocuspocus is the channel.
    */
   private applyToState(
     doc: WorkspaceDocEntity,
     action: WorkspaceActionPayload,
   ): Buffer {
-    const state = decodeState(doc.yjsState, doc.kind);
-    applyActionToJsonState(state, action);
-    return encodeState(state);
+    const yDoc = decodeDoc(doc.yjsState);
+    applyActionToDoc(yDoc, action, doc.kind);
+    return encodeDoc(yDoc);
   }
 
-  private initialState(
-    kind: WorkspaceDocKind,
-    initial: unknown,
-  ): Buffer {
-    const seed = makeInitialState(kind, initial);
-    return encodeState(seed);
+  private initialState(kind: WorkspaceDocKind, initial: unknown): Buffer {
+    return encodeDoc(makeFreshDoc(kind, initial));
   }
 
   // ── Helpers ────────────────────────────────────────────────────
@@ -327,15 +333,46 @@ export class WorkspaceStateService {
 
   async readState(docId: string, actorUserId: string) {
     const doc = await this.findById(docId, actorUserId);
+    const yDoc = decodeDoc(doc.yjsState);
     return {
       id: doc.id,
       kind: doc.kind,
       title: doc.title,
       currentVersion: doc.currentVersion,
-      state: decodeState(doc.yjsState, doc.kind),
+      state: snapshotDoc(yDoc, doc.kind),
       createdAt: doc.createdAt,
       updatedAt: doc.updatedAt,
     };
+  }
+
+  /**
+   * Read the raw Yjs binary state. Used by the Hocuspocus server's
+   * `onLoadDocument` hook to hydrate a fresh Y.Doc when a client
+   * connects without an existing in-memory copy.
+   */
+  async readBinaryState(
+    docId: string,
+    actorUserId: string,
+  ): Promise<{ doc: WorkspaceDocEntity; bytes: Buffer }> {
+    const doc = await this.findById(docId, actorUserId);
+    return { doc, bytes: doc.yjsState };
+  }
+
+  /**
+   * Persist a Yjs binary update arriving from Hocuspocus. Called by
+   * the `onStoreDocument` hook after debounce. The caller already
+   * holds the merged Y.Doc and gives us the canonical bytes; we
+   * just persist and bump the version counter.
+   */
+  async persistBinaryState(
+    docId: string,
+    bytes: Uint8Array,
+    actorUserId: string,
+  ): Promise<void> {
+    const doc = await this.findById(docId, actorUserId);
+    doc.yjsState = Buffer.from(bytes);
+    doc.currentVersion += 1;
+    await this.docsRepo.save(doc);
   }
 
   async readActionLog(docId: string, actorUserId: string, limit = 100) {
@@ -347,278 +384,6 @@ export class WorkspaceStateService {
     });
   }
 }
-
-// ── Phase-1 JSON state (will be replaced by Y.Doc in phase 2) ─────
-
-interface DocumentState {
-  kind: 'document';
-  /** TipTap doc JSON. The actual schema lives in the editor; here
-   *  we just pass it through. */
-  tipTapJson: unknown;
-  blocks: Array<{ id: string; type: string; data: unknown }>;
-  comments: Array<{
-    id: string;
-    anchorBlockId: string;
-    body: string;
-    authorUserId: string;
-    createdAt: string;
-  }>;
-  meta: { title: string };
-}
-
-interface SheetState {
-  kind: 'sheet';
-  sheets: Array<{ id: string; name: string; rowCount: number; colCount: number }>;
-  /** Key: `${sheetId}:${row}:${col}` */
-  cells: Record<
-    string,
-    { value: unknown; formula?: string; format?: unknown }
-  >;
-  charts: Array<{ id: string; sheetId: string; sourceRange: string; type: string }>;
-}
-
-interface SlidesState {
-  kind: 'slides';
-  slides: Array<{ id: string; layout: string; background?: string }>;
-  /** Key: `${slideId}:${elementId}` */
-  elements: Record<string, Record<string, unknown>>;
-  theme: { id: string };
-}
-
-type State = DocumentState | SheetState | SlidesState;
-
-function encodeState(state: State): Buffer {
-  return Buffer.from(JSON.stringify(state), 'utf8');
-}
-
-function decodeState(buf: Buffer, kind: WorkspaceDocKind): State {
-  if (!buf || buf.length === 0) return makeInitialState(kind, undefined);
-  try {
-    const parsed = JSON.parse(buf.toString('utf8')) as State;
-    if (parsed.kind !== kind) {
-      // shape drift — re-init rather than crash. Old kind metadata
-      // is preserved in metadata column if needed.
-      return makeInitialState(kind, undefined);
-    }
-    return parsed;
-  } catch {
-    return makeInitialState(kind, undefined);
-  }
-}
-
-function makeInitialState(kind: WorkspaceDocKind, initial: unknown): State {
-  if (kind === 'document') {
-    return {
-      kind: 'document',
-      tipTapJson:
-        initial ?? {
-          type: 'doc',
-          content: [
-            {
-              type: 'paragraph',
-              content: [],
-            },
-          ],
-        },
-      blocks: [],
-      comments: [],
-      meta: { title: '' },
-    };
-  }
-  if (kind === 'sheet') {
-    const sheetId = randomUUID();
-    return {
-      kind: 'sheet',
-      sheets: [
-        {
-          id: sheetId,
-          name: 'Sheet1',
-          rowCount: 100,
-          colCount: 26,
-        },
-      ],
-      cells: {},
-      charts: [],
-    };
-  }
-  return {
-    kind: 'slides',
-    slides: [{ id: randomUUID(), layout: 'title' }],
-    elements: {},
-    theme: { id: 'default' },
-  };
-}
-
-function applyActionToJsonState(state: State, action: WorkspaceActionPayload) {
-  switch (action.verb) {
-    // ── Doc lifecycle ──────────────────────────────────────────
-    case 'workspace.rename_doc':
-    case 'workspace.delete_doc':
-      // Handled at the service level (title / status columns).
-      return;
-    case 'workspace.create_doc':
-      // The create-doc path goes through handleCreateDoc; this branch
-      // is unreachable but typescript wants the exhaustive switch.
-      return;
-
-    // ── Document verbs ─────────────────────────────────────────
-    case 'doc.replace_content':
-      if (state.kind !== 'document') return;
-      state.tipTapJson = action.tipTapJson;
-      return;
-    case 'doc.insert_block':
-      if (state.kind !== 'document') return;
-      state.blocks.push({
-        id: randomUUID(),
-        type: action.block.type,
-        data: action.block,
-      });
-      return;
-    case 'doc.update_block':
-      if (state.kind !== 'document') return;
-      {
-        const block = state.blocks.find((b) => b.id === action.blockId);
-        if (block) block.data = { ...(block.data as object), ...action.patch };
-      }
-      return;
-    case 'doc.delete_block':
-      if (state.kind !== 'document') return;
-      state.blocks = state.blocks.filter((b) => b.id !== action.blockId);
-      return;
-    case 'doc.add_comment':
-      if (state.kind !== 'document') return;
-      state.comments.push({
-        id: randomUUID(),
-        anchorBlockId: action.anchorBlockId,
-        body: action.body,
-        authorUserId: 'unknown', // filled by the dispatcher in phase 2
-        createdAt: new Date().toISOString(),
-      });
-      return;
-    case 'doc.format_range':
-      // Format ranges are ProseMirror-coord changes; phase 1 stub
-      // just records they happened. Real semantics arrive with
-      // y-prosemirror in phase 2.
-      return;
-
-    // ── Sheet verbs ─────────────────────────────────────────────
-    case 'sheet.add_sheet':
-      if (state.kind !== 'sheet') return;
-      state.sheets.push({
-        id: randomUUID(),
-        name: action.name,
-        rowCount: action.rowCount ?? 100,
-        colCount: action.colCount ?? 26,
-      });
-      return;
-    case 'sheet.delete_sheet':
-      if (state.kind !== 'sheet') return;
-      state.sheets = state.sheets.filter((s) => s.id !== action.sheetId);
-      return;
-    case 'sheet.set_cell':
-      if (state.kind !== 'sheet') return;
-      state.cells[`${action.sheetId}:${action.row}:${action.col}`] = {
-        value: action.value ?? null,
-        formula: action.formula,
-        format: action.format,
-      };
-      return;
-    case 'sheet.set_range':
-      if (state.kind !== 'sheet') return;
-      action.rows.forEach((row, ri) => {
-        row.forEach((value, ci) => {
-          state.cells[
-            `${action.sheetId}:${action.fromRow + ri}:${action.fromCol + ci}`
-          ] = { value };
-        });
-      });
-      return;
-    case 'sheet.add_chart':
-      if (state.kind !== 'sheet') return;
-      state.charts.push({
-        id: randomUUID(),
-        sheetId: action.sheetId,
-        sourceRange: action.sourceRange,
-        type: action.type,
-      });
-      return;
-    case 'sheet.sort':
-    case 'sheet.filter':
-      // Sort + filter are view-level operations; the cell map
-      // doesn't change, just the rendering order. The editor handles
-      // them locally; we record them for audit but don't mutate
-      // cells.
-      return;
-
-    // ── Slides verbs ────────────────────────────────────────────
-    case 'slides.add_slide':
-      if (state.kind !== 'slides') return;
-      {
-        const newSlide = {
-          id: randomUUID(),
-          layout: action.layout ?? 'blank',
-          background: action.background,
-        };
-        if (action.afterSlideId) {
-          const idx = state.slides.findIndex(
-            (s) => s.id === action.afterSlideId,
-          );
-          state.slides.splice(idx + 1, 0, newSlide);
-        } else {
-          state.slides.push(newSlide);
-        }
-      }
-      return;
-    case 'slides.delete_slide':
-      if (state.kind !== 'slides') return;
-      state.slides = state.slides.filter((s) => s.id !== action.slideId);
-      Object.keys(state.elements)
-        .filter((k) => k.startsWith(`${action.slideId}:`))
-        .forEach((k) => delete state.elements[k]);
-      return;
-    case 'slides.add_element':
-      if (state.kind !== 'slides') return;
-      {
-        const elementId = action.element.id ?? randomUUID();
-        state.elements[`${action.slideId}:${elementId}`] = {
-          ...action.element,
-          id: elementId,
-        };
-      }
-      return;
-    case 'slides.update_element':
-      if (state.kind !== 'slides') return;
-      {
-        const key = `${action.slideId}:${action.elementId}`;
-        if (state.elements[key]) {
-          state.elements[key] = { ...state.elements[key], ...action.patch };
-        }
-      }
-      return;
-    case 'slides.move_element':
-      if (state.kind !== 'slides') return;
-      {
-        const key = `${action.slideId}:${action.elementId}`;
-        if (state.elements[key]) {
-          state.elements[key] = {
-            ...state.elements[key],
-            x: action.x,
-            y: action.y,
-          };
-        }
-      }
-      return;
-    case 'slides.delete_element':
-      if (state.kind !== 'slides') return;
-      delete state.elements[`${action.slideId}:${action.elementId}`];
-      return;
-    case 'slides.apply_theme':
-      if (state.kind !== 'slides') return;
-      state.theme = { id: action.themeId };
-      return;
-  }
-}
-
 function stripEnvelope(action: WorkspaceAction): WorkspaceActionPayload {
   const {
     id: _id,

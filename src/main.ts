@@ -7,6 +7,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { NestFactory } from '@nestjs/core';
 import * as Sentry from '@sentry/node';
 import { AppModule } from './app.module';
+import { WorkspaceRealtimeService } from './modules/workspace-state/workspace-realtime.service';
 
 async function bootstrap() {
   // rawBody:true keeps req.rawBody available for webhook signature
@@ -61,6 +62,14 @@ async function bootstrap() {
 
   app.enableShutdownHooks();
   await app.listen(port);
+
+  // Mount the Hocuspocus websocket server onto the same HTTP server
+  // Nest is now listening on. We hook into the `upgrade` event in
+  // WorkspaceRealtimeService so clients connect at
+  // `wss://<host>/v1/realtime/workspace`.
+  const realtime = app.get(WorkspaceRealtimeService);
+  const httpServer = app.getHttpServer();
+  realtime.attach(httpServer);
 }
 
 void bootstrap();
