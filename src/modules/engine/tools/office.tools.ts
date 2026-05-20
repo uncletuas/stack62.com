@@ -3,6 +3,8 @@ import { DocumentsService } from '../../documents/documents.service';
 import { FilesService } from '../../files/files.service';
 import { RecordsService } from '../../records/records.service';
 import { SystemsService } from '../../systems/systems.service';
+import { WorkspaceExportService } from '../../workspace-state/workspace-export.service';
+import { WorkspaceImportService } from '../../workspace-state/workspace-import.service';
 import { WorkspaceStateService } from '../../workspace-state/workspace-state.service';
 import {
   WORKSPACE_ACTION_VERBS,
@@ -44,6 +46,8 @@ export class OfficeTools {
     private readonly recordsService: RecordsService,
     private readonly systemsService: SystemsService,
     private readonly workspaceState: WorkspaceStateService,
+    private readonly workspaceImport: WorkspaceImportService,
+    private readonly workspaceExport: WorkspaceExportService,
   ) {}
 
   build(): ToolDefinition[] {
@@ -202,6 +206,139 @@ export class OfficeTools {
           };
         },
         { actionLevel: 1 },
+      ),
+
+      // ── Import / export bridge ──────────────────────────────────
+      tool(
+        'office.import_file_to_workspace',
+        "Import an existing .docx or .xlsx file (already uploaded to Stack62 as a FileEntity) into a NEW collaborative workspace doc. Use this when the user says 'open this report as a workspace doc so I can edit it with Coworker' or imports legacy material. Returns the new docId; pair with workspace.open(target='workspace-doc' / 'workspace-sheet'). PPTX import is not yet supported — refuse politely if asked.",
+        {
+          properties: {
+            fileId: {
+              type: 'string',
+              description: 'Existing file id (from /files).',
+            },
+            title: {
+              type: 'string',
+              description:
+                "Title for the new workspace doc. Defaults to the file's name (without extension).",
+            },
+          },
+          required: ['fileId'],
+        },
+        async (input, ctx) => {
+          if (!ctx.workspaceId)
+            throw new BadRequestException('workspaceId required.');
+          const fileId = String(input.fileId);
+          const { file, buffer } = await this.filesService.read(
+            fileId,
+            ctx.actorUserId,
+          );
+          const lower = file.filename.toLowerCase();
+          if (lower.endsWith('.docx')) {
+            const out = await this.workspaceImport.importDocx({
+              buffer,
+              organizationId: ctx.organizationId,
+              workspaceId: ctx.workspaceId,
+              actorUserId: ctx.actorUserId,
+              title:
+                typeof input.title === 'string' && input.title
+                  ? input.title
+                  : file.filename.replace(/\.docx$/i, ''),
+            });
+            return {
+              output: {
+                docId: out.docId,
+                kind: 'document',
+                version: out.version,
+              },
+              summary: `Imported "${file.filename}" as a workspace document.`,
+            };
+          }
+          if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
+            const out = await this.workspaceImport.importXlsx({
+              buffer,
+              organizationId: ctx.organizationId,
+              workspaceId: ctx.workspaceId,
+              actorUserId: ctx.actorUserId,
+              title:
+                typeof input.title === 'string' && input.title
+                  ? input.title
+                  : file.filename.replace(/\.xlsx?$/i, ''),
+            });
+            return {
+              output: {
+                docId: out.docId,
+                kind: 'sheet',
+                version: out.version,
+                rowsImported: out.rowsImported,
+                colsImported: out.colsImported,
+              },
+              summary: `Imported "${file.filename}" as a workspace sheet (${out.rowsImported} rows × ${out.colsImported} cols).`,
+            };
+          }
+          throw new BadRequestException(
+            'Only .docx and .xlsx imports are supported today.',
+          );
+        },
+        { actionLevel: 2 },
+      ),
+
+      tool(
+        'office.export_workspace_doc',
+        "Export a workspace doc / sheet / slide deck back to a downloadable .docx / .xlsx / .pptx file. The exported file is registered as a FileEntity (scope='document') so the user can download it via the existing file viewer. Use this when the user says 'give me this as a Word doc' or 'I need a .pptx I can email'. The Yjs state stays the source of truth — this is a one-off snapshot, not a sync.",
+        {
+          properties: {
+            docId: {
+              type: 'string',
+              description: 'Workspace doc id to export.',
+            },
+            format: {
+              type: 'string',
+              enum: ['docx', 'xlsx', 'pptx'],
+              description:
+                'Output format. Must match the doc kind: documents→docx, sheets→xlsx, slides→pptx.',
+            },
+          },
+          required: ['docId', 'format'],
+        },
+        async (input, ctx) => {
+          if (!ctx.workspaceId)
+            throw new BadRequestException('workspaceId required.');
+          const format = String(input.format) as 'docx' | 'xlsx' | 'pptx';
+          const out = await this.workspaceExport.export(
+            String(input.docId),
+            ctx.actorUserId,
+            format,
+          );
+          // Register as a FileEntity so the user can download via
+          // the existing file viewer + share with non-Stack62 users.
+          const file = await this.filesService.upload(
+            {
+              organizationId: ctx.organizationId,
+              workspaceId: ctx.workspaceId,
+              scope: 'document',
+            },
+            {
+              buffer: out.buffer,
+              originalName: out.filename,
+              mimeType: out.mimeType,
+              size: out.buffer.length,
+            },
+            ctx.actorUserId,
+          );
+          return {
+            output: {
+              fileId: file.id,
+              filename: file.filename,
+              mimeType: file.mimeType,
+              size: Number(file.size),
+              downloadUrl: `/v1/files/${file.id}/download`,
+            },
+            summary: `Exported as "${file.filename}".`,
+          };
+        },
+        { actionLevel: 2 },
       ),
 
       // ── Legacy file-based docs (existing) ───────────────────────

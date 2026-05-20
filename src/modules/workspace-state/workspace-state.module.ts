@@ -6,6 +6,8 @@ import { AccessControlModule } from '../../shared/access-control/access-control.
 import { ActivityModule } from '../activity/activity.module';
 import { WorkspaceActionLogEntity } from './entities/workspace-action-log.entity';
 import { WorkspaceDocEntity } from './entities/workspace-doc.entity';
+import { WorkspaceExportService } from './workspace-export.service';
+import { WorkspaceImportService } from './workspace-import.service';
 import { WorkspaceRealtimeService } from './workspace-realtime.service';
 import { WorkspaceStateController } from './workspace-state.controller';
 import { WorkspaceStateService } from './workspace-state.service';
@@ -33,7 +35,17 @@ import { WorkspaceStateService } from './workspace-state.service';
     }),
   ],
   controllers: [WorkspaceStateController],
-  providers: [WorkspaceStateService, WorkspaceRealtimeService],
-  exports: [WorkspaceStateService, WorkspaceRealtimeService],
+  providers: [
+    WorkspaceStateService,
+    WorkspaceRealtimeService,
+    WorkspaceImportService,
+    WorkspaceExportService,
+  ],
+  exports: [
+    WorkspaceStateService,
+    WorkspaceRealtimeService,
+    WorkspaceImportService,
+    WorkspaceExportService,
+  ],
 })
 export class WorkspaceStateModule {}
