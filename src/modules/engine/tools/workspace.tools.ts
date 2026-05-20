@@ -78,6 +78,9 @@ export class WorkspaceTools {
                 'file',
                 'folder',
                 'document',
+                'workspace-doc',
+                'workspace-sheet',
+                'workspace-slides',
                 'system',
                 'task',
                 'schedule',
@@ -89,7 +92,7 @@ export class WorkspaceTools {
                 'files-explorer',
               ],
               description:
-                "What kind of thing to open. 'file' opens a file in a new editor tab; 'files-explorer' opens the file browser; 'system' opens a system editor; etc.",
+                "What kind of thing to open. 'file' opens an uploaded file; 'workspace-doc' / 'workspace-sheet' / 'workspace-slides' open the AI-native collaborative editors (from office.workspace_create); 'files-explorer' opens the file browser; 'system' opens a system editor; etc.",
             },
             id: {
               type: 'string',

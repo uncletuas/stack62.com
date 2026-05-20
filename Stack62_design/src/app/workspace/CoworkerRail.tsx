@@ -2389,6 +2389,20 @@ function openIntentToRoute(intent: {
         title: baseTitle ?? "Document",
         refId: intent.id,
       };
+    case "workspace-doc":
+    case "workspace-sheet":
+    case "workspace-slides":
+      return {
+        kind: "workspace-doc",
+        title:
+          baseTitle ??
+          (t === "workspace-doc"
+            ? "Document"
+            : t === "workspace-sheet"
+              ? "Sheet"
+              : "Presentation"),
+        refId: intent.id,
+      };
     case "system":
       return { kind: "system", title: baseTitle ?? "System", refId: intent.id };
     case "task":

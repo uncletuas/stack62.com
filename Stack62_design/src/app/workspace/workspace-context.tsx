@@ -43,6 +43,7 @@ export type EditorKind =
   | "room"
   | "streaming-doc"
   | "meeting-bot"
+  | "workspace-doc"
   | "settings";
 
 /**

@@ -1085,6 +1085,112 @@ export async function deleteFile(fileId: string) {
   });
 }
 
+// ── Workspace state (AI-native docs/sheets/slides) ────────────────
+
+export type WorkspaceDocKind = 'document' | 'sheet' | 'slides';
+
+export interface WorkspaceDocSummary {
+  id: string;
+  organizationId: string;
+  workspaceId: string | null;
+  createdByUserId: string;
+  kind: WorkspaceDocKind;
+  title: string;
+  currentVersion: number;
+  status: string;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function fetchWorkspaceDocs(query: {
+  organizationId: string;
+  workspaceId?: string;
+  kind?: WorkspaceDocKind;
+}) {
+  return apiRequest<WorkspaceDocSummary[]>('/workspace/docs', { query });
+}
+
+export async function fetchWorkspaceDoc(docId: string) {
+  return apiRequest<WorkspaceDocSummary>(`/workspace/docs/${docId}`);
+}
+
+export async function fetchWorkspaceDocState(docId: string) {
+  return apiRequest<{
+    id: string;
+    kind: WorkspaceDocKind;
+    title: string;
+    currentVersion: number;
+    state: unknown;
+  }>(`/workspace/docs/${docId}/state`);
+}
+
+/**
+ * Create a new workspace doc by dispatching the `workspace.create_doc`
+ * action. The placeholder docId in the URL is ignored by the
+ * service when the verb is create_doc — a fresh doc is minted.
+ */
+export async function createWorkspaceDoc(payload: {
+  organizationId: string;
+  workspaceId: string;
+  kind: WorkspaceDocKind;
+  title: string;
+  initial?: unknown;
+}) {
+  return apiRequest<{ action: { docId: string }; version: number }>(
+    `/workspace/docs/00000000-0000-0000-0000-000000000000/actions`,
+    {
+      method: 'POST',
+      body: {
+        organizationId: payload.organizationId,
+        workspaceId: payload.workspaceId,
+        action: {
+          verb: 'workspace.create_doc',
+          kind: payload.kind,
+          title: payload.title,
+          initial: payload.initial,
+        },
+      },
+    },
+  );
+}
+
+export async function dispatchWorkspaceAction(payload: {
+  organizationId: string;
+  workspaceId?: string;
+  docId: string;
+  action: Record<string, unknown>;
+}) {
+  return apiRequest<{
+    action: { id: string; docId: string };
+    version: number;
+  }>(`/workspace/docs/${payload.docId}/actions`, {
+    method: 'POST',
+    body: {
+      organizationId: payload.organizationId,
+      workspaceId: payload.workspaceId,
+      action: payload.action,
+    },
+  });
+}
+
+/**
+ * Build the wss:// URL for the Hocuspocus realtime endpoint. Derives
+ * scheme + host from the configured API base — wss if the API is
+ * https, ws otherwise.
+ */
+export function getWorkspaceRealtimeUrl(): string {
+  const base = getApiBaseUrl();
+  try {
+    const u = new URL(base);
+    const wsProto = u.protocol === 'https:' ? 'wss:' : 'ws:';
+    // base already includes the /v1 prefix.
+    return `${wsProto}//${u.host}${u.pathname.replace(/\/$/, '')}/realtime/workspace`;
+  } catch {
+    return base.replace(/^http/, 'ws') + '/realtime/workspace';
+  }
+}
+
 export async function updateFile(
   fileId: string,
   patch: { filename?: string; folderId?: string | null },
