@@ -16,6 +16,7 @@ import {
   AlignRight,
   Bold,
   Italic,
+  ListChecks,
   Link2,
   List,
   ListOrdered,
@@ -23,6 +24,7 @@ import {
   Loader2,
   Quote,
   Redo2,
+  Sparkles,
   Strikethrough,
   Underline as UnderlineIcon,
   Undo2,
@@ -37,6 +39,7 @@ import {
 } from "../../lib/resources";
 import { useAppContext } from "../../context/app-context";
 import { useWorkspace, type EditorTab } from "../workspace-context";
+import { WorkspaceActivityPanel } from "./workspace-surfaces/WorkspaceActivityPanel";
 import { WorkspaceSheetSurface } from "./workspace-surfaces/WorkspaceSheetSurface";
 import { WorkspaceSlidesSurface } from "./workspace-surfaces/WorkspaceSlidesSurface";
 
@@ -108,6 +111,23 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
   >("connecting");
   const [peerCount, setPeerCount] = useState(0);
   const [docTitle, setDocTitle] = useState<string>(tab.title ?? "Untitled");
+  // Activity panel toggle (closed by default — it's a side rail).
+  const [showActivity, setShowActivity] = useState(false);
+  // "Coworker just edited" badge state. Set when the activity panel
+  // reports the latest action was by a coworker within the last 15s.
+  const [aiBadge, setAiBadge] = useState<{ occurredAt: string } | null>(null);
+  useEffect(() => {
+    if (!aiBadge) return;
+    // Auto-clear after 15 seconds — long enough to notice, short
+    // enough to not dominate the header.
+    const ms = 15000 - (Date.now() - new Date(aiBadge.occurredAt).getTime());
+    if (ms <= 0) {
+      setAiBadge(null);
+      return;
+    }
+    const id = window.setTimeout(() => setAiBadge(null), ms);
+    return () => window.clearTimeout(id);
+  }, [aiBadge]);
   const providerRef = useRef<HocuspocusProvider | null>(null);
 
   // ── Hocuspocus provider lifecycle ────────────────────────────────
@@ -278,9 +298,28 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
         title={docTitle}
         providerStatus={providerStatus}
         peerCount={peerCount}
+        aiBadge={aiBadge}
+        activityOpen={showActivity}
+        onToggleActivity={() => setShowActivity((v) => !v)}
       />
       {docKind === "document" && editor && <Toolbar editor={editor} />}
-      {body}
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">{body}</div>
+        <WorkspaceActivityPanel
+          docId={docId}
+          open={showActivity}
+          onClose={() => setShowActivity(false)}
+          onLatestActor={(info) => {
+            if (!info) return;
+            // Show the AI badge only for fresh coworker actions.
+            if (info.actorKind !== "coworker") return;
+            const ageMs = Date.now() - new Date(info.occurredAt).getTime();
+            if (ageMs < 15000) {
+              setAiBadge({ occurredAt: info.occurredAt });
+            }
+          }}
+        />
+      </div>
       <style>{`
         .workspace-doc-prose { font-size: 14px; line-height: 1.65; color: #1f1f1f; min-height: 60vh; }
         .workspace-doc-prose h1 { font-size: 1.75em; font-weight: 700; margin: 0.6em 0 0.3em; }
@@ -358,10 +397,16 @@ function Header({
   title,
   providerStatus,
   peerCount,
+  aiBadge,
+  activityOpen,
+  onToggleActivity,
 }: {
   title: string;
   providerStatus: string;
   peerCount: number;
+  aiBadge: { occurredAt: string } | null;
+  activityOpen: boolean;
+  onToggleActivity: () => void;
 }) {
   const statusTone =
     providerStatus === "connected"
@@ -381,8 +426,29 @@ function Header({
     <div className="flex items-center justify-between border-b border-app bg-app-surface px-4 py-2 text-xs">
       <div className="flex items-center gap-2 truncate">
         <span className="truncate font-medium text-app">{title}</span>
+        {aiBadge && (
+          <span
+            className="inline-flex animate-pulse items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-emerald-300"
+            title={`Last edit by Coworker at ${new Date(aiBadge.occurredAt).toLocaleTimeString()}`}
+          >
+            <Sparkles className="h-2.5 w-2.5" /> Coworker just edited
+          </span>
+        )}
       </div>
       <div className="flex items-center gap-3 text-[11px]">
+        <button
+          type="button"
+          onClick={onToggleActivity}
+          title={activityOpen ? "Hide activity" : "Show activity"}
+          className={`flex items-center gap-1 rounded p-1 transition ${
+            activityOpen
+              ? "bg-accent-soft text-accent"
+              : "text-app-muted hover:bg-app-hover"
+          }`}
+        >
+          <ListChecks className="h-3 w-3" />
+          <span className="hidden sm:inline">Activity</span>
+        </button>
         <span className={statusTone}>● {statusText}</span>
         {peerCount > 0 && (
           <span className="flex items-center gap-1 text-app-muted">

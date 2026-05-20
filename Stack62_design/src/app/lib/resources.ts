@@ -1125,6 +1125,25 @@ export async function fetchWorkspaceDocState(docId: string) {
   }>(`/workspace/docs/${docId}/state`);
 }
 
+export interface WorkspaceActionLogEntry {
+  id: string;
+  docId: string;
+  actorKind: 'user' | 'coworker';
+  actorUserId: string;
+  coworkerId: string | null;
+  verb: string;
+  payload: Record<string, unknown>;
+  occurredAt: string;
+  createdAt: string;
+}
+
+export async function fetchWorkspaceActionLog(docId: string, limit = 50) {
+  return apiRequest<WorkspaceActionLogEntry[]>(
+    `/workspace/docs/${docId}/actions`,
+    { query: { limit: String(limit) } },
+  );
+}
+
 /**
  * Create a new workspace doc by dispatching the `workspace.create_doc`
  * action. The placeholder docId in the URL is ignored by the
