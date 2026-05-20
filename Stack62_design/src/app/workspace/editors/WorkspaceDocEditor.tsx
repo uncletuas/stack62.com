@@ -38,6 +38,7 @@ import {
 import { useAppContext } from "../../context/app-context";
 import { useWorkspace, type EditorTab } from "../workspace-context";
 import { WorkspaceSheetSurface } from "./workspace-surfaces/WorkspaceSheetSurface";
+import { WorkspaceSlidesSurface } from "./workspace-surfaces/WorkspaceSlidesSurface";
 
 /**
  * The collaborative, AI-native document editor.
@@ -252,20 +253,13 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
     }
     if (docKind === "slides") {
       return (
-        <div className="grid h-full place-items-center px-6 text-center text-sm text-app-faint">
-          <div className="max-w-md space-y-2">
-            <p className="font-medium text-app-muted">
-              Collaborative slide editor coming in turn 5.
-            </p>
-            <p className="text-[11px]">
-              The slides exist in the same Y.Doc — when the Konva
-              surface ships, this tab will surface them. For now you
-              can still ask the Coworker to add/remove slides via{" "}
-              <code>slides.add_slide</code> dispatches; they're being
-              persisted.
-            </p>
-          </div>
-        </div>
+        <WorkspaceSlidesSurface
+          docId={docId}
+          ydoc={ydoc}
+          provider={providerRef.current}
+          organizationId={currentOrganization?.id ?? ""}
+          workspaceId={currentWorkspace?.id ?? ""}
+        />
       );
     }
     // Default: document → TipTap
