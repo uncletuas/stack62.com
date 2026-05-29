@@ -175,10 +175,9 @@ services:
     staticPublishPath: ./Stack62_design/dist
     autoDeploy: true
     envVars:
-      # After first deploy, paste your API URL here (e.g.
-      # https://stack62-api.onrender.com/v1) and trigger a manual rebuild.
-      # Vite inlines it at build time.
+      # API base URL — inlined at build time by Vite
       - key: VITE_API_BASE_URL
+        value: https://stack62-api.onrender.com/v1
         sync: false
     routes:
       # SPA fallback — client-side routing
