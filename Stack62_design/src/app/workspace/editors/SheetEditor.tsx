@@ -10,7 +10,7 @@ import type { ColDef, GridApi, GridOptions } from "ag-grid-community";
 import {
   Undo2,
   Redo2,
-  Print,
+  Printer,
   ZoomIn,
   ZoomOut,
   Bold,
@@ -364,7 +364,7 @@ export function SheetEditor({
             <Redo2 size={18} />
           </button>
           <button className="h-8 w-8 grid place-items-center text-[#5f6368] hover:bg-[#f1f3f4] rounded-full">
-            <Print size={18} />
+            <Printer size={18} />
           </button>
           <button className="h-8 w-8 grid place-items-center text-[#5f6368] hover:bg-[#f1f3f4] rounded-full">
             <ZoomIn size={18} />
