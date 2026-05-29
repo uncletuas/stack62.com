@@ -169,6 +169,12 @@ const SheetDeleteSheetSchema = z.object({
   sheetId: uuidSchema,
 });
 
+const SheetRenameSheetSchema = z.object({
+  verb: z.literal('sheet.rename_sheet'),
+  sheetId: uuidSchema,
+  name: z.string().min(1).max(64),
+});
+
 const SheetSetCellSchema = z.object({
   verb: z.literal('sheet.set_cell'),
   sheetId: uuidSchema,
@@ -221,6 +227,30 @@ const SheetFilterSchema = z.object({
     op: z.enum(['eq', 'neq', 'gt', 'lt', 'gte', 'lte', 'contains']),
     value: cellValueSchema,
   }),
+});
+
+const SheetAddRowSchema = z.object({
+  verb: z.literal('sheet.add_row'),
+  sheetId: uuidSchema,
+  afterRow: positiveIntSchema.optional(),
+});
+
+const SheetDeleteRowSchema = z.object({
+  verb: z.literal('sheet.delete_row'),
+  sheetId: uuidSchema,
+  row: positiveIntSchema,
+});
+
+const SheetAddColumnSchema = z.object({
+  verb: z.literal('sheet.add_column'),
+  sheetId: uuidSchema,
+  afterCol: positiveIntSchema.optional(),
+});
+
+const SheetDeleteColumnSchema = z.object({
+  verb: z.literal('sheet.delete_column'),
+  sheetId: uuidSchema,
+  col: positiveIntSchema,
 });
 
 // Slide actions ----------------------------------------------------
@@ -291,6 +321,7 @@ export const WorkspaceActionPayloadSchema = z.discriminatedUnion('verb', [
   DocFormatRangeSchema,
   SheetAddSheetSchema,
   SheetDeleteSheetSchema,
+  SheetRenameSheetSchema,
   SheetSetCellSchema,
   SheetSetRangeSchema,
   SheetAddChartSchema,
@@ -298,6 +329,10 @@ export const WorkspaceActionPayloadSchema = z.discriminatedUnion('verb', [
   SheetDeleteChartSchema,
   SheetSortSchema,
   SheetFilterSchema,
+  SheetAddRowSchema,
+  SheetDeleteRowSchema,
+  SheetAddColumnSchema,
+  SheetDeleteColumnSchema,
   SlidesAddSlideSchema,
   SlidesDeleteSlideSchema,
   SlidesAddElementSchema,
@@ -356,6 +391,7 @@ export const WORKSPACE_ACTION_VERBS = [
   'doc.format_range',
   'sheet.add_sheet',
   'sheet.delete_sheet',
+  'sheet.rename_sheet',
   'sheet.set_cell',
   'sheet.set_range',
   'sheet.add_chart',
@@ -363,6 +399,10 @@ export const WORKSPACE_ACTION_VERBS = [
   'sheet.delete_chart',
   'sheet.sort',
   'sheet.filter',
+  'sheet.add_row',
+  'sheet.delete_row',
+  'sheet.add_column',
+  'sheet.delete_column',
   'slides.add_slide',
   'slides.delete_slide',
   'slides.add_element',

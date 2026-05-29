@@ -26,7 +26,8 @@ import {
 } from "recharts";
 import { dispatchWorkspaceAction } from "../../../lib/resources";
 import { useAppContext } from "../../../context/app-context";
-import { Undo2, Redo2, Bold, Italic, Underline } from "lucide-react";
+import { Undo2, Redo2, Bold, Italic, Underline, Plus, Minus } from "lucide-react";
+import { HyperFormula } from "hyperformula";
 
 // AG Grid Community v33+ requires explicit module registration. We
 // register every community module once at file load — keeps the bundle
@@ -82,6 +83,8 @@ export function WorkspaceSheetSurface({
   const [, setChartsVersion] = useState(0);
   const [undoManager, setUndoManager] = useState<Y.UndoManager | null>(null);
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: number } | null>(null);
+  const [editingSheetId, setEditingSheetId] = useState<string | null>(null);
+  const [newSheetName, setNewSheetName] = useState("");
 
   // Initialize undo manager for sheets, cells, and charts
   useEffect(() => {
@@ -199,6 +202,8 @@ export function WorkspaceSheetSurface({
         editable: false,
         width: 50,
         pinned: "left",
+        sortable: false,
+        filter: false,
         cellStyle: {
           backgroundColor: "#f1f3f4",
           color: "#5f6368",
@@ -214,6 +219,8 @@ export function WorkspaceSheetSurface({
         editable: true,
         width: 110,
         suppressMovable: true,
+        sortable: true,
+        filter: true,
         cellStyle: (params) => {
           const row = params.node?.rowIndex ?? 0;
           const cell = ydoc.getMap("cells").get(`${activeSheet.id}:${row}:${c}`) as { format?: Record<string, unknown> } | undefined;
@@ -313,6 +320,144 @@ export function WorkspaceSheetSurface({
     [activeSheet, selectedCell, docId, organizationId, workspaceId, ydoc]
   );
 
+  // ── Add new sheet ────────────────────────────────────────────────
+  const addNewSheet = useCallback(async () => {
+    const sheetNumber = sheets.length + 1;
+    try {
+      await dispatchWorkspaceAction({
+        organizationId,
+        workspaceId,
+        docId,
+        action: {
+          verb: "sheet.add_sheet",
+          name: `Sheet${sheetNumber}`,
+        },
+      });
+    } catch (err) {
+      console.warn("sheet.add_sheet failed", err instanceof Error ? err.message : err);
+    }
+  }, [sheets.length, docId, organizationId, workspaceId]);
+
+  // ── Delete sheet ────────────────────────────────────────────────
+  const deleteSheet = useCallback(async (sheetId: string) => {
+    if (sheets.length <= 1) {
+      alert("Cannot delete the only sheet!");
+      return;
+    }
+    if (confirm(`Are you sure you want to delete this sheet?`)) {
+      try {
+        await dispatchWorkspaceAction({
+          organizationId,
+          workspaceId,
+          docId,
+          action: {
+            verb: "sheet.delete_sheet",
+            sheetId,
+          },
+        });
+      } catch (err) {
+        console.warn("sheet.delete_sheet failed", err instanceof Error ? err.message : err);
+      }
+    }
+  }, [sheets.length, docId, organizationId, workspaceId]);
+
+  // ── Rename sheet ────────────────────────────────────────────────
+  const startRenameSheet = useCallback((e: React.MouseEvent, sheetId: string, currentName: string) => {
+    e.stopPropagation();
+    setEditingSheetId(sheetId);
+    setNewSheetName(currentName);
+  }, []);
+
+  const commitRenameSheet = useCallback(async (sheetId: string) => {
+    if (!newSheetName.trim()) return;
+    try {
+      await dispatchWorkspaceAction({
+        organizationId,
+        workspaceId,
+        docId,
+        action: {
+          verb: "sheet.rename_sheet",
+          sheetId,
+          name: newSheetName.trim(),
+        },
+      });
+      setEditingSheetId(null);
+    } catch (err) {
+      console.warn("Rename sheet failed", err);
+    }
+  }, [newSheetName, docId, organizationId, workspaceId]);
+
+  // ── Row/column management ─────────────────────────────────────────
+  const addRow = useCallback(async () => {
+    if (!activeSheet) return;
+    try {
+      await dispatchWorkspaceAction({
+        organizationId,
+        workspaceId,
+        docId,
+        action: {
+          verb: "sheet.add_row",
+          sheetId: activeSheet.id,
+        },
+      });
+    } catch (err) {
+      console.warn("sheet.add_row failed", err);
+    }
+  }, [activeSheet, docId, organizationId, workspaceId]);
+
+  const deleteRow = useCallback(async () => {
+    if (!activeSheet || !selectedCell) return;
+    try {
+      await dispatchWorkspaceAction({
+        organizationId,
+        workspaceId,
+        docId,
+        action: {
+          verb: "sheet.delete_row",
+          sheetId: activeSheet.id,
+          row: selectedCell.row,
+        },
+      });
+    } catch (err) {
+      console.warn("sheet.delete_row failed", err);
+    }
+  }, [activeSheet, selectedCell, docId, organizationId, workspaceId]);
+
+  const addColumn = useCallback(async () => {
+    if (!activeSheet) return;
+    try {
+      await dispatchWorkspaceAction({
+        organizationId,
+        workspaceId,
+        docId,
+        action: {
+          verb: "sheet.add_column",
+          sheetId: activeSheet.id,
+        },
+      });
+    } catch (err) {
+      console.warn("sheet.add_column failed", err);
+    }
+  }, [activeSheet, docId, organizationId, workspaceId]);
+
+  const deleteColumn = useCallback(async () => {
+    if (!activeSheet || !selectedCell) return;
+    try {
+      await dispatchWorkspaceAction({
+        organizationId,
+        workspaceId,
+        docId,
+        action: {
+          verb: "sheet.delete_column",
+          sheetId: activeSheet.id,
+          col: selectedCell.col,
+        },
+      });
+    } catch (err) {
+      console.warn("sheet.delete_column failed", err);
+    }
+  }, [activeSheet, selectedCell, docId, organizationId, workspaceId]);
+
   // ── Edit handler ────────────────────────────────────────────────
   const onCellValueChanged = useCallback(
     async (event: CellValueChangedEvent) => {
@@ -371,6 +516,25 @@ export function WorkspaceSheetSurface({
     // cells is the only thing the eye expects in a grid. We don't
     // let the user's app-wide dark theme bleed in here.
     <div className="flex h-full flex-col bg-[#f6f8fa] text-[#1f1f1f]">
+      <style>{`
+        /* Ensure grid lines are visible */
+        .ag-theme-quartz {
+          --ag-borders: 1px solid #e2e8f0;
+          --ag-border-color: #e2e8f0;
+          --ag-row-border-color: #e2e8f0;
+          --ag-column-border-color: #e2e8f0;
+        }
+        .ag-theme-quartz .ag-row {
+          border-bottom: 1px solid #e2e8f0;
+        }
+        .ag-theme-quartz .ag-cell {
+          border-right: 1px solid #e2e8f0;
+        }
+        .ag-theme-quartz .ag-header-cell {
+          border-right: 1px solid #e2e8f0;
+          border-bottom: 1px solid #e2e8f0;
+        }
+      `}</style>
       {/* Toolbar */}
       <div className="flex shrink-0 items-center gap-1 border-b border-[#d0d7de] bg-white px-2 py-1 text-[11px]">
         <button
@@ -400,6 +564,54 @@ export function WorkspaceSheetSurface({
         >
           <Redo2 className="h-3.5 w-3.5" />
           <span className="hidden md:inline">Redo</span>
+        </button>
+        <div className="mx-1 h-5 w-px bg-[#d0d7de]" />
+        <button
+          type="button"
+          onClick={addRow}
+          title="Add Row"
+          className="flex items-center gap-1 rounded px-2 py-1 transition text-[#1f1f1f] hover:bg-[#f6f8fa]"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          <span className="hidden md:inline">Add Row</span>
+        </button>
+        <button
+          type="button"
+          onClick={deleteRow}
+          disabled={!selectedCell}
+          title="Delete Row"
+          className={`flex items-center gap-1 rounded px-2 py-1 transition ${
+            !selectedCell
+              ? "text-[#57606a] opacity-40"
+              : "text-[#1f1f1f] hover:bg-[#f6f8fa]"
+          }`}
+        >
+          <Minus className="h-3.5 w-3.5" />
+          <span className="hidden md:inline">Del Row</span>
+        </button>
+        <div className="mx-1 h-5 w-px bg-[#d0d7de]" />
+        <button
+          type="button"
+          onClick={addColumn}
+          title="Add Column"
+          className="flex items-center gap-1 rounded px-2 py-1 transition text-[#1f1f1f] hover:bg-[#f6f8fa]"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          <span className="hidden md:inline">Add Col</span>
+        </button>
+        <button
+          type="button"
+          onClick={deleteColumn}
+          disabled={!selectedCell}
+          title="Delete Column"
+          className={`flex items-center gap-1 rounded px-2 py-1 transition ${
+            !selectedCell
+              ? "text-[#57606a] opacity-40"
+              : "text-[#1f1f1f] hover:bg-[#f6f8fa]"
+          }`}
+        >
+          <Minus className="h-3.5 w-3.5" />
+          <span className="hidden md:inline">Del Col</span>
         </button>
         <div className="mx-1 h-5 w-px bg-[#d0d7de]" />
         <button
@@ -492,6 +704,13 @@ export function WorkspaceSheetSurface({
           headerHeight={28}
           suppressMovableColumns
           animateRows={false}
+          cellSelection={true}
+          enableRangeSelection={true}
+          enableFillHandle
+          allowDragFromFillHandle
+          defaultColDef={{
+            resizable: true,
+          }}
           // Cell-level performance: avoid re-rendering every cell on
           // each Y.Map bump by using `getRowId` + immutable rowData
           // patterns. For now the brute-force re-render on bumpCells
@@ -584,24 +803,65 @@ export function WorkspaceSheetSurface({
       )}
 
       {/* Sheet tabs */}
-      {sheets.length > 1 && (
-        <div className="flex shrink-0 items-center gap-0.5 border-t border-[#d0d7de] bg-white px-2 py-1 text-[11px]">
-          {sheets.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              onClick={() => setActiveSheetId(s.id)}
-              className={`rounded px-2 py-0.5 transition ${
-                s.id === activeSheet.id
-                  ? "bg-[#2da44e] text-white"
-                  : "text-[#57606a] hover:bg-[#f6f8fa]"
-              }`}
-            >
-              {s.name}
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="flex shrink-0 items-center gap-0.5 border-t border-[#d0d7de] bg-white px-2 py-1 text-[11px]">
+        {sheets.map((s) => (
+          <div
+            key={s.id}
+            className="flex items-center gap-1"
+          >
+            {editingSheetId === s.id ? (
+              <input
+                autoFocus
+                value={newSheetName}
+                onChange={(e) => setNewSheetName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    void commitRenameSheet(s.id);
+                  } else if (e.key === "Escape") {
+                    setEditingSheetId(null);
+                  }
+                }}
+                onBlur={() => void commitRenameSheet(s.id)}
+                className="w-24 rounded border border-[#d0d7de] px-1 py-0.5 text-[11px] text-[#1f1f1f] focus:outline-none focus:ring-1 focus:ring-[#2da44e]"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => setActiveSheetId(s.id)}
+                onDoubleClick={(e) => startRenameSheet(e, s.id, s.name)}
+                className={`rounded px-2 py-0.5 transition ${
+                  s.id === activeSheet.id
+                    ? "bg-[#2da44e] text-white"
+                    : "text-[#57606a] hover:bg-[#f6f8fa]"
+                }`}
+              >
+                {s.name}
+              </button>
+            )}
+            {!editingSheetId && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void deleteSheet(s.id);
+                }}
+                className="rounded px-1 py-0.5 text-[#57606a] hover:bg-[#f6f8fa] hover:text-red-600 transition"
+                title="Delete sheet"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() => addNewSheet()}
+          className="rounded px-2 py-0.5 text-[#57606a] hover:bg-[#f6f8fa] transition"
+          title="Add new sheet"
+        >
+          +
+        </button>
+      </div>
     </div>
   );
 

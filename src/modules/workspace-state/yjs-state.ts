@@ -245,6 +245,20 @@ export function applyActionToDoc(
           }
         }
         return;
+      case 'sheet.rename_sheet':
+        if (kind !== 'sheet') return;
+        {
+          const arr = doc.getArray('sheets');
+          for (let i = 0; i < arr.length; i++) {
+            const s = arr.get(i) as { id?: string; name?: string };
+            if (s?.id === action.sheetId) {
+              arr.delete(i, 1);
+              arr.insert(i, [{ ...s, name: action.name }]);
+              break;
+            }
+          }
+        }
+        return;
       case 'sheet.set_cell':
         if (kind !== 'sheet') return;
         doc.getMap('cells').set(
@@ -300,6 +314,144 @@ export function applyActionToDoc(
       case 'sheet.sort':
       case 'sheet.filter':
         // View-level. Recorded in the action log only.
+        return;
+
+      case 'sheet.add_row':
+        if (kind !== 'sheet') return;
+        {
+          // Update sheet's row count
+          const arr = doc.getArray('sheets');
+          for (let i = 0; i < arr.length; i++) {
+            const s = arr.get(i) as { id?: string; rowCount?: number };
+            if (s?.id === action.sheetId) {
+              const newCount = (s.rowCount ?? 100) + 1;
+              arr.delete(i, 1);
+              arr.insert(i, [{ ...s, rowCount: newCount }]);
+              break;
+            }
+          }
+        }
+        return;
+
+      case 'sheet.delete_row':
+        if (kind !== 'sheet') return;
+        {
+          // Shift cells down after deleted row
+          const cells = doc.getMap('cells');
+          const sheetId = action.sheetId;
+          const keysToUpdate: Array<{ oldKey: string; newKey: string; value: unknown }> = [];
+          const keysToDelete: string[] = [];
+          
+          for (const key of Array.from(cells.keys())) {
+            if (key.startsWith(`${sheetId}:`)) {
+              const parts = key.split(':');
+              const r = Number(parts[1]);
+              const c = Number(parts[2]);
+              if (r > action.row) {
+                const oldValue = cells.get(key);
+                if (oldValue !== undefined) {
+                  keysToUpdate.push({
+                    oldKey: key,
+                    newKey: `${sheetId}:${r - 1}:${c}`,
+                    value: oldValue,
+                  });
+                }
+              } else if (r === action.row) {
+                keysToDelete.push(key);
+              }
+            }
+          }
+          
+          // Delete old keys, then insert new ones
+          for (const key of keysToDelete) {
+            cells.delete(key);
+          }
+          for (const { oldKey, newKey, value } of keysToUpdate) {
+            cells.delete(oldKey);
+            cells.set(newKey, value);
+          }
+          
+          // Update sheet's row count
+          const arr = doc.getArray('sheets');
+          for (let i = 0; i < arr.length; i++) {
+            const s = arr.get(i) as { id?: string; rowCount?: number };
+            if (s?.id === action.sheetId) {
+              const newCount = Math.max(1, (s.rowCount ?? 100) - 1);
+              arr.delete(i, 1);
+              arr.insert(i, [{ ...s, rowCount: newCount }]);
+              break;
+            }
+          }
+        }
+        return;
+
+      case 'sheet.add_column':
+        if (kind !== 'sheet') return;
+        {
+          // Update sheet's column count
+          const arr = doc.getArray('sheets');
+          for (let i = 0; i < arr.length; i++) {
+            const s = arr.get(i) as { id?: string; colCount?: number };
+            if (s?.id === action.sheetId) {
+              const newCount = (s.colCount ?? 26) + 1;
+              arr.delete(i, 1);
+              arr.insert(i, [{ ...s, colCount: newCount }]);
+              break;
+            }
+          }
+        }
+        return;
+
+      case 'sheet.delete_column':
+        if (kind !== 'sheet') return;
+        {
+          // Shift cells right after deleted column
+          const cells = doc.getMap('cells');
+          const sheetId = action.sheetId;
+          const keysToUpdate: Array<{ oldKey: string; newKey: string; value: unknown }> = [];
+          const keysToDelete: string[] = [];
+          
+          for (const key of Array.from(cells.keys())) {
+            if (key.startsWith(`${sheetId}:`)) {
+              const parts = key.split(':');
+              const r = Number(parts[1]);
+              const c = Number(parts[2]);
+              if (c > action.col) {
+                const oldValue = cells.get(key);
+                if (oldValue !== undefined) {
+                  keysToUpdate.push({
+                    oldKey: key,
+                    newKey: `${sheetId}:${r}:${c - 1}`,
+                    value: oldValue,
+                  });
+                }
+              } else if (c === action.col) {
+                keysToDelete.push(key);
+              }
+            }
+          }
+          
+          // Delete old keys, then insert new ones
+          for (const key of keysToDelete) {
+            cells.delete(key);
+          }
+          for (const { oldKey, newKey, value } of keysToUpdate) {
+            cells.delete(oldKey);
+            cells.set(newKey, value);
+          }
+          
+          // Update sheet's column count
+          const arr = doc.getArray('sheets');
+          for (let i = 0; i < arr.length; i++) {
+            const s = arr.get(i) as { id?: string; colCount?: number };
+            if (s?.id === action.sheetId) {
+              const newCount = Math.max(1, (s.colCount ?? 26) - 1);
+              arr.delete(i, 1);
+              arr.insert(i, [{ ...s, colCount: newCount }]);
+              break;
+            }
+          }
+        }
         return;
 
       // ── Slides ──────────────────────────────────────────────
