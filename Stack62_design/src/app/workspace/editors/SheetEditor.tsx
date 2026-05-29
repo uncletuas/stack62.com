@@ -7,22 +7,25 @@ import {
 } from "react";
 import { AgGridReact } from "ag-grid-react";
 import type { ColDef, GridApi, GridOptions } from "ag-grid-community";
-import "ag-grid-community/styles/ag-grid.css";
-import "ag-grid-community/styles/ag-theme-alpine.css";
 import {
-  AlignCenter,
-  AlignLeft,
-  AlignRight,
+  Undo2,
+  Redo2,
+  Print,
+  ZoomIn,
+  ZoomOut,
   Bold,
-  Eraser,
-  Highlighter,
   Italic,
-  PaintBucket,
-  Palette,
-  Plus,
-  Strikethrough,
   Underline,
+  TextColor,
+  FillColor,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  MoreHorizontal,
+  Plus,
 } from "lucide-react";
+import "ag-grid-community/styles/ag-grid.min.css";
+import "ag-grid-community/styles/ag-theme-quartz.min.css";
 
 export type SheetCell = {
   v?: string;
@@ -46,17 +49,18 @@ export type WorkbookJson = {
   sheets: Sheet[];
 };
 
-const DEFAULT_ROWS = 100;
+const DEFAULT_ROWS = 1000;
 const DEFAULT_COLS = 26;
 
 function colName(idx: number): string {
-  let s = "";
-  let n = idx;
-  while (n >= 0) {
-    s = String.fromCharCode(65 + (n % 26)) + s;
-    n = Math.floor(n / 26) - 1;
+  let name = "";
+  let n = idx + 1;
+  while (n > 0) {
+    const mod = (n - 1) % 26;
+    name = String.fromCharCode(65 + mod) + name;
+    n = Math.floor((n - mod) / 26);
   }
-  return s;
+  return name;
 }
 
 function freshSheet(name: string): Sheet {
@@ -73,7 +77,7 @@ function freshSheet(name: string): Sheet {
 
 function parseWorkbook(text: string): WorkbookJson {
   const trimmed = (text ?? "").trim();
-  if (!trimmed) return { version: 1, sheets: [freshSheet("Sheet 1")] };
+  if (!trimmed) return { version: 1, sheets: [freshSheet("Sheet1")] };
   try {
     const parsed = JSON.parse(trimmed);
     if (parsed && parsed.version === 1 && Array.isArray(parsed.sheets)) {
@@ -82,7 +86,7 @@ function parseWorkbook(text: string): WorkbookJson {
   } catch {
     // Fall through
   }
-  const sheet = freshSheet("Sheet 1");
+  const sheet = freshSheet("Sheet1");
   const lines = trimmed.split(/\r?\n/);
   lines.forEach((line, r) => {
     const cells = line.split(",");
@@ -182,6 +186,8 @@ export function SheetEditor({
   const gridRef = useRef<AgGridReact>(null);
   const gridApiRef = useRef<GridApi | null>(null);
   const lastEmittedRef = useRef<string>("");
+  const [selectedCell, setSelectedCell] = useState<{ row: number; col: number } | null>(null);
+  const [formulaBarValue, setFormulaBarValue] = useState("");
 
   useEffect(() => {
     if (text === lastEmittedRef.current) return;
@@ -192,33 +198,33 @@ export function SheetEditor({
 
   const columnDefs = useMemo<ColDef[]>(() => {
     const cols: ColDef[] = [];
-    const maxCols = Math.max(DEFAULT_COLS, activeSheet.rows.reduce((max, row) => Math.max(max, row.length), 0));
-    for (let i = 0; i < maxCols; i++) {
+    for (let c = 0; c < DEFAULT_COLS; c++) {
       cols.push({
-        field: `col${i}`,
-        headerName: colName(i),
-        width: 110,
+        field: `col${c}`,
+        headerName: colName(c),
+        width: 120,
         editable: true,
-        cellRenderer: (params: any) => {
-          const cellData = activeSheet.rows[params.rowIndex]?.[params.colDef.field?.slice(3) as unknown as number] || {};
+        resizable: true,
+        sortable: false,
+        filter: false,
+        cellStyle: (params) => {
+          const cellData = activeSheet.rows[params.rowIndex]?.[c] || {};
+          return {
+            fontWeight: cellData.bold ? "bold" : "normal",
+            fontStyle: cellData.italic ? "italic" : "normal",
+            textDecoration: `${cellData.underline ? "underline" : ""} ${cellData.strike ? "line-through" : ""}`.trim(),
+            textAlign: cellData.align || "left",
+            color: cellData.color || "#000000",
+            backgroundColor: cellData.bg || "#ffffff",
+          };
+        },
+        valueGetter: (params) => {
+          const cellData = activeSheet.rows[params.rowIndex]?.[c] || {};
           let displayValue = cellData.v || "";
           if (displayValue.startsWith("=")) {
             displayValue = evaluateFormula(displayValue, activeSheet);
           }
-          return (
-            <div
-              style={{
-                fontWeight: cellData.bold ? "bold" : "normal",
-                fontStyle: cellData.italic ? "italic" : "normal",
-                textDecoration: `${cellData.underline ? "underline" : ""} ${cellData.strike ? "line-through" : ""}`.trim(),
-                textAlign: cellData.align || "left",
-                color: cellData.color || "inherit",
-                backgroundColor: cellData.bg || "transparent",
-              }}
-            >
-              {displayValue}
-            </div>
-          );
+          return displayValue;
         },
       });
     }
@@ -228,9 +234,7 @@ export function SheetEditor({
   const rowData = useMemo(() => {
     return activeSheet.rows.map((row, r) => {
       const rowData: any = {};
-      row.forEach((cell, c) => {
-        rowData[`col${c}`] = cell;
-      });
+      rowData.rowNumber = r + 1;
       return rowData;
     });
   }, [activeSheet]);
@@ -248,7 +252,7 @@ export function SheetEditor({
       const newSheets = [...prev.sheets];
       const sheet = { ...newSheets[activeSheetIndex] };
       const newRows = [...sheet.rows];
-      newRows[rowIdx] = [...(newRows[rowIdx] || [])];
+      newRows[rowIdx] = [...newRows[rowIdx]];
       newRows[rowIdx][colIdx] = { ...newRows[rowIdx][colIdx], v: params.newValue };
       sheet.rows = newRows;
       newSheets[activeSheetIndex] = sheet;
@@ -258,33 +262,33 @@ export function SheetEditor({
     });
   }, [activeSheetIndex, emit]);
 
+  const onCellClicked = useCallback((params: any) => {
+    const colIdx = parseInt(params.colDef.field.slice(3), 10);
+    const rowIdx = params.rowIndex;
+    setSelectedCell({ row: rowIdx, col: colIdx });
+    const cellData = activeSheet.rows[rowIdx]?.[colIdx];
+    setFormulaBarValue(cellData?.v || "");
+  }, [activeSheet]);
+
   const applyFormat = useCallback((format: Partial<SheetCell>) => {
-    const selectedCells = gridApiRef.current?.getSelectedCells();
-    if (!selectedCells) return;
-    
+    if (!selectedCell) return;
     setWorkbook((prev) => {
       const newSheets = [...prev.sheets];
       const sheet = { ...newSheets[activeSheetIndex] };
       const newRows = sheet.rows.map(row => [...row]);
-      
-      selectedCells.forEach((cell) => {
-        const rowIdx = cell.rowIndex;
-        const colIdx = parseInt(cell.column.getColId().slice(3), 10);
-        newRows[rowIdx] = [...newRows[rowIdx]];
-        newRows[rowIdx][colIdx] = { ...newRows[rowIdx][colIdx], ...format };
-      });
-      
+      newRows[selectedCell.row] = [...newRows[selectedCell.row]];
+      newRows[selectedCell.row][selectedCell.col] = { ...newRows[selectedCell.row][selectedCell.col], ...format };
       sheet.rows = newRows;
       newSheets[activeSheetIndex] = sheet;
       const newWorkbook = { ...prev, sheets: newSheets };
       emit(newWorkbook);
       return newWorkbook;
     });
-  }, [activeSheetIndex, emit]);
+  }, [activeSheetIndex, emit, selectedCell]);
 
   const addSheet = () => {
     setWorkbook((prev) => {
-      const newSheet = freshSheet(`Sheet ${prev.sheets.length + 1}`);
+      const newSheet = freshSheet(`Sheet${prev.sheets.length + 1}`);
       const newWorkbook = { ...prev, sheets: [...prev.sheets, newSheet] };
       emit(newWorkbook);
       return newWorkbook;
@@ -292,159 +296,228 @@ export function SheetEditor({
     setActiveSheetIndex(workbook.sheets.length);
   };
 
-  const removeCurrentSheet = () => {
-    if (workbook.sheets.length <= 1) return;
-    setWorkbook((prev) => {
-      const newSheets = prev.sheets.filter((_, i) => i !== activeSheetIndex);
-      const newWorkbook = { ...prev, sheets: newSheets };
-      emit(newWorkbook);
-      return newWorkbook;
-    });
-    setActiveSheetIndex(Math.max(0, activeSheetIndex - 1));
-  };
-
   const gridOptions: GridOptions = {
     rowHeight: 28,
-    headerHeight: 24,
+    headerHeight: 28,
     enableRangeSelection: true,
     onGridReady: (params) => {
       gridApiRef.current = params.api;
     },
+    onCellValueChanged,
+    onCellClicked,
+    suppressColumnVirtualisation: true,
   };
 
+  const currentCellStyle = selectedCell ? activeSheet.rows[selectedCell.row]?.[selectedCell.col] : {};
+
   return (
-    <div className="flex h-full flex-col bg-white text-gray-800" style={{ "--app-bg": "#ffffff", "--app-border": "#d0d7de" } as React.CSSProperties}>
+    <div className="flex h-full flex-col bg-white text-[#202124]">
+      {/* Google-style top bar */}
+      <div className="flex h-12 items-center gap-2 border-b border-[#dadce0] bg-white px-3">
+        <div className="flex items-center gap-2">
+          <div className="h-8 w-8 bg-[#34a853] rounded flex items-center justify-center">
+            <span className="text-white font-bold text-sm">S</span>
+          </div>
+          <input
+            type="text"
+            value={title || "Untitled spreadsheet"}
+            className="border-none bg-transparent text-sm font-medium text-[#202124] focus:outline-none focus:bg-[#e8f0fe] px-2 py-1 rounded"
+            placeholder="Untitled spreadsheet"
+          />
+        </div>
+
+        <div className="ml-auto flex items-center gap-1">
+          <button className="h-8 px-3 text-sm font-medium text-[#5f6368] hover:bg-[#f1f3f4] rounded">
+            File
+          </button>
+          <button className="h-8 px-3 text-sm font-medium text-[#5f6368] hover:bg-[#f1f3f4] rounded">
+            Edit
+          </button>
+          <button className="h-8 px-3 text-sm font-medium text-[#5f6368] hover:bg-[#f1f3f4] rounded">
+            View
+          </button>
+          <button className="h-8 px-3 text-sm font-medium text-[#5f6368] hover:bg-[#f1f3f4] rounded">
+            Insert
+          </button>
+          <button className="h-8 px-3 text-sm font-medium text-[#5f6368] hover:bg-[#f1f3f4] rounded">
+            Format
+          </button>
+          <button className="h-8 px-3 text-sm font-medium text-[#5f6368] hover:bg-[#f1f3f4] rounded">
+            Data
+          </button>
+          <button className="h-8 px-3 text-sm font-medium text-[#5f6368] hover:bg-[#f1f3f4] rounded">
+            Tools
+          </button>
+          <button className="h-8 px-3 text-sm font-medium text-[#5f6368] hover:bg-[#f1f3f4] rounded">
+            Extensions
+          </button>
+          <button className="h-8 px-3 text-sm font-medium text-[#5f6368] hover:bg-[#f1f3f4] rounded">
+            Help
+          </button>
+        </div>
+
+        <div className="ml-4 flex items-center gap-1">
+          <button className="h-8 w-8 grid place-items-center text-[#5f6368] hover:bg-[#f1f3f4] rounded-full">
+            <Undo2 size={18} />
+          </button>
+          <button className="h-8 w-8 grid place-items-center text-[#5f6368] hover:bg-[#f1f3f4] rounded-full">
+            <Redo2 size={18} />
+          </button>
+          <button className="h-8 w-8 grid place-items-center text-[#5f6368] hover:bg-[#f1f3f4] rounded-full">
+            <Print size={18} />
+          </button>
+          <button className="h-8 w-8 grid place-items-center text-[#5f6368] hover:bg-[#f1f3f4] rounded-full">
+            <ZoomIn size={18} />
+          </button>
+          <button className="h-8 w-8 grid place-items-center text-[#5f6368] hover:bg-[#f1f3f4] rounded-full">
+            <ZoomOut size={18} />
+          </button>
+          <div className="mx-2 h-6 w-px bg-[#dadce0]" />
+          <button className="h-8 grid place-items-center text-[#5f6368] hover:bg-[#f1f3f4] rounded px-2 text-sm font-medium">
+            Share
+          </button>
+        </div>
+      </div>
+
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-1 border-b border-[#d0d7de] bg-gray-50 px-3 py-2">
-        <ToolbarButton icon={Bold} label="Bold" onClick={() => applyFormat({ bold: !activeSheet.rows[0]?.[0]?.bold })} />
-        <ToolbarButton icon={Italic} label="Italic" onClick={() => applyFormat({ italic: !activeSheet.rows[0]?.[0]?.italic })} />
-        <ToolbarButton icon={Underline} label="Underline" onClick={() => applyFormat({ underline: !activeSheet.rows[0]?.[0]?.underline })} />
-        <ToolbarButton icon={Strikethrough} label="Strikethrough" onClick={() => applyFormat({ strike: !activeSheet.rows[0]?.[0]?.strike })} />
-        <Divider />
-        <ToolbarButton icon={AlignLeft} label="Align Left" onClick={() => applyFormat({ align: "left" })} />
-        <ToolbarButton icon={AlignCenter} label="Align Center" onClick={() => applyFormat({ align: "center" })} />
-        <ToolbarButton icon={AlignRight} label="Align Right" onClick={() => applyFormat({ align: "right" })} />
-        <Divider />
-        <ColorPicker icon={Palette} label="Text Color" onPick={(c) => applyFormat({ color: c })} />
-        <ColorPicker icon={PaintBucket} label="Fill Color" onPick={(c) => applyFormat({ bg: c })} />
-        <Divider />
-        <ToolbarButton icon={Eraser} label="Clear Formatting" onClick={() => applyFormat({ bold: undefined, italic: undefined, underline: undefined, strike: undefined, align: undefined, color: undefined, bg: undefined })} />
+      <div className="flex h-12 items-center gap-1 border-b border-[#dadce0] bg-white px-3">
+        <button className="h-8 w-8 grid place-items-center text-[#5f6368] hover:bg-[#f1f3f4] rounded">
+          <Undo2 size={18} />
+        </button>
+        <button className="h-8 w-8 grid place-items-center text-[#5f6368] hover:bg-[#f1f3f4] rounded">
+          <Redo2 size={18} />
+        </button>
+        <div className="mx-1 h-6 w-px bg-[#dadce0]" />
+
+        <button
+          className={`h-8 w-8 grid place-items-center rounded ${currentCellStyle.bold ? "bg-[#e8f0fe] text-[#1a73e8]" : "text-[#5f6368] hover:bg-[#f1f3f4]"}`}
+          onClick={() => applyFormat({ bold: !currentCellStyle.bold })}
+        >
+          <Bold size={18} />
+        </button>
+        <button
+          className={`h-8 w-8 grid place-items-center rounded ${currentCellStyle.italic ? "bg-[#e8f0fe] text-[#1a73e8]" : "text-[#5f6368] hover:bg-[#f1f3f4]"}`}
+          onClick={() => applyFormat({ italic: !currentCellStyle.italic })}
+        >
+          <Italic size={18} />
+        </button>
+        <button
+          className={`h-8 w-8 grid place-items-center rounded ${currentCellStyle.underline ? "bg-[#e8f0fe] text-[#1a73e8]" : "text-[#5f6368] hover:bg-[#f1f3f4]"}`}
+          onClick={() => applyFormat({ underline: !currentCellStyle.underline })}
+        >
+          <Underline size={18} />
+        </button>
+        <div className="mx-1 h-6 w-px bg-[#dadce0]" />
+
+        <button className="h-8 w-8 grid place-items-center text-[#5f6368] hover:bg-[#f1f3f4] rounded">
+          <TextColor size={18} />
+        </button>
+        <button className="h-8 w-8 grid place-items-center text-[#5f6368] hover:bg-[#f1f3f4] rounded">
+          <FillColor size={18} />
+        </button>
+        <div className="mx-1 h-6 w-px bg-[#dadce0]" />
+
+        <button
+          className={`h-8 w-8 grid place-items-center rounded ${currentCellStyle.align === "left" ? "bg-[#e8f0fe] text-[#1a73e8]" : "text-[#5f6368] hover:bg-[#f1f3f4]"}`}
+          onClick={() => applyFormat({ align: "left" })}
+        >
+          <AlignLeft size={18} />
+        </button>
+        <button
+          className={`h-8 w-8 grid place-items-center rounded ${currentCellStyle.align === "center" ? "bg-[#e8f0fe] text-[#1a73e8]" : "text-[#5f6368] hover:bg-[#f1f3f4]"}`}
+          onClick={() => applyFormat({ align: "center" })}
+        >
+          <AlignCenter size={18} />
+        </button>
+        <button
+          className={`h-8 w-8 grid place-items-center rounded ${currentCellStyle.align === "right" ? "bg-[#e8f0fe] text-[#1a73e8]" : "text-[#5f6368] hover:bg-[#f1f3f4]"}`}
+          onClick={() => applyFormat({ align: "right" })}
+        >
+          <AlignRight size={18} />
+        </button>
+        <div className="mx-1 h-6 w-px bg-[#dadce0]" />
+
+        <div className="flex items-center gap-1 border border-[#dadce0] rounded bg-white">
+          <button className="h-8 w-8 grid place-items-center text-[#5f6368] hover:bg-[#f1f3f4] rounded-l">
+            <MoreHorizontal size={18} />
+          </button>
+        </div>
+
         <div className="ml-auto flex items-center gap-2">
-          {title && <span className="text-xs text-gray-500">{title}</span>}
+          <span className="text-xs text-[#5f6368]">100%</span>
+          <button className="h-8 w-8 grid place-items-center text-[#5f6368] hover:bg-[#f1f3f4] rounded">
+            <ZoomOut size={18} />
+          </button>
+        </div>
+      </div>
+
+      {/* Formula bar */}
+      <div className="flex h-10 items-center gap-2 border-b border-[#dadce0] bg-white px-3">
+        <div className="h-8 min-w-[80px] flex items-center justify-center border border-[#dadce0] bg-[#f8f9fa] rounded px-2 text-sm font-medium text-[#202124]">
+          {selectedCell ? `${colName(selectedCell.col)}${selectedCell.row + 1}` : ""}
+        </div>
+        <div className="flex-1 flex items-center border border-transparent hover:border-[#dadce0] bg-[#f8f9fa] rounded h-8 px-2">
+          <input
+            type="text"
+            value={formulaBarValue}
+            onChange={(e) => setFormulaBarValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && selectedCell) {
+                setWorkbook((prev) => {
+                  const newSheets = [...prev.sheets];
+                  const sheet = { ...newSheets[activeSheetIndex] };
+                  const newRows = [...sheet.rows];
+                  newRows[selectedCell.row] = [...newRows[selectedCell.row]];
+                  newRows[selectedCell.row][selectedCell.col] = { ...newRows[selectedCell.row][selectedCell.col], v: formulaBarValue };
+                  sheet.rows = newRows;
+                  newSheets[activeSheetIndex] = sheet;
+                  const newWorkbook = { ...prev, sheets: newSheets };
+                  emit(newWorkbook);
+                  return newWorkbook;
+                });
+              }
+            }}
+            className="flex-1 border-none bg-transparent text-sm text-[#202124] focus:outline-none"
+            placeholder="Insert function (fx)"
+          />
         </div>
       </div>
 
       {/* Grid */}
       <div className="flex-1 min-h-0">
-        <div className="ag-theme-alpine h-full">
+        <div className="ag-theme-quartz h-full">
           <AgGridReact
             ref={gridRef}
             rowData={rowData}
             columnDefs={columnDefs}
             gridOptions={gridOptions}
-            onCellValueChanged={onCellValueChanged}
+            rowSelection="multiple"
           />
         </div>
       </div>
 
-      {/* Sheet Tabs */}
-      <div className="flex items-center gap-1 border-t border-[#d0d7de] bg-gray-50 px-2 py-1">
+      {/* Sheet tabs */}
+      <div className="flex h-11 items-center gap-1 border-t border-[#dadce0] bg-[#f8f9fa] px-2">
         {workbook.sheets.map((sheet, i) => (
           <button
             key={i}
             onClick={() => setActiveSheetIndex(i)}
-            className={`flex items-center gap-1 rounded px-2 py-1 text-xs ${i === activeSheetIndex ? "bg-white border-t-2 border-blue-500 text-gray-800" : "text-gray-600 hover:bg-gray-200"}`}
+            className={`h-9 px-3 flex items-center justify-center text-sm font-medium rounded-t transition-colors ${
+              i === activeSheetIndex
+                ? "bg-white text-[#1a73e8] border-b-2 border-[#1a73e8] mt-1"
+                : "text-[#5f6368] hover:bg-[#e8f0fe]"
+            }`}
           >
             {sheet.name}
-            {workbook.sheets.length > 1 && i === activeSheetIndex && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeCurrentSheet();
-                }}
-                className="ml-1 text-gray-400 hover:text-gray-600"
-              >
-                ×
-              </button>
-            )}
           </button>
         ))}
         <button
           onClick={addSheet}
-          className="flex h-7 w-7 items-center justify-center rounded text-gray-600 hover:bg-gray-200"
+          className="h-9 w-9 grid place-items-center text-[#5f6368] hover:bg-[#e8f0fe] rounded"
         >
-          <Plus className="h-3.5 w-3.5" />
+          <Plus size={18} />
         </button>
       </div>
-    </div>
-  );
-}
-
-function ToolbarButton({
-  icon: Icon,
-  label,
-  onClick,
-}: {
-  icon: any;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      title={label}
-      onClick={onClick}
-      className="flex h-8 w-8 items-center justify-center rounded text-gray-600 hover:bg-gray-200"
-    >
-      <Icon className="h-4 w-4" />
-    </button>
-  );
-}
-
-function Divider() {
-  return <div className="mx-1 h-5 w-px bg-gray-300" />;
-}
-
-function ColorPicker({
-  icon: Icon,
-  label,
-  onPick,
-}: {
-  icon: any;
-  label: string;
-  onPick: (color: string) => void;
-}) {
-  const COLORS = [
-    "#1f1f1f", "#5f6368", "#ea4335", "#fbbc04", "#34a853", "#1a73e8", "#a142f4",
-    "#ffffff", "#fef7e0", "#e8f5e8", "#e8f0fe", "#fce8e6",
-  ];
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        title={label}
-        onClick={() => setOpen((v) => !v)}
-        className="flex h-8 w-8 items-center justify-center rounded text-gray-600 hover:bg-gray-200"
-      >
-        <Icon className="h-4 w-4" />
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 flex w-48 flex-wrap gap-1 rounded border border-gray-300 bg-white p-2 shadow-lg">
-          {COLORS.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => {
-                onPick(c);
-                setOpen(false);
-              }}
-              className="h-6 w-6 rounded border border-gray-300"
-              style={{ backgroundColor: c }}
-            />
-          ))}
-        </div>
-      )}
     </div>
   );
 }

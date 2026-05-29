@@ -465,8 +465,8 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
   if (!tab.refId) return <EmptyFileState inputRef={inputRef} onUpload={onUpload} draft={fileDrafts[tab.id]} />;
 
   return (
-    <div className="flex h-full flex-col bg-app text-app">
-      {surface !== "document" && (
+    <div className={`flex h-full flex-col ${surface === "sheet" ? "bg-white" : "bg-app text-app"}`}>
+      {surface !== "document" && surface !== "sheet" && (
         <FileWorkbenchHeader
           file={stored}
           title={displayName}
@@ -480,7 +480,7 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
       )}
 
       <div className="flex min-h-0 flex-1">
-        <main className="min-w-0 flex-1 overflow-auto bg-[#111827]">
+        <main className={`min-w-0 flex-1 overflow-auto ${surface === "sheet" ? "" : "bg-[#111827]"}`}>
           {loading ? (
             <div className="grid h-full place-items-center text-app-faint">
               <Loader2 className="h-5 w-5 animate-spin" />
@@ -509,10 +509,6 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
             <EmptyMessage text="Preview unavailable for this file type. Download it or ask the coworker to convert it." />
           )}
         </main>
-
-        {surface !== "document" && (
-          <Inspector file={stored} surface={surface} content={content} />
-        )}
       </div>
     </div>
   );

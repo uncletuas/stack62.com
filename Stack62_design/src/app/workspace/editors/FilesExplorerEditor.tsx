@@ -18,6 +18,10 @@ import {
   FolderPlus,
   FolderInput,
   HardDrive,
+  Image as ImageIcon,
+  Video,
+  Music,
+  File,
   Info,
   Loader2,
   MoreVertical,
@@ -127,7 +131,8 @@ export function FilesExplorerEditor() {
     fileId: string;
   } | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
-  const [showNewMenu, setShowNewMenu] = useState(false);
+  const [showOptionsMenu, setShowOptionsMenu] = useState(false);
+  const [showNewSubmenu, setShowNewSubmenu] = useState(false);
   const [creating, setCreating] = useState<WorkspaceDocKind | null>(null);
 
   // Create a new workspace document/sheet/slides via the
@@ -147,7 +152,7 @@ export function FilesExplorerEditor() {
       });
       return;
     }
-    setShowNewMenu(false);
+    setShowOptionsMenu(false);
     const title = await appDialog.prompt({
       title: `New ${kind === "document" ? "document" : kind === "sheet" ? "spreadsheet" : "presentation"}`,
       description: "Give it a name. You can rename later.",
@@ -617,13 +622,21 @@ export function FilesExplorerEditor() {
     return () => window.removeEventListener("click", onDoc);
   }, [contextMenu]);
 
-  // Close the "New" dropdown when clicking elsewhere.
+  // Close the options menu when clicking elsewhere.
   useEffect(() => {
-    if (!showNewMenu) return;
-    const onDoc = () => setShowNewMenu(false);
+    if (!showOptionsMenu) return;
+    const onDoc = () => setShowOptionsMenu(false);
     window.addEventListener("click", onDoc);
     return () => window.removeEventListener("click", onDoc);
-  }, [showNewMenu]);
+  }, [showOptionsMenu]);
+
+  // Close the new submenu when clicking elsewhere.
+  useEffect(() => {
+    if (!showNewSubmenu) return;
+    const onDoc = () => setShowNewSubmenu(false);
+    window.addEventListener("click", onDoc);
+    return () => window.removeEventListener("click", onDoc);
+  }, [showNewSubmenu]);
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -654,66 +667,125 @@ export function FilesExplorerEditor() {
           {/* "Create new" — workspace doc/sheet/slides */}
           <div className="relative">
             <button
-              onClick={() => setShowNewMenu((v) => !v)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowOptionsMenu((v) => !v);
+                setShowNewSubmenu(false);
+              }}
               disabled={creating !== null || !workspaceId}
               className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm text-accent-fg shadow-sm hover:opacity-90 disabled:opacity-60"
               title={
                 workspaceId
-                  ? "Create a new workspace document, sheet, or slide deck"
+                  ? "Create new items, upload files, or connect folders"
                   : "Select a workspace first"
               }
             >
               {creating ? (
                 <Loader2 className="size-4 animate-spin" />
               ) : (
-                <Plus className="size-4" />
+                <MoreVertical className="size-4" />
               )}
-              New
+              Options
               <ChevronDown className="size-3 opacity-70" />
             </button>
-            {showNewMenu && (
+            {showOptionsMenu && (
               <div
                 role="menu"
-                className="absolute left-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-md border border-app bg-app-elevated shadow-lg"
+                className="absolute right-0 top-full z-40 mt-1 w-56 overflow-hidden rounded-md border border-app bg-app-elevated shadow-lg"
                 onClick={(e) => e.stopPropagation()}
               >
-                <NewMenuItem
-                  icon={FileText}
-                  label="Document"
-                  description="Collaborative rich text"
-                  onClick={() => void onCreateWorkspaceDoc("document", "Untitled document")}
+                {/* New submenu trigger */}
+                <div className="relative group">
+                  <button
+                    role="menuitem"
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowNewSubmenu((v) => !v);
+                    }}
+                    onMouseEnter={() => setShowNewSubmenu(true)}
+                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition hover:bg-app-hover"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Plus className="size-4 shrink-0 text-app-muted" />
+                      <span className="text-sm font-medium text-app">New</span>
+                    </div>
+                    <ChevronRight className="size-3 text-app-muted" />
+                  </button>
+
+                  {/* New submenu with document types */}
+                  {showNewSubmenu && (
+                    <div
+                      role="menu"
+                      className="absolute left-full top-0 ml-1 w-56 overflow-hidden rounded-md border border-app bg-app-elevated shadow-lg"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <NewMenuItem
+                        icon={FileText}
+                        label="Document"
+                        description="Collaborative rich text"
+                        onClick={() => {
+                          setShowOptionsMenu(false);
+                          setShowNewSubmenu(false);
+                          void onCreateWorkspaceDoc("document", "Untitled document");
+                        }}
+                      />
+                      <NewMenuItem
+                        icon={SheetIcon}
+                        label="Spreadsheet"
+                        description="Cells, formulas, multi-sheet"
+                        onClick={() => {
+                          setShowOptionsMenu(false);
+                          setShowNewSubmenu(false);
+                          void onCreateWorkspaceDoc("sheet", "Untitled spreadsheet");
+                        }}
+                      />
+                      <NewMenuItem
+                        icon={Presentation}
+                        label="Presentation"
+                        description="Slides, shapes, present mode"
+                        onClick={() => {
+                          setShowOptionsMenu(false);
+                          setShowNewSubmenu(false);
+                          void onCreateWorkspaceDoc("slides", "Untitled presentation");
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <MenuDivider />
+
+                <MenuItem
+                  icon={FolderPlus}
+                  label="New folder"
+                  onClick={() => {
+                    setShowOptionsMenu(false);
+                    void onCreateFolder();
+                  }}
                 />
-                <NewMenuItem
-                  icon={SheetIcon}
-                  label="Spreadsheet"
-                  description="Cells, formulas, multi-sheet"
-                  onClick={() => void onCreateWorkspaceDoc("sheet", "Untitled spreadsheet")}
+
+                <MenuItem
+                  icon={Upload}
+                  label="Upload"
+                  onClick={() => {
+                    setShowOptionsMenu(false);
+                    // Trigger file input click programmatically
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.multiple = true;
+                    input.onchange = (e) => void onUpload((e.target as HTMLInputElement).files);
+                    input.click();
+                  }}
                 />
-                <NewMenuItem
-                  icon={Presentation}
-                  label="Presentation"
-                  description="Slides, shapes, present mode"
-                  onClick={() => void onCreateWorkspaceDoc("slides", "Untitled presentation")}
-                />
+
+                <div onClick={(e) => e.stopPropagation()}>
+                  <LocalFolderButton />
+                </div>
               </div>
             )}
           </div>
-          <button
-            onClick={() => void onCreateFolder()}
-            className="flex items-center gap-1.5 rounded-md border border-app px-3 py-1.5 text-sm hover:bg-app-hover"
-          >
-            <FolderPlus className="size-4" /> Folder
-          </button>
-          <label className="flex cursor-pointer items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm text-accent-fg hover:opacity-90">
-            <Upload className="size-4" /> {uploading ? "Uploading…" : "Upload"}
-            <input
-              type="file"
-              multiple
-              hidden
-              onChange={(e) => void onUpload(e.target.files)}
-            />
-          </label>
-          <LocalFolderButton />
+
         </div>
 
         {/* Selection toolbar — Drive-style float-down */}
@@ -2094,3 +2166,4 @@ export const __testExport = { humanBytes };
 // Suppress unused-imports lint for the Move icon — kept reserved for
 // future "drag-to-here" affordance in the toolbar.
 void Move;
+

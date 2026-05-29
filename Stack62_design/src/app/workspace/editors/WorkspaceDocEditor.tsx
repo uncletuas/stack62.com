@@ -46,23 +46,6 @@ import { WorkspaceSlidesSurface } from "./workspace-surfaces/WorkspaceSlidesSurf
 
 /**
  * The collaborative, AI-native document editor.
- *
- * Architecture in one paragraph: TipTap renders ProseMirror. A Y.Doc
- * holds the canonical state. `HocuspocusProvider` syncs the Y.Doc to
- * Stack62's backend over `wss://…/v1/realtime/workspace`. The
- * `@tiptap/extension-collaboration` extension binds the editor to
- * the Y.Doc, so typing in this editor becomes Yjs updates the
- * server broadcasts to every other connected client. AI actions
- * land via the REST `dispatch_action` endpoint, which mutates the
- * same Y.Doc on the server and broadcasts back to the editor —
- * the AI's edits *appear* in the user's editor as if a teammate
- * typed them, because at the Yjs layer that's exactly what happened.
- *
- * One non-obvious thing: we deliberately do NOT include
- * `StarterKit.history` because Yjs handles undo/redo through
- * `Collaboration` (which uses `Y.UndoManager`). Mixing the two
- * gives you "ghost undo" bugs where ⌘Z reverts edits the local
- * user didn't make. StarterKit's history is opted out below.
  */
 export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
   const { user, currentOrganization, currentWorkspace } = useAppContext();
@@ -70,11 +53,6 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
 
   const docId = tab.refId;
 
-  // Fetch the doc's kind so we can route to the right surface
-  // (document → TipTap, sheet → AG Grid, slides → Konva next turn).
-  // We start as null and switch when the fetch resolves; until then
-  // the editor shows a connecting state inside whatever surface we
-  // can guess from the tab title heuristic ("Sheet" / "Presentation").
   const [docKind, setDocKind] = useState<WorkspaceDocKind | null>(null);
   useEffect(() => {
     if (!docId) return;
@@ -84,8 +62,6 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
         if (alive) setDocKind(d.kind);
       })
       .catch(() => {
-        // Fall back to inferring from the tab title — set in
-        // openIntentToRoute when the chat chip is clicked.
         if (alive) {
           const t = (tab.title ?? "").toLowerCase();
           setDocKind(
@@ -102,9 +78,6 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
     };
   }, [docId, tab.title]);
 
-  // The Y.Doc lives for the lifetime of the tab. `useMemo` with a
-  // tab.id-keyed reset means switching docs gets a fresh Y.Doc; the
-  // old one is collected when its provider is destroyed below.
   const ydoc = useMemo(() => new Y.Doc(), [tab.id, docId]);
 
   const [providerStatus, setProviderStatus] = useState<
@@ -112,12 +85,10 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
   >("connecting");
   const [peerCount, setPeerCount] = useState(0);
   const [docTitle, setDocTitle] = useState<string>(tab.title ?? "Untitled");
-  // Activity panel toggle (closed by default — it's a side rail).
   const [showActivity, setShowActivity] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [newCommentBody, setNewCommentBody] = useState("");
 
-  // Function to dispatch add comment action
   const addComment = async () => {
     if (!newCommentBody.trim() || !currentOrganization?.id) return;
     try {
@@ -139,20 +110,12 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
       console.error("Error adding comment:", err);
     }
   };
-  // Page size — controls visual page-break boundaries in the doc
-  // canvas. Letter is the US default; A4 covers the rest of the world.
-  // The editor's content flows naturally; we draw horizontal break
-  // lines every page-height to give the visual feel of pages.
   const [pageSize, setPageSize] = useState<"letter" | "a4" | "legal">(
     "letter",
   );
-  // "Coworker just edited" badge state. Set when the activity panel
-  // reports the latest action was by a coworker within the last 15s.
   const [aiBadge, setAiBadge] = useState<{ occurredAt: string } | null>(null);
   useEffect(() => {
     if (!aiBadge) return;
-    // Auto-clear after 15 seconds — long enough to notice, short
-    // enough to not dominate the header.
     const ms = 15000 - (Date.now() - new Date(aiBadge.occurredAt).getTime());
     if (ms <= 0) {
       setAiBadge(null);
@@ -163,7 +126,6 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
   }, [aiBadge]);
   const providerRef = useRef<HocuspocusProvider | null>(null);
 
-  // ── Hocuspocus provider lifecycle ────────────────────────────────
   useEffect(() => {
     if (!docId) return;
     const token = getStoredToken();
@@ -190,15 +152,11 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
         else setProviderStatus("connecting");
       },
       onAwarenessUpdate: ({ states }) => {
-        // States is an array of every connected client. Subtract 1
-        // for self so "Others online" reads naturally.
         setPeerCount(Math.max(0, states.length - 1));
       },
     });
     providerRef.current = provider;
 
-    // Identify this user to other clients (drives the colored
-    // selection cursor in CollaborationCursor).
     if (user) {
       provider.setAwarenessField("user", {
         name: `${user.firstName} ${user.lastName}`.trim() || user.email,
@@ -212,11 +170,9 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
     };
   }, [docId, ydoc, user, appendRunLog]);
 
-  // ── TipTap editor ────────────────────────────────────────────────
   const editor = useEditor(
     {
       extensions: [
-        // history is owned by Yjs (Collaboration extension below).
         StarterKit.configure({ history: false }),
         Collaboration.configure({ document: ydoc, field: "content" }),
         ...(providerRef.current
@@ -224,9 +180,8 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
               CollaborationCursor.configure({
                 provider: providerRef.current,
                 user: {
-                  name:
-                    user?.firstName ?
-                      `${user.firstName} ${user.lastName}`.trim()
+                  name: user?.firstName
+                    ? `${user.firstName} ${user.lastName}`.trim()
                     : (user?.email ?? "User"),
                   color: user ? hashColor(user.id) : "#6b7280",
                 },
@@ -252,12 +207,10 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
           class: "workspace-doc-prose prose max-w-none focus:outline-none",
         },
       },
-      // The Yjs binding will hydrate content from the synced doc.
     },
     [ydoc, providerRef.current],
   );
 
-  // Pull title from the Y.Doc's meta map and react to remote changes.
   useEffect(() => {
     const meta = ydoc.getMap("meta");
     const refresh = () => {
@@ -272,7 +225,6 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
     return () => meta.unobserve(refresh);
   }, [ydoc, tab.id, updateTab, docTitle]);
 
-  // Comments state
   const [comments, setComments] = useState<Array<{ id: string; anchorBlockId?: string; body: string; createdAt: string }>>([]);
   useEffect(() => {
     const commentsMap = ydoc.getMap("comments");
@@ -295,10 +247,6 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
     );
   }
 
-  // ── Kind-router ───────────────────────────────────────────────
-  // The header + provider lifecycle are shared. The body switches
-  // between TipTap (document), AG Grid (sheet), and a placeholder
-  // for slides until turn 5 ships the Konva surface.
   const body = (() => {
     if (!docKind) {
       return (
@@ -329,24 +277,13 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
         />
       );
     }
-    // Default: document → TipTap with real page breaks
     return (
       <div className="min-h-0 flex-1 overflow-auto bg-[#f1f3f4] py-6">
         <div className="mx-auto" style={{ width: pageSize === "a4" ? "8.27in" : "8.5in" }}>
-          <div className="relative">
-            <EditorContent
-              editor={editor}
-              className="workspace-doc-prose relative z-10"
-              style={{
-                padding: "1in 1in",
-                lineHeight: 1.65,
-              }}
-            />
-            <PageBackgrounds
-              editor={editor}
-              pageSize={pageSize}
-            />
-          </div>
+          <PageContainer
+            editor={editor}
+            pageSize={pageSize}
+          />
         </div>
       </div>
     );
@@ -382,7 +319,6 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
                 onClose={() => setShowActivity(false)}
                 onLatestActor={(info) => {
                   if (!info) return;
-                  // Show the AI badge only for fresh coworker actions.
                   if (info.actorKind !== "coworker") return;
                   const ageMs = Date.now() - new Date(info.occurredAt).getTime();
                   if (ageMs < 15000) {
@@ -453,7 +389,6 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
             onClose={() => setShowActivity(false)}
             onLatestActor={(info) => {
               if (!info) return;
-              // Show the AI badge only for fresh coworker actions.
               if (info.actorKind !== "coworker") return;
               const ageMs = Date.now() - new Date(info.occurredAt).getTime();
               if (ageMs < 15000) {
@@ -464,7 +399,7 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
         )}
       </div>
       <style>{`
-        .workspace-doc-prose { font-size: 14px; line-height: 1.65; color: #1f1f1f; min-height: 60vh; }
+        .workspace-doc-prose { font-size: 14px; line-height: 1.65; color: #1f1f1f; }
         .workspace-doc-prose h1 { font-size: 1.75em; font-weight: 700; margin: 0.6em 0 0.3em; }
         .workspace-doc-prose h2 { font-size: 1.4em; font-weight: 700; margin: 0.6em 0 0.3em; }
         .workspace-doc-prose h3 { font-size: 1.2em; font-weight: 600; margin: 0.6em 0 0.3em; }
@@ -508,7 +443,6 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
           pointer-events: none;
           height: 0;
         }
-        /* Collaboration cursor */
         .collaboration-cursor__caret {
           border-left: 1px solid;
           border-right: 1px solid;
@@ -533,8 +467,6 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
     </div>
   );
 }
-
-// ── Header strip ─────────────────────────────────────────────────
 
 function Header({
   title,
@@ -603,8 +535,6 @@ function Header({
   );
 }
 
-// ── Toolbar ──────────────────────────────────────────────────────
-
 function Toolbar({
   editor,
   pageSize,
@@ -618,7 +548,6 @@ function Toolbar({
   showComments: boolean;
   onToggleComments: () => void;
 }) {
-  // The toolbar mounts inside the same chrome strip as the header.
   return (
     <div
       className="flex flex-wrap items-center gap-0.5 border-b border-app bg-app-surface px-2 py-1 text-[12px]"
@@ -818,13 +747,6 @@ function EmptyMessage({
   );
 }
 
-// ── Helpers ──────────────────────────────────────────────────────
-
-/**
- * Stable color per user — drives the collaboration cursor's
- * coloured selection range so each teammate has a consistent hue
- * across sessions.
- */
 function hashColor(seed: string): string {
   let hash = 0;
   for (let i = 0; i < seed.length; i++) {
@@ -843,9 +765,9 @@ function hashColor(seed: string): string {
   return palette[hash % palette.length];
 }
 
-function PageBackgrounds({
+function PageContainer({
   editor,
-  pageSize
+  pageSize,
 }: {
   editor: ReturnType<typeof useEditor>;
   pageSize: "letter" | "a4" | "legal";
@@ -859,7 +781,7 @@ function PageBackgrounds({
       const contentHeight = editor.view.dom.scrollHeight;
       const pageHeightInches = pageSize === "a4" ? 11.69 : pageSize === "legal" ? 14 : 11;
       const contentHeightInches = contentHeight / 96;
-      const usablePageHeightInches = pageHeightInches - 2; // minus top and bottom margins
+      const usablePageHeightInches = pageHeightInches - 2;
       const numPages = Math.max(1, Math.ceil(contentHeightInches / usablePageHeightInches));
       setPageCount(numPages);
     };
@@ -883,23 +805,44 @@ function PageBackgrounds({
     return "11in";
   }, [pageSize]);
 
-  const pageHeightNum = useMemo(() => {
-    if (pageSize === "a4") return 11.69;
-    if (pageSize === "legal") return 14;
-    return 11;
+  const pageHeightPx = useMemo(() => {
+    if (pageSize === "a4") return 11.69 * 96;
+    if (pageSize === "legal") return 14 * 96;
+    return 11 * 96;
   }, [pageSize]);
 
+  const gapPx = 24; // gap between pages
+
   return (
-    <div className="absolute inset-0 z-0 pointer-events-none">
+    <div className="flex flex-col gap-6">
       {Array.from({ length: pageCount }).map((_, index) => (
         <div
           key={index}
-          className="absolute left-0 w-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.12)]"
+          className="relative bg-white shadow-[0_2px_8px_rgba(0,0,0,0.12)]"
           style={{
-            top: `calc(${index * pageHeightNum}in + ${index * 24}px)`,
             height: pageHeight,
+            overflow: "hidden",
           }}
-        />
+        >
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              transform: `translateY(-${index * (pageHeightPx + gapPx)}px)`,
+            }}
+          >
+            <EditorContent
+              editor={editor}
+              className="workspace-doc-prose relative z-10"
+              style={{
+                padding: "1in 1in",
+                lineHeight: 1.65,
+              }}
+            />
+          </div>
+        </div>
       ))}
     </div>
   );
