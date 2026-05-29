@@ -27,7 +27,6 @@ import {
 import { dispatchWorkspaceAction } from "../../../lib/resources";
 import { useAppContext } from "../../../context/app-context";
 import { Undo2, Redo2, Bold, Italic, Underline, Plus, Minus } from "lucide-react";
-import { HyperFormula } from "hyperformula";
 
 // AG Grid Community v33+ requires explicit module registration. We
 // register every community module once at file load — keeps the bundle
