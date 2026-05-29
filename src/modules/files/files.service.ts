@@ -487,6 +487,95 @@ export class FilesService {
     return this.filesRepository.save(clone);
   }
 
+  /** Generate signed download URL (if storage supports it) */
+  async getSignedDownloadUrl(
+    fileId: string,
+    actorUserId: string,
+    expiresInSeconds: number = 3600,
+  ): Promise<string | null> {
+    const file = await this.findOne(fileId, actorUserId);
+    if (typeof this.storage.generateSignedDownloadUrl === 'function') {
+      return this.storage.generateSignedDownloadUrl(
+        file.storagePath,
+        expiresInSeconds,
+      );
+    }
+    return null;
+  }
+
+  /** Generate signed upload URL for a new file */
+  async getSignedUploadUrl(
+    dto: UploadFileDto,
+    mimeType: string,
+    filename: string,
+    actorUserId: string,
+  ): Promise<{ key: string; signedUrl: string | null }> {
+    await this.accessControlService.assertResolvedAccess(actorUserId, {
+      resource: 'system',
+      action: 'create',
+      organizationId: dto.organizationId,
+      workspaceId: dto.workspaceId,
+      systemId: dto.systemId,
+    });
+
+    const id = crypto.randomUUID();
+    const ext = path.extname(filename) || '';
+    const safeName = `${id}${ext}`;
+    const key = `${dto.organizationId}/${dto.scope || 'attachment'}/${safeName}`;
+
+    let signedUrl: string | null = null;
+    if (typeof this.storage.generateSignedUploadUrl === 'function') {
+      signedUrl = await this.storage.generateSignedUploadUrl(
+        key,
+        mimeType,
+        3600,
+      );
+    }
+
+    return { key, signedUrl };
+  }
+
+  /** Register file after direct upload to signed URL */
+  async registerDirectUpload(
+    dto: UploadFileDto,
+    key: string,
+    filename: string,
+    mimeType: string,
+    size: number,
+    checksum: string,
+    actorUserId: string,
+  ) {
+    await this.accessControlService.assertResolvedAccess(actorUserId, {
+      resource: 'system',
+      action: 'create',
+      organizationId: dto.organizationId,
+      workspaceId: dto.workspaceId,
+      systemId: dto.systemId,
+    });
+
+    const entity = this.filesRepository.create({
+      id: path.basename(key, path.extname(key)),
+      organizationId: dto.organizationId,
+      workspaceId: dto.workspaceId ?? null,
+      systemId: dto.systemId ?? null,
+      scope: dto.scope || 'attachment',
+      filename,
+      mimeType,
+      size: String(size),
+      storagePath: key,
+      checksum,
+      ownerKind: dto.ownerKind ?? null,
+      ownerId: dto.ownerId ?? null,
+      metadata: null,
+      uploadedByUserId: actorUserId,
+      status: 'active',
+      folderId: (dto as { folderId?: string }).folderId ?? null,
+    });
+
+    const saved = await this.filesRepository.save(entity);
+    return saved;
+  }
+
   private ensureDir(dir: string) {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });

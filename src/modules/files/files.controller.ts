@@ -165,4 +165,46 @@ export class FilesController {
       user.userId,
     );
   }
+
+  @Post('signed-upload-url')
+  getSignedUploadUrl(
+    @Body() body: UploadFileDto & { mimeType: string; filename: string },
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.filesService.getSignedUploadUrl(
+      body,
+      body.mimeType,
+      body.filename,
+      user.userId,
+    );
+  }
+
+  @Post('register-direct-upload')
+  registerDirectUpload(
+    @Body() body: UploadFileDto & { key: string; filename: string; mimeType: string; size: number; checksum: string },
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.filesService.registerDirectUpload(
+      body,
+      body.key,
+      body.filename,
+      body.mimeType,
+      body.size,
+      body.checksum,
+      user.userId,
+    );
+  }
+
+  @Get(':fileId/signed-download-url')
+  getSignedDownloadUrl(
+    @Param('fileId') fileId: string,
+    @Query('expiresInSeconds') expiresInSeconds: string,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.filesService.getSignedDownloadUrl(
+      fileId,
+      user.userId,
+      expiresInSeconds ? Number(expiresInSeconds) : undefined,
+    );
+  }
 }

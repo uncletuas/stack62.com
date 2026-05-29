@@ -22,6 +22,7 @@ import {
   ListOrdered,
   ListTodo,
   Loader2,
+  MessageSquarePlus,
   Quote,
   Redo2,
   Sparkles,
@@ -113,6 +114,31 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
   const [docTitle, setDocTitle] = useState<string>(tab.title ?? "Untitled");
   // Activity panel toggle (closed by default — it's a side rail).
   const [showActivity, setShowActivity] = useState(false);
+  const [showComments, setShowComments] = useState(false);
+  const [newCommentBody, setNewCommentBody] = useState("");
+
+  // Function to dispatch add comment action
+  const addComment = async () => {
+    if (!newCommentBody.trim() || !currentOrganization?.id) return;
+    try {
+      const formData = new FormData();
+      formData.append("organizationId", currentOrganization.id);
+      formData.append("workspaceId", currentWorkspace?.id ?? "");
+      formData.append("action", JSON.stringify({
+        verb: "doc.add_comment",
+        body: newCommentBody.trim(),
+      }));
+      const response = await fetch(`/workspace/docs/${docId}/actions`, {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+      if (!response.ok) throw new Error("Failed to add comment");
+      setNewCommentBody("");
+    } catch (err) {
+      console.error("Error adding comment:", err);
+    }
+  };
   // Page size — controls visual page-break boundaries in the doc
   // canvas. Letter is the US default; A4 covers the rest of the world.
   // The editor's content flows naturally; we draw horizontal break
@@ -246,6 +272,20 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
     return () => meta.unobserve(refresh);
   }, [ydoc, tab.id, updateTab, docTitle]);
 
+  // Comments state
+  const [comments, setComments] = useState<Array<{ id: string; anchorBlockId?: string; body: string; createdAt: string }>>([]);
+  useEffect(() => {
+    const commentsMap = ydoc.getMap("comments");
+    const refreshComments = () => {
+      const arr = Array.from(commentsMap.values()) as Array<{ id: string; anchorBlockId?: string; body: string; createdAt: string }>;
+      arr.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      setComments(arr);
+    };
+    refreshComments();
+    commentsMap.observe(refreshComments);
+    return () => commentsMap.unobserve(refreshComments);
+  }, [ydoc]);
+
   if (!docId) {
     return (
       <EmptyMessage
@@ -289,41 +329,24 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
         />
       );
     }
-    // Default: document → TipTap with visual page breaks
+    // Default: document → TipTap with real page breaks
     return (
       <div className="min-h-0 flex-1 overflow-auto bg-[#f1f3f4] py-6">
-        <div
-          className="mx-auto bg-white shadow-[0_2px_8px_rgba(0,0,0,0.12)]"
-          data-page-size={pageSize}
-          style={{
-            // Page width in CSS inches — browsers map this to the
-            // user's effective DPI. Looks like a piece of paper at
-            // any zoom.
-            width: pageSize === "a4" ? "8.27in" : "8.5in",
-            // Minimum height of one page; content can flow past
-            // this and the visual page-break gradient marks the
-            // boundary between pages.
-            minHeight:
-              pageSize === "a4"
-                ? "11.69in"
-                : pageSize === "legal"
-                  ? "14in"
-                  : "11in",
-            padding: "1in 1in",
-            // Repeating linear-gradient draws a 24px-tall light-gray
-            // strip every page-height to simulate the gap between
-            // physical pages. Doesn't break the editor's contiguous
-            // contenteditable — content still flows freely.
-            backgroundImage:
-              pageSize === "a4"
-                ? "repeating-linear-gradient(to bottom, transparent 0, transparent calc(11.69in - 2px), #d0d4d8 calc(11.69in - 2px), #d0d4d8 calc(11.69in + 2px), #f1f3f4 calc(11.69in + 2px), #f1f3f4 calc(11.69in + 22px), transparent calc(11.69in + 22px))"
-                : pageSize === "legal"
-                  ? "repeating-linear-gradient(to bottom, transparent 0, transparent calc(14in - 2px), #d0d4d8 calc(14in - 2px), #d0d4d8 calc(14in + 2px), #f1f3f4 calc(14in + 2px), #f1f3f4 calc(14in + 22px), transparent calc(14in + 22px))"
-                  : "repeating-linear-gradient(to bottom, transparent 0, transparent calc(11in - 2px), #d0d4d8 calc(11in - 2px), #d0d4d8 calc(11in + 2px), #f1f3f4 calc(11in + 2px), #f1f3f4 calc(11in + 22px), transparent calc(11in + 22px))",
-            backgroundRepeat: "repeat-y",
-          }}
-        >
-          <EditorContent editor={editor} />
+        <div className="mx-auto" style={{ width: pageSize === "a4" ? "8.27in" : "8.5in" }}>
+          <div className="relative">
+            <EditorContent
+              editor={editor}
+              className="workspace-doc-prose relative z-10"
+              style={{
+                padding: "1in 1in",
+                lineHeight: 1.65,
+              }}
+            />
+            <PageBackgrounds
+              editor={editor}
+              pageSize={pageSize}
+            />
+          </div>
         </div>
       </div>
     );
@@ -340,24 +363,105 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
         onToggleActivity={() => setShowActivity((v) => !v)}
       />
       {docKind === "document" && editor && (
-        <Toolbar editor={editor} pageSize={pageSize} setPageSize={setPageSize} />
+        <Toolbar 
+          editor={editor} 
+          pageSize={pageSize} 
+          setPageSize={setPageSize} 
+          showComments={showComments}
+          onToggleComments={() => setShowComments(v => !v)}
+        />
       )}
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">{body}</div>
-        <WorkspaceActivityPanel
-          docId={docId}
-          open={showActivity}
-          onClose={() => setShowActivity(false)}
-          onLatestActor={(info) => {
-            if (!info) return;
-            // Show the AI badge only for fresh coworker actions.
-            if (info.actorKind !== "coworker") return;
-            const ageMs = Date.now() - new Date(info.occurredAt).getTime();
-            if (ageMs < 15000) {
-              setAiBadge({ occurredAt: info.occurredAt });
-            }
-          }}
-        />
+        {(showActivity || showComments) && (
+          <div className="flex flex-col w-80 border-l border-app bg-app-elevated">
+            {showActivity && (
+              <WorkspaceActivityPanel
+                docId={docId}
+                open={showActivity}
+                onClose={() => setShowActivity(false)}
+                onLatestActor={(info) => {
+                  if (!info) return;
+                  // Show the AI badge only for fresh coworker actions.
+                  if (info.actorKind !== "coworker") return;
+                  const ageMs = Date.now() - new Date(info.occurredAt).getTime();
+                  if (ageMs < 15000) {
+                    setAiBadge({ occurredAt: info.occurredAt });
+                  }
+                }}
+              />
+            )}
+            {showComments && (
+              <div className="flex flex-col h-full">
+                <header className="flex items-center justify-between border-b border-app px-4 py-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-app-subtle">
+                    Comments
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowComments(false)}
+                    className="rounded p-1 text-app-muted hover:bg-app-hover"
+                  >
+                    ×
+                  </button>
+                </header>
+                <div className="flex-1 overflow-auto p-4 space-y-3">
+                  {comments.length === 0 ? (
+                    <p className="text-sm text-app-faint">No comments yet.</p>
+                  ) : (
+                    comments.map(comment => (
+                      <div key={comment.id} className="rounded border border-app p-3 bg-app">
+                        <p className="text-xs text-app-subtle mb-1">
+                          {new Date(comment.createdAt).toLocaleString()}
+                        </p>
+                        <p className="text-sm">{comment.body}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className="border-t border-app p-3">
+                  <textarea
+                    value={newCommentBody}
+                    onChange={e => setNewCommentBody(e.target.value)}
+                    placeholder="Add a comment..."
+                    className="w-full rounded border border-app bg-app px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent"
+                    rows={3}
+                    onKeyDown={e => {
+                      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                        e.preventDefault();
+                        void addComment();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void addComment()}
+                    disabled={!newCommentBody.trim()}
+                    className="mt-2 w-full rounded bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground hover:opacity-90 disabled:opacity-50"
+                  >
+                    Add Comment
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {!showActivity && !showComments && (
+          <WorkspaceActivityPanel
+            docId={docId}
+            open={false}
+            onClose={() => setShowActivity(false)}
+            onLatestActor={(info) => {
+              if (!info) return;
+              // Show the AI badge only for fresh coworker actions.
+              if (info.actorKind !== "coworker") return;
+              const ageMs = Date.now() - new Date(info.occurredAt).getTime();
+              if (ageMs < 15000) {
+                setAiBadge({ occurredAt: info.occurredAt });
+              }
+            }}
+          />
+        )}
       </div>
       <style>{`
         .workspace-doc-prose { font-size: 14px; line-height: 1.65; color: #1f1f1f; min-height: 60vh; }
@@ -505,10 +609,14 @@ function Toolbar({
   editor,
   pageSize,
   setPageSize,
+  showComments,
+  onToggleComments,
 }: {
   editor: NonNullable<ReturnType<typeof useEditor>>;
   pageSize: "letter" | "a4" | "legal";
   setPageSize: (size: "letter" | "a4" | "legal") => void;
+  showComments: boolean;
+  onToggleComments: () => void;
 }) {
   // The toolbar mounts inside the same chrome strip as the header.
   return (
@@ -526,6 +634,12 @@ function Toolbar({
       <Btn icon={Undo2} label="Undo" onClick={() => editor.chain().focus().undo().run()} />
       <Btn icon={Redo2} label="Redo" onClick={() => editor.chain().focus().redo().run()} />
       <Sep />
+      <Btn 
+        icon={MessageSquarePlus} 
+        label="Comments" 
+        onClick={onToggleComments} 
+        active={showComments} 
+      />
 
       <select
         value={
@@ -727,4 +841,66 @@ function hashColor(seed: string): string {
     "#7e57c2",
   ];
   return palette[hash % palette.length];
+}
+
+function PageBackgrounds({
+  editor,
+  pageSize
+}: {
+  editor: ReturnType<typeof useEditor>;
+  pageSize: "letter" | "a4" | "legal";
+}) {
+  const [pageCount, setPageCount] = useState(1);
+
+  useEffect(() => {
+    if (!editor) return;
+
+    const updatePageCount = () => {
+      const contentHeight = editor.view.dom.scrollHeight;
+      const pageHeightInches = pageSize === "a4" ? 11.69 : pageSize === "legal" ? 14 : 11;
+      const contentHeightInches = contentHeight / 96;
+      const usablePageHeightInches = pageHeightInches - 2; // minus top and bottom margins
+      const numPages = Math.max(1, Math.ceil(contentHeightInches / usablePageHeightInches));
+      setPageCount(numPages);
+    };
+
+    updatePageCount();
+
+    const observer = new MutationObserver(updatePageCount);
+    if (editor.view.dom) observer.observe(editor.view.dom, { childList: true, subtree: true, characterData: true });
+    
+    editor.on('update', updatePageCount);
+    
+    return () => {
+      observer.disconnect();
+      editor.off('update', updatePageCount);
+    };
+  }, [editor, pageSize]);
+
+  const pageHeight = useMemo(() => {
+    if (pageSize === "a4") return "11.69in";
+    if (pageSize === "legal") return "14in";
+    return "11in";
+  }, [pageSize]);
+
+  const pageHeightNum = useMemo(() => {
+    if (pageSize === "a4") return 11.69;
+    if (pageSize === "legal") return 14;
+    return 11;
+  }, [pageSize]);
+
+  return (
+    <div className="absolute inset-0 z-0 pointer-events-none">
+      {Array.from({ length: pageCount }).map((_, index) => (
+        <div
+          key={index}
+          className="absolute left-0 w-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.12)]"
+          style={{
+            top: `calc(${index * pageHeightNum}in + ${index * 24}px)`,
+            height: pageHeight,
+          }}
+        />
+      ))}
+    </div>
+  );
 }

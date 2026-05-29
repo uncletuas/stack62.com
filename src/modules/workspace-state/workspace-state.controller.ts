@@ -151,9 +151,13 @@ export class WorkspaceStateController {
       });
     }
     if (filename.endsWith('.pptx')) {
-      throw new BadRequestException(
-        '.pptx import is not yet supported — the OSS parser story for pptx is fragile. Coming in a follow-up. For now, ask the Coworker to recreate the deck with office.workspace_create + slides.* actions.',
-      );
+      return this.importer.importPptx({
+        buffer: file.buffer,
+        organizationId: body.organizationId,
+        workspaceId: body.workspaceId,
+        actorUserId: user.userId,
+        title,
+      });
     }
     throw new BadRequestException(
       'Supported import formats: .docx, .xlsx. Got: ' + file.originalname,

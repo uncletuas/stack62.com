@@ -102,6 +102,19 @@ export class S3Backend implements StorageBackend {
     const command = new GetObjectCommand({ Bucket: this.bucket, Key: key });
     return getSignedUrl(this.client, command, { expiresIn: expiresInSeconds });
   }
+
+  async generateSignedUploadUrl(
+    key: string,
+    contentType: string,
+    expiresInSeconds: number,
+  ): Promise<string | null> {
+    const command = new PutObjectCommand({ 
+      Bucket: this.bucket, 
+      Key: key,
+      ContentType: contentType 
+    });
+    return getSignedUrl(this.client, command, { expiresIn: expiresInSeconds });
+  }
 }
 
 async function streamToBuffer(stream: Readable): Promise<Buffer> {

@@ -195,6 +195,17 @@ const SheetAddChartSchema = z.object({
   title: z.string().optional(),
 });
 
+const SheetUpdateChartSchema = z.object({
+  verb: z.literal('sheet.update_chart'),
+  chartId: uuidSchema,
+  patch: z.record(z.string(), z.unknown()),
+});
+
+const SheetDeleteChartSchema = z.object({
+  verb: z.literal('sheet.delete_chart'),
+  chartId: uuidSchema,
+});
+
 const SheetSortSchema = z.object({
   verb: z.literal('sheet.sort'),
   sheetId: uuidSchema,
@@ -255,6 +266,12 @@ const SlidesDeleteElementSchema = z.object({
   elementId: uuidSchema,
 });
 
+const SlidesUpdateSlideSchema = z.object({
+  verb: z.literal('slides.update_slide'),
+  slideId: z.string().uuid(),
+  patch: z.record(z.string(), z.unknown()),
+});
+
 const SlidesApplyThemeSchema = z.object({
   verb: z.literal('slides.apply_theme'),
   themeId: z.string().min(1).max(64),
@@ -277,6 +294,8 @@ export const WorkspaceActionPayloadSchema = z.discriminatedUnion('verb', [
   SheetSetCellSchema,
   SheetSetRangeSchema,
   SheetAddChartSchema,
+  SheetUpdateChartSchema,
+  SheetDeleteChartSchema,
   SheetSortSchema,
   SheetFilterSchema,
   SlidesAddSlideSchema,
@@ -285,6 +304,7 @@ export const WorkspaceActionPayloadSchema = z.discriminatedUnion('verb', [
   SlidesUpdateElementSchema,
   SlidesMoveElementSchema,
   SlidesDeleteElementSchema,
+  SlidesUpdateSlideSchema,
   SlidesApplyThemeSchema,
 ]);
 
@@ -339,6 +359,8 @@ export const WORKSPACE_ACTION_VERBS = [
   'sheet.set_cell',
   'sheet.set_range',
   'sheet.add_chart',
+  'sheet.update_chart',
+  'sheet.delete_chart',
   'sheet.sort',
   'sheet.filter',
   'slides.add_slide',
@@ -347,9 +369,51 @@ export const WORKSPACE_ACTION_VERBS = [
   'slides.update_element',
   'slides.move_element',
   'slides.delete_element',
+  'slides.update_slide',
   'slides.apply_theme',
 ] as const;
 
 export type WorkspaceActionVerb = (typeof WORKSPACE_ACTION_VERBS)[number];
 
 export type WorkspaceDocKind = 'document' | 'sheet' | 'slides';
+
+/** Calculate inverse action to undo a given action */
+export function getInverseAction(action: WorkspaceActionPayload, previousState?: unknown): WorkspaceActionPayload | null {
+  switch (action.verb) {
+    case 'sheet.set_cell':
+      // Need previous cell value to invert
+      return {
+        verb: 'sheet.set_cell',
+        sheetId: action.sheetId,
+        row: action.row,
+        col: action.col,
+        value: null,
+        formula: undefined,
+        format: undefined,
+      };
+
+    case 'sheet.add_sheet':
+      return {
+        verb: 'sheet.delete_sheet',
+        sheetId: '', // Will be filled in when action is applied
+      };
+
+    case 'slides.add_element':
+      return {
+        verb: 'slides.delete_element',
+        slideId: action.slideId,
+        elementId: '', // Will be filled in when action is applied
+      };
+
+    case 'slides.delete_element':
+      // Need previous element to restore
+      return null;
+
+    case 'slides.update_element':
+      // Need previous state to invert
+      return null;
+
+    default:
+      return null;
+  }
+}

@@ -1,5 +1,4 @@
 import {
-  KeyboardEvent as ReactKeyboardEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -30,35 +29,12 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { appDialog } from "../../components/app-dialog";
-
-/**
- * Stack62 Docs — Google-Docs-style rich-text editor.
- *
- * Rewritten 2026-05 with the goal of being predictable rather than
- * comprehensive. Three rules drive the design:
- *
- *   1. **One source of truth.** The DOM inside the contentEditable
- *      element is the document. We render initial HTML once on mount
- *      and on external content changes; user typing never round-trips
- *      through React state. Reducing React's involvement in the hot
- *      path is what makes selection-based formatting actually work.
- *
- *   2. **Toolbar mousedown preventDefault.** This is the single trick
- *      that makes Docs/Word/Notion-style toolbars work. Clicking a
- *      formatting button would normally pull focus away from the
- *      editor, collapsing the selection. We catch mousedown at the
- *      toolbar root and call preventDefault, so the selection
- *      survives and execCommand has a real Range to apply to.
- *
- *   3. **execCommand + styleWithCSS.** Yes the API is "deprecated".
- *      No there is no production replacement that handles every edge
- *      case across Chrome/Safari/Firefox. styleWithCSS=true makes the
- *      browser emit `<span style="...">` instead of legacy `<b>`
- *      tags, which compose better when overlapping styles are applied.
- *
- * The Coworker drives this editor by dispatching `stack62:doc-command`
- * window events. See handleCommand() below for the verb list.
- */
+import { useEditor, EditorContent } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import Link from "@tiptap/extension-link";
+import TaskList from "@tiptap/extension-task-list";
+import TaskItem from "@tiptap/extension-task-item";
+import Placeholder from "@tiptap/extension-placeholder";
 
 const FONT_FAMILIES = [
   { value: "'Inter', 'Arial', sans-serif", label: "Inter" },
@@ -74,13 +50,13 @@ const FONT_SIZES = [
 ];
 
 const BLOCK_STYLES = [
-  { value: "p", label: "Normal text" },
-  { value: "h1", label: "Heading 1" },
-  { value: "h2", label: "Heading 2" },
-  { value: "h3", label: "Heading 3" },
-  { value: "h4", label: "Heading 4" },
+  { value: "paragraph", label: "Normal text" },
+  { value: "heading 1", label: "Heading 1" },
+  { value: "heading 2", label: "Heading 2" },
+  { value: "heading 3", label: "Heading 3" },
+  { value: "heading 4", label: "Heading 4" },
   { value: "blockquote", label: "Quote" },
-  { value: "pre", label: "Code block" },
+  { value: "codeBlock", label: "Code block" },
 ];
 
 const PAGE_SIZES: Record<
@@ -112,10 +88,7 @@ const DEFAULT_LAYOUT: DocsLayout = {
 };
 
 interface DocCommandEvent {
-  /** Optional document id to target. When omitted the active editor
-   *  responds; this is useful when only one DocsEditor is mounted. */
   documentId?: string | null;
-  /** Verb. See handleCommand for the supported set. */
   verb:
     | "get-content"
     | "get-text"
@@ -124,10 +97,13 @@ interface DocCommandEvent {
     | "insert"
     | "exec"
     | "find-replace";
-  /** Verb-specific payload. */
   payload?: Record<string, unknown>;
-  /** Reply channel — the editor posts back here. */
   replyId?: string;
+}
+
+function looksLikeHtml(s: string): boolean {
+  if (!s) return false;
+  return /<\/?(p|div|span|h[1-6]|ul|ol|li|table|tr|td|a|br|hr|strong|em|b|i)\b/i.test(s);
 }
 
 export function DocsEditor({
@@ -145,154 +121,177 @@ export function DocsEditor({
   title?: string;
   readOnly?: boolean;
 }) {
-  const editorRef = useRef<HTMLDivElement | null>(null);
   const lastEmittedRef = useRef<string>("");
-  const savedRangeRef = useRef<Range | null>(null);
-
   const [layout, setLayout] = useState<DocsLayout>(DEFAULT_LAYOUT);
-  const [stats, setStats] = useState({ words: 0, chars: 0 });
-  const [active, setActive] = useState<Record<string, boolean>>({});
-  const [currentBlock, setCurrentBlock] = useState<string>("p");
 
-  // ── Initial styleWithCSS setup ─────────────────────────────────
-  useEffect(() => {
-    try {
-      document.execCommand("styleWithCSS", false, "true");
-      document.execCommand("defaultParagraphSeparator", false, "p");
-    } catch {
-      // Safari refuses some of these; the editor still works.
-    }
-  }, []);
-
-  // ── Hydrate when external `text` changes ───────────────────────
-  // We compare against the last value we emitted so the user's
-  // typing doesn't get clobbered when the parent passes the same
-  // string back after autosave.
-  useEffect(() => {
-    const el = editorRef.current;
-    if (!el) return;
-    if (text === lastEmittedRef.current) return;
-    el.innerHTML = looksLikeHtml(text) ? text : textToHtml(text);
-    lastEmittedRef.current = el.innerHTML;
-    setStats(computeStats(el));
-  }, [text]);
-
-  // ── Selection tracking — drives active-style indicators ─────────
-  const refreshSelectionState = useCallback(() => {
-    if (!editorRef.current) return;
-    try {
-      const next: Record<string, boolean> = {};
-      for (const cmd of [
-        "bold",
-        "italic",
-        "underline",
-        "strikeThrough",
-        "insertUnorderedList",
-        "insertOrderedList",
-        "justifyLeft",
-        "justifyCenter",
-        "justifyRight",
-        "justifyFull",
-      ]) {
-        try {
-          next[cmd] = document.queryCommandState(cmd);
-        } catch {
-          next[cmd] = false;
-        }
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        blockquote: true,
+        codeBlock: true,
+        code: true,
+        bulletList: true,
+        orderedList: true,
+        horizontalRule: true,
+        dropcursor: { color: "#1a73e8" },
+        gapcursor: true,
+      }),
+      Link.configure({
+        openOnClick: true,
+        HTMLAttributes: {
+          rel: "noopener noreferrer",
+          target: "_blank",
+        },
+      }),
+      TaskList,
+      TaskItem.configure({ nested: true }),
+      Placeholder.configure({ placeholder: "Type something..." }),
+    ],
+    content: looksLikeHtml(text) ? text : textToHtml(text),
+    editable: !readOnly,
+    onUpdate: ({ editor }) => {
+      const html = editor.getHTML();
+      if (html !== lastEmittedRef.current) {
+        lastEmittedRef.current = html;
+        onChange(html);
       }
-      setActive(next);
+    },
+    editorProps: {
+      attributes: {
+        class: "docs-editor outline-none",
+        style: `min-height: 100%; font-family: ${layout.fontFamily}; font-size: ${layout.fontSize}px; line-height: 1.6;`,
+      },
+    },
+  });
 
-      // Detect current block element by walking up from the selection.
-      const sel = window.getSelection();
-      if (sel && sel.rangeCount > 0) {
-        let node: Node | null = sel.getRangeAt(0).startContainer;
-        while (node && node !== editorRef.current) {
-          if (node.nodeType === Node.ELEMENT_NODE) {
-            const tag = (node as Element).tagName.toLowerCase();
-            if (
-              tag === "h1" ||
-              tag === "h2" ||
-              tag === "h3" ||
-              tag === "h4" ||
-              tag === "blockquote" ||
-              tag === "pre"
-            ) {
-              setCurrentBlock(tag);
-              return;
+  // Update editor when external text changes
+  useEffect(() => {
+    if (!editor) return;
+    if (text === lastEmittedRef.current) return;
+    const content = looksLikeHtml(text) ? text : textToHtml(text);
+    if (editor.getHTML() !== content) {
+      editor.commands.setContent(content);
+    }
+  }, [text, editor]);
+
+  // Command handler for AI coworker
+  const handleCommand = useCallback(
+    (detail: DocCommandEvent) => {
+      if (!editor) return;
+      if (detail.documentId && documentId && detail.documentId !== documentId) return;
+
+      const reply = (output: unknown) => {
+        if (!detail.replyId) return;
+        window.dispatchEvent(
+          new CustomEvent("stack62:doc-command-reply", {
+            detail: { replyId: detail.replyId, output },
+          }),
+        );
+      };
+
+      switch (detail.verb) {
+        case "get-content": {
+          reply({ html: editor.getHTML(), text: editor.getText() });
+          break;
+        }
+        case "get-text": {
+          reply({ text: editor.getText() });
+          break;
+        }
+        case "replace-all": {
+          const next = String(detail.payload?.html ?? detail.payload?.text ?? "");
+          editor.commands.setContent(looksLikeHtml(next) ? next : textToHtml(next));
+          reply({ ok: true });
+          break;
+        }
+        case "append": {
+          const next = String(detail.payload?.html ?? detail.payload?.text ?? "");
+          editor.commands.insertContentAt(
+            editor.state.doc.content.size,
+            looksLikeHtml(next) ? next : textToHtml(next)
+          );
+          reply({ ok: true });
+          break;
+        }
+        case "insert": {
+          const html = String(detail.payload?.html ?? "");
+          editor.commands.insertContent(html);
+          reply({ ok: true });
+          break;
+        }
+        case "exec": {
+          const command = String(detail.payload?.command ?? "");
+          const value = detail.payload?.value as string | undefined;
+          if (command) {
+            switch (command) {
+              case "bold": editor.commands.toggleBold(); break;
+              case "italic": editor.commands.toggleItalic(); break;
+              case "underline": editor.commands.toggleUnderline(); break;
+              case "strikeThrough": editor.commands.toggleStrike(); break;
+              case "insertUnorderedList": editor.commands.toggleBulletList(); break;
+              case "insertOrderedList": editor.commands.toggleOrderedList(); break;
+              case "justifyLeft": editor.commands.setTextAlign("left"); break;
+              case "justifyCenter": editor.commands.setTextAlign("center"); break;
+              case "justifyRight": editor.commands.setTextAlign("right"); break;
+              case "justifyFull": editor.commands.setTextAlign("justify"); break;
+              case "insertHorizontalRule": editor.commands.setHorizontalRule(); break;
+              case "removeFormat": editor.commands.unsetAllMarks(); break;
+              case "undo": editor.commands.undo(); break;
+              case "redo": editor.commands.redo(); break;
+              default:
+                if (value) editor.commands.command({ fn: () => true });
             }
           }
-          node = node.parentNode;
+          reply({ ok: true });
+          break;
         }
-        setCurrentBlock("p");
+        case "find-replace": {
+          const find = String(detail.payload?.find ?? "");
+          const replace = String(detail.payload?.replace ?? "");
+          if (!find) {
+            reply({ ok: false, error: "find is required" });
+            break;
+          }
+          const { doc } = editor.state;
+          let count = 0;
+          let html = editor.getHTML();
+          const re = new RegExp(escapeRegex(find), "g");
+          html = html.replace(re, () => { count++; return replace; });
+          editor.commands.setContent(html);
+          reply({ ok: true, replacements: count });
+          break;
+        }
       }
-    } catch {
-      /* ignore */
-    }
-  }, []);
+    },
+    [editor, documentId],
+  );
 
   useEffect(() => {
-    const onSelectionChange = () => {
-      const el = editorRef.current;
-      if (!el) return;
-      const sel = window.getSelection();
-      if (sel && sel.rangeCount > 0 && el.contains(sel.anchorNode)) {
-        savedRangeRef.current = sel.getRangeAt(0).cloneRange();
-        refreshSelectionState();
-      }
+    const listener = (event: Event) => {
+      const ev = event as CustomEvent<DocCommandEvent>;
+      if (!ev.detail) return;
+      handleCommand(ev.detail);
     };
-    document.addEventListener("selectionchange", onSelectionChange);
-    return () =>
-      document.removeEventListener("selectionchange", onSelectionChange);
-  }, [refreshSelectionState]);
+    window.addEventListener("stack62:doc-command", listener);
+    return () => window.removeEventListener("stack62:doc-command", listener);
+  }, [handleCommand]);
 
-  // ── Restore selection (used after toolbar interactions) ─────────
-  const restoreSelection = useCallback(() => {
-    const range = savedRangeRef.current;
-    if (!range) return;
-    const sel = window.getSelection();
-    if (!sel) return;
-    sel.removeAllRanges();
-    sel.addRange(range);
-  }, []);
+  const pageStyle = useMemo(() => {
+    const size = PAGE_SIZES[layout.pageSize];
+    const portrait = layout.orientation === "portrait";
+    const widthIn = portrait ? size.widthIn : size.heightIn;
+    const heightIn = portrait ? size.heightIn : size.widthIn;
+    return {
+      width: `${widthIn}in`,
+      minHeight: `${heightIn}in`,
+      padding: `${layout.marginIn}in`,
+      fontFamily: layout.fontFamily,
+      fontSize: `${layout.fontSize}px`,
+    } as const;
+  }, [layout]);
 
-  // ── Emit current content upward ────────────────────────────────
-  const emit = useCallback(() => {
-    const el = editorRef.current;
-    if (!el) return;
-    const html = el.innerHTML;
-    lastEmittedRef.current = html;
-    setStats(computeStats(el));
-    onChange(html);
-  }, [onChange]);
-
-  // ── Toolbar primitives ─────────────────────────────────────────
-  const exec = useCallback(
-    (command: string, value?: string) => {
-      const el = editorRef.current;
-      if (!el || readOnly) return;
-      restoreSelection();
-      try {
-        document.execCommand(command, false, value);
-      } catch {
-        /* ignore */
-      }
-      el.focus();
-      refreshSelectionState();
-      emit();
-    },
-    [emit, readOnly, refreshSelectionState, restoreSelection],
-  );
-
-  const setBlock = useCallback(
-    (tag: string) => {
-      if (tag === "p") exec("formatBlock", "<p>");
-      else exec("formatBlock", `<${tag}>`);
-    },
-    [exec],
-  );
-
-  // ── Insert link ────────────────────────────────────────────────
   const insertLink = useCallback(async () => {
+    if (!editor) return;
     const url = await appDialog.prompt({
       title: "Insert link",
       placeholder: "https://example.com",
@@ -300,11 +299,11 @@ export function DocsEditor({
       confirmLabel: "Insert",
     });
     if (!url) return;
-    exec("createLink", url.startsWith("http") ? url : `https://${url}`);
-  }, [exec]);
+    editor.commands.setLink({ href: url.startsWith("http") ? url : `https://${url}` });
+  }, [editor]);
 
-  // ── Insert image ───────────────────────────────────────────────
   const insertImage = useCallback(async () => {
+    if (!editor) return;
     const url = await appDialog.prompt({
       title: "Insert image",
       placeholder: "https://example.com/image.png",
@@ -312,11 +311,11 @@ export function DocsEditor({
       confirmLabel: "Insert",
     });
     if (!url) return;
-    exec("insertImage", url);
-  }, [exec]);
+    editor.commands.insertContent(`<img src="${url}" alt="Image" />`);
+  }, [editor]);
 
-  // ── Insert table ───────────────────────────────────────────────
   const insertTable = useCallback(async () => {
+    if (!editor) return;
     const rowsStr = await appDialog.prompt({
       title: "Insert table",
       description: "Rows?",
@@ -342,174 +341,56 @@ export function DocsEditor({
       html += "</tr>";
     }
     html += "</tbody></table><p></p>";
-    exec("insertHTML", html);
-  }, [exec]);
+    editor.commands.insertContent(html);
+  }, [editor]);
 
-  // ── Coworker command bridge ────────────────────────────────────
-  // The Coworker (or any feature) can dispatch `stack62:doc-command`
-  // window events. Each verb returns synchronously via a reply event.
-  const handleCommand = useCallback(
-    (detail: DocCommandEvent) => {
-      const el = editorRef.current;
-      if (!el) return;
-      if (detail.documentId && documentId && detail.documentId !== documentId)
-        return;
+  const stats = useMemo(() => {
+    if (!editor) return { words: 0, chars: 0 };
+    const text = editor.getText();
+    const trimmed = text.trim();
+    const words = trimmed ? trimmed.split(/\s+/).length : 0;
+    return { words, chars: text.length };
+  }, [editor, editor?.state]);
 
-      const reply = (output: unknown) => {
-        if (!detail.replyId) return;
-        window.dispatchEvent(
-          new CustomEvent("stack62:doc-command-reply", {
-            detail: { replyId: detail.replyId, output },
-          }),
-        );
-      };
-
-      switch (detail.verb) {
-        case "get-content": {
-          reply({ html: el.innerHTML, text: el.innerText });
-          break;
-        }
-        case "get-text": {
-          reply({ text: el.innerText });
-          break;
-        }
-        case "replace-all": {
-          const next = String(detail.payload?.html ?? detail.payload?.text ?? "");
-          el.innerHTML = looksLikeHtml(next) ? next : textToHtml(next);
-          emit();
-          reply({ ok: true });
-          break;
-        }
-        case "append": {
-          const next = String(detail.payload?.html ?? detail.payload?.text ?? "");
-          const block = document.createElement("div");
-          block.innerHTML = looksLikeHtml(next) ? next : textToHtml(next);
-          while (block.firstChild) el.appendChild(block.firstChild);
-          emit();
-          reply({ ok: true });
-          break;
-        }
-        case "insert": {
-          const html = String(detail.payload?.html ?? "");
-          restoreSelection();
-          try {
-            document.execCommand("insertHTML", false, html);
-          } catch {
-            el.innerHTML = el.innerHTML + html;
-          }
-          emit();
-          reply({ ok: true });
-          break;
-        }
-        case "exec": {
-          const command = String(detail.payload?.command ?? "");
-          const value = detail.payload?.value as string | undefined;
-          if (command) exec(command, value);
-          reply({ ok: true });
-          break;
-        }
-        case "find-replace": {
-          const find = String(detail.payload?.find ?? "");
-          const replace = String(detail.payload?.replace ?? "");
-          if (!find) {
-            reply({ ok: false, error: "find is required" });
-            break;
-          }
-          const re = new RegExp(escapeRegex(find), "g");
-          const before = el.innerHTML;
-          el.innerHTML = before.replace(re, escapeHtml(replace));
-          emit();
-          reply({ ok: true, replacements: (before.match(re) ?? []).length });
-          break;
-        }
-      }
-    },
-    [documentId, emit, exec, restoreSelection],
-  );
-
-  useEffect(() => {
-    const listener = (event: Event) => {
-      const ev = event as CustomEvent<DocCommandEvent>;
-      if (!ev.detail) return;
-      handleCommand(ev.detail);
-    };
-    window.addEventListener("stack62:doc-command", listener);
-    return () =>
-      window.removeEventListener("stack62:doc-command", listener);
-  }, [handleCommand]);
-
-  // ── Page geometry ──────────────────────────────────────────────
-  const pageStyle = useMemo(() => {
-    const size = PAGE_SIZES[layout.pageSize];
-    const portrait = layout.orientation === "portrait";
-    const widthIn = portrait ? size.widthIn : size.heightIn;
-    const heightIn = portrait ? size.heightIn : size.widthIn;
-    return {
-      width: `${widthIn}in`,
-      minHeight: `${heightIn}in`,
-      padding: `${layout.marginIn}in`,
-      fontFamily: layout.fontFamily,
-      fontSize: `${layout.fontSize}px`,
-    } as const;
-  }, [layout]);
-
-  // ── Keyboard shortcuts inside the editor ───────────────────────
-  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-    const cmd = e.ctrlKey || e.metaKey;
-    if (!cmd) return;
-    const k = e.key.toLowerCase();
-    if (k === "b") {
-      e.preventDefault();
-      exec("bold");
-    } else if (k === "i") {
-      e.preventDefault();
-      exec("italic");
-    } else if (k === "u") {
-      e.preventDefault();
-      exec("underline");
-    } else if (k === "k") {
-      e.preventDefault();
-      void insertLink();
-    } else if (k === "z" && !e.shiftKey) {
-      e.preventDefault();
-      exec("undo");
-    } else if ((k === "z" && e.shiftKey) || k === "y") {
-      e.preventDefault();
-      exec("redo");
-    }
-  };
+  if (!editor) return null;
 
   return (
     <div className="flex h-full flex-col bg-[#f1f3f4] text-[#1f1f1f]">
-      {/* Title strip */}
       {title && (
         <div className="border-b border-app bg-app-surface px-4 py-1.5 text-xs text-app-muted">
           {title}
         </div>
       )}
 
-      {/* Toolbar — see "Toolbar mousedown preventDefault" note above */}
       <div
         className="flex flex-wrap items-center gap-0.5 border-b border-app bg-app-surface px-2 py-1 text-[12px] text-app"
-        onMouseDown={(e) => {
-          // Anything other than an input loses focus = collapsed
-          // selection. Intercept here so toolbar clicks don't fight
-          // the contentEditable.
-          if (
-            e.target instanceof HTMLElement &&
-            !["INPUT", "SELECT", "TEXTAREA"].includes(e.target.tagName)
-          ) {
-            e.preventDefault();
-          }
-        }}
+        onMouseDown={(e) => e.preventDefault()}
       >
-        <ToolbarButton icon={Undo2} label="Undo (⌘Z)" onClick={() => exec("undo")} />
-        <ToolbarButton icon={Redo2} label="Redo (⌘⇧Z)" onClick={() => exec("redo")} />
+        <ToolbarButton icon={Undo2} label="Undo (⌘Z)" onClick={() => editor.chain().focus().undo().run()} disabled={!editor.can().undo()} />
+        <ToolbarButton icon={Redo2} label="Redo (⌘⇧Z)" onClick={() => editor.chain().focus().redo().run()} disabled={!editor.can().redo()} />
         <Divider />
 
         <select
-          value={currentBlock}
-          onChange={(e) => setBlock(e.target.value)}
+          value={
+            editor.isActive("heading", { level: 1 }) ? "heading 1" :
+            editor.isActive("heading", { level: 2 }) ? "heading 2" :
+            editor.isActive("heading", { level: 3 }) ? "heading 3" :
+            editor.isActive("heading", { level: 4 }) ? "heading 4" :
+            editor.isActive("blockquote") ? "blockquote" :
+            editor.isActive("codeBlock") ? "codeBlock" : "paragraph"
+          }
+          onChange={(e) => {
+            editor.chain().focus();
+            switch (e.target.value) {
+              case "paragraph": editor.commands.setParagraph(); break;
+              case "heading 1": editor.commands.toggleHeading({ level: 1 }); break;
+              case "heading 2": editor.commands.toggleHeading({ level: 2 }); break;
+              case "heading 3": editor.commands.toggleHeading({ level: 3 }); break;
+              case "heading 4": editor.commands.toggleHeading({ level: 4 }); break;
+              case "blockquote": editor.commands.toggleBlockquote(); break;
+              case "codeBlock": editor.commands.toggleCodeBlock(); break;
+            }
+          }}
           className="h-7 rounded border border-app bg-app px-1 text-[11px] focus:outline-none"
           title="Paragraph style"
         >
@@ -524,7 +405,6 @@ export function DocsEditor({
           value={layout.fontFamily}
           onChange={(e) => {
             setLayout((cur) => ({ ...cur, fontFamily: e.target.value }));
-            exec("fontName", e.target.value);
           }}
           className="ml-1 h-7 rounded border border-app bg-app px-1 text-[11px] focus:outline-none"
           title="Font"
@@ -538,13 +418,7 @@ export function DocsEditor({
 
         <select
           value={layout.fontSize}
-          onChange={(e) => {
-            const size = Number(e.target.value);
-            setLayout((cur) => ({ ...cur, fontSize: size }));
-            // execCommand fontSize is 1..7. We use a custom span instead.
-            wrapSelection(`font-size:${size}px`);
-            emit();
-          }}
+          onChange={(e) => setLayout((cur) => ({ ...cur, fontSize: Number(e.target.value) }))}
           className="ml-1 h-7 w-14 rounded border border-app bg-app px-1 text-[11px] focus:outline-none"
           title="Font size"
         >
@@ -560,37 +434,37 @@ export function DocsEditor({
         <ToolbarButton
           icon={Bold}
           label="Bold (⌘B)"
-          active={active.bold}
-          onClick={() => exec("bold")}
+          active={editor.isActive("bold")}
+          onClick={() => editor.chain().focus().toggleBold().run()}
         />
         <ToolbarButton
           icon={Italic}
           label="Italic (⌘I)"
-          active={active.italic}
-          onClick={() => exec("italic")}
+          active={editor.isActive("italic")}
+          onClick={() => editor.chain().focus().toggleItalic().run()}
         />
         <ToolbarButton
           icon={Underline}
           label="Underline (⌘U)"
-          active={active.underline}
-          onClick={() => exec("underline")}
+          active={editor.isActive("underline")}
+          onClick={() => editor.chain().focus().toggleUnderline().run()}
         />
         <ToolbarButton
           icon={Strikethrough}
           label="Strikethrough"
-          active={active.strikeThrough}
-          onClick={() => exec("strikeThrough")}
+          active={editor.isActive("strike")}
+          onClick={() => editor.chain().focus().toggleStrike().run()}
         />
 
         <ColorPicker
           icon={Palette}
           label="Text color"
-          onPick={(color) => exec("foreColor", color)}
+          onPick={(color) => editor.chain().focus().setColor(color).run()}
         />
         <ColorPicker
           icon={Highlighter}
           label="Highlight"
-          onPick={(color) => exec("hiliteColor", color)}
+          onPick={(color) => editor.chain().focus().setHighlight({ color }).run()}
         />
 
         <Divider />
@@ -598,26 +472,26 @@ export function DocsEditor({
         <ToolbarButton
           icon={AlignLeft}
           label="Align left"
-          active={active.justifyLeft}
-          onClick={() => exec("justifyLeft")}
+          active={editor.isActive({ textAlign: "left" })}
+          onClick={() => editor.chain().focus().setTextAlign("left").run()}
         />
         <ToolbarButton
           icon={AlignCenter}
           label="Align center"
-          active={active.justifyCenter}
-          onClick={() => exec("justifyCenter")}
+          active={editor.isActive({ textAlign: "center" })}
+          onClick={() => editor.chain().focus().setTextAlign("center").run()}
         />
         <ToolbarButton
           icon={AlignRight}
           label="Align right"
-          active={active.justifyRight}
-          onClick={() => exec("justifyRight")}
+          active={editor.isActive({ textAlign: "right" })}
+          onClick={() => editor.chain().focus().setTextAlign("right").run()}
         />
         <ToolbarButton
           icon={AlignJustify}
           label="Justify"
-          active={active.justifyFull}
-          onClick={() => exec("justifyFull")}
+          active={editor.isActive({ textAlign: "justify" })}
+          onClick={() => editor.chain().focus().setTextAlign("justify").run()}
         />
 
         <Divider />
@@ -625,19 +499,20 @@ export function DocsEditor({
         <ToolbarButton
           icon={List}
           label="Bulleted list"
-          active={active.insertUnorderedList}
-          onClick={() => exec("insertUnorderedList")}
+          active={editor.isActive("bulletList")}
+          onClick={() => editor.chain().focus().toggleBulletList().run()}
         />
         <ToolbarButton
           icon={ListOrdered}
           label="Numbered list"
-          active={active.insertOrderedList}
-          onClick={() => exec("insertOrderedList")}
+          active={editor.isActive("orderedList")}
+          onClick={() => editor.chain().focus().toggleOrderedList().run()}
         />
         <ToolbarButton
           icon={Quote}
           label="Quote"
-          onClick={() => setBlock("blockquote")}
+          active={editor.isActive("blockquote")}
+          onClick={() => editor.chain().focus().toggleBlockquote().run()}
         />
 
         <Divider />
@@ -660,7 +535,7 @@ export function DocsEditor({
         <ToolbarButton
           icon={Minus}
           label="Horizontal rule"
-          onClick={() => exec("insertHorizontalRule")}
+          onClick={() => editor.chain().focus().setHorizontalRule().run()}
         />
 
         <Divider />
@@ -668,7 +543,7 @@ export function DocsEditor({
         <ToolbarButton
           icon={Eraser}
           label="Clear formatting"
-          onClick={() => exec("removeFormat")}
+          onClick={() => editor.chain().focus().unsetAllMarks().run()}
         />
 
         <div className="ml-auto flex items-center gap-2 pr-1">
@@ -693,32 +568,16 @@ export function DocsEditor({
         </div>
       </div>
 
-      {/* Canvas */}
       <div className="min-h-0 flex-1 overflow-auto py-6">
         <div
-          className="mx-auto bg-white text-[#1f1f1f] shadow-[0_2px_8px_rgba(0,0,0,0.15)]"
+          className="mx-auto bg-white text-[#1f1f1f] shadow-[0_2px_8px rgba(0,0,0,0.15)]"
           style={{
             ...pageStyle,
             transform: `scale(${Math.max(0.5, zoom / 100)})`,
             transformOrigin: "top center",
           }}
         >
-          <div
-            ref={editorRef}
-            contentEditable={!readOnly}
-            suppressContentEditableWarning
-            spellCheck
-            onInput={emit}
-            onKeyDown={onKeyDown}
-            onBlur={emit}
-            className="docs-editor outline-none"
-            style={{
-              minHeight: "100%",
-              fontFamily: layout.fontFamily,
-              fontSize: `${layout.fontSize}px`,
-              lineHeight: 1.6,
-            }}
-          />
+          <EditorContent editor={editor} />
         </div>
       </div>
 
@@ -763,23 +622,24 @@ export function DocsEditor({
           border-top: 1px solid #d0d4d8;
           margin: 1em 0;
         }
+        .docs-editor mark { background-color: #fef7e0; }
       `}</style>
     </div>
   );
 }
-
-// ── Helpers ──────────────────────────────────────────────────────
 
 function ToolbarButton({
   icon: Icon,
   label,
   active,
   onClick,
+  disabled = false,
 }: {
   icon: LucideIcon;
   label: string;
   active?: boolean;
   onClick: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
@@ -787,10 +647,10 @@ function ToolbarButton({
       title={label}
       aria-label={label}
       onClick={onClick}
+      disabled={disabled}
       className={`grid h-7 w-7 place-items-center rounded transition ${
-        active
-          ? "bg-accent-soft text-accent"
-          : "text-app-muted hover:bg-app-hover"
+        disabled ? "opacity-30 cursor-not-allowed" :
+        active ? "bg-accent-soft text-accent" : "text-app-muted hover:bg-app-hover"
       }`}
     >
       <Icon className="h-3.5 w-3.5" />
@@ -812,18 +672,8 @@ function ColorPicker({
   onPick: (color: string) => void;
 }) {
   const COLORS = [
-    "#1f1f1f",
-    "#5f6368",
-    "#ea4335",
-    "#fbbc04",
-    "#34a853",
-    "#1a73e8",
-    "#a142f4",
-    "#ffffff",
-    "#fef7e0",
-    "#e8f5e8",
-    "#e8f0fe",
-    "#fce8e6",
+    "#1f1f1f", "#5f6368", "#ea4335", "#fbbc04", "#34a853", "#1a73e8", "#a142f4",
+    "#ffffff", "#fef7e0", "#e8f5e8", "#e8f0fe", "#fce8e6",
   ];
   const [open, setOpen] = useState(false);
   return (
@@ -851,43 +701,6 @@ function ColorPicker({
         </div>
       )}
     </div>
-  );
-}
-
-/** Wrap the current selection with a span carrying the given style.
- *  Used for font-size because execCommand's fontSize takes a 1..7
- *  legacy scale, which we don't want to map. */
-function wrapSelection(style: string) {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return;
-  const range = sel.getRangeAt(0);
-  if (range.collapsed) return;
-  const span = document.createElement("span");
-  span.setAttribute("style", style);
-  try {
-    span.appendChild(range.extractContents());
-    range.insertNode(span);
-    // Reselect the inserted content so further edits target it.
-    const next = document.createRange();
-    next.selectNodeContents(span);
-    sel.removeAllRanges();
-    sel.addRange(next);
-  } catch {
-    /* ignore */
-  }
-}
-
-function computeStats(el: HTMLElement): { words: number; chars: number } {
-  const text = el.innerText ?? "";
-  const trimmed = text.trim();
-  const words = trimmed ? trimmed.split(/\s+/).length : 0;
-  return { words, chars: text.length };
-}
-
-function looksLikeHtml(s: string): boolean {
-  if (!s) return false;
-  return /<\/?(p|div|span|h[1-6]|ul|ol|li|table|tr|td|a|br|hr|strong|em|b|i)\b/i.test(
-    s,
   );
 }
 

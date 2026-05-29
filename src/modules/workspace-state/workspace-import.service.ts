@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import * as Excel from 'exceljs';
 import * as mammoth from 'mammoth';
+import * as JSZip from 'jszip';
 import { WorkspaceStateService } from './workspace-state.service';
 
 /**
@@ -84,44 +85,15 @@ export class WorkspaceImportService {
     if (wb.worksheets.length === 0) {
       throw new BadRequestException('Spreadsheet has no sheets.');
     }
-    // Phase 1: import the first worksheet's cells. Multi-sheet
-    // import is a follow-up (need to seed multiple entries in
-    // Y.Array("sheets") and have makeFreshDoc accept that). The AI
-    // can copy additional sheets in via dispatch after this.
-    const ws = wb.worksheets[0];
-    const rows: Array<Array<string | number | boolean | null>> = [];
-    for (let r = 1; r <= ws.actualRowCount; r++) {
-      const row: Array<string | number | boolean | null> = [];
-      const xlRow = ws.getRow(r);
-      for (let c = 1; c <= ws.actualColumnCount; c++) {
-        const cell = xlRow.getCell(c);
-        const v = cell.value;
-        if (v == null) row.push('');
-        else if (typeof v === 'object' && 'text' in (v as object)) {
-          // Rich-text or hyperlink — flatten to displayable string.
-          row.push(String((v as { text: string }).text));
-        } else if (v instanceof Date) {
-          row.push(v.toISOString());
-        } else if (
-          typeof v === 'string' ||
-          typeof v === 'number' ||
-          typeof v === 'boolean'
-        ) {
-          row.push(v);
-        } else {
-          row.push(String(v));
-        }
-      }
-      rows.push(row);
-    }
-    const dispatch = await this.state.dispatch(
+    
+    // Step 1: Create empty sheet doc
+    const createResult = await this.state.dispatch(
       {
         docId: '00000000-0000-0000-0000-000000000000',
         verb: 'workspace.create_doc',
         kind: 'sheet',
-        title: opts.title ?? ws.name ?? 'Imported sheet',
-        // initial is the 2D row array — makeFreshDoc reads it.
-        initial: rows,
+        title: opts.title ?? wb.worksheets[0]?.name ?? 'Imported sheet',
+        initial: [], // initial is empty; we'll add sheets/cells via actions
       },
       {
         organizationId: opts.organizationId,
@@ -129,11 +101,218 @@ export class WorkspaceImportService {
         actorUserId: opts.actorUserId,
       },
     );
+
+    const docId = createResult.action.docId;
+    
+    // Step 2: Read the current state to get sheet IDs
+    const docState = await this.state.readState(docId, opts.actorUserId);
+    const { sheets } = docState.state as { sheets: Array<{ id: string; name: string }> };
+    let mainSheetId = sheets[0]?.id;
+    let totalRows = 0;
+    let totalCols = 0;
+
+    // Step 3: Process each worksheet
+    for (let wsIdx = 0; wsIdx < wb.worksheets.length; wsIdx++) {
+      const ws = wb.worksheets[wsIdx];
+      if (!ws) continue;
+      
+      // For first sheet, use existing sheetId; for others, add new sheet
+      let sheetId: string;
+      if (wsIdx === 0 && mainSheetId) {
+        sheetId = mainSheetId;
+      } else {
+        const addResult = await this.state.dispatch(
+          {
+            docId,
+            verb: 'sheet.add_sheet',
+            name: ws.name || `Sheet${wsIdx + 1}`,
+            rowCount: ws.actualRowCount > 100 ? ws.actualRowCount : 100,
+            colCount: ws.actualColumnCount > 26 ? ws.actualColumnCount : 26,
+          },
+          {
+            organizationId: opts.organizationId,
+            workspaceId: opts.workspaceId,
+            actorUserId: opts.actorUserId,
+          },
+        );
+        const updatedState = await this.state.readState(docId, opts.actorUserId);
+        const updatedSheets = (updatedState.state as any).sheets;
+        sheetId = updatedSheets[updatedSheets.length - 1]?.id;
+      }
+
+      // Extract cells and set range
+      const rows: Array<Array<string | number | boolean | null>> = [];
+      for (let r = 1; r <= ws.actualRowCount; r++) {
+        const row: Array<string | number | boolean | null> = [];
+        const xlRow = ws.getRow(r);
+        for (let c = 1; c <= ws.actualColumnCount; c++) {
+          const cell = xlRow.getCell(c);
+          const v = cell.value;
+          if (v == null) row.push('');
+          else if (typeof v === 'object' && 'text' in (v as object)) {
+            row.push(String((v as { text: string }).text));
+          } else if (v instanceof Date) {
+            row.push(v.toISOString());
+          } else if (
+            typeof v === 'string' ||
+            typeof v === 'number' ||
+            typeof v === 'boolean'
+          ) {
+            row.push(v);
+          } else {
+            row.push(String(v));
+          }
+        }
+        rows.push(row);
+      }
+
+      if (rows.length > 0) {
+        await this.state.dispatch(
+          {
+            docId,
+            verb: 'sheet.set_range',
+            sheetId,
+            fromRow: 0,
+            fromCol: 0,
+            rows,
+          },
+          {
+            organizationId: opts.organizationId,
+            workspaceId: opts.workspaceId,
+            actorUserId: opts.actorUserId,
+          },
+        );
+        totalRows += rows.length;
+        totalCols = Math.max(totalCols, rows[0]?.length ?? 0);
+      }
+    }
+
     return {
-      docId: dispatch.action.docId,
-      version: dispatch.version,
-      rowsImported: rows.length,
-      colsImported: rows[0]?.length ?? 0,
+      docId,
+      version: createResult.version,
+      rowsImported: totalRows,
+      colsImported: totalCols,
+      sheetsImported: wb.worksheets.length,
+    };
+  }
+
+  async importPptx(opts: {
+    buffer: Buffer;
+    organizationId: string;
+    workspaceId: string;
+    actorUserId: string;
+    title?: string;
+  }) {
+    const zip = await JSZip.loadAsync(opts.buffer);
+
+    // Step 1: Create empty slides doc
+    const createResult = await this.state.dispatch(
+      {
+        docId: '00000000-0000-0000-0000-000000000000',
+        verb: 'workspace.create_doc',
+        kind: 'slides',
+        title: opts.title ?? 'Imported presentation',
+        initial: null,
+      },
+      {
+        organizationId: opts.organizationId,
+        workspaceId: opts.workspaceId,
+        actorUserId: opts.actorUserId,
+      },
+    );
+
+    const docId = createResult.action.docId;
+
+    // Step 2: Read presentation structure to find slides
+    const presentationXml = await zip.file('ppt/presentation.xml')?.async('string');
+    if (!presentationXml) {
+      throw new BadRequestException('Invalid PPTX file: missing presentation.xml');
+    }
+
+    // Parse slide order from presentation XML
+    const slideRefs = [...presentationXml.matchAll(/<p:sldId[^>]*r:id="([^"]+)"/g)].map(
+      (match) => match[1],
+    );
+
+    // Get slides relationships to map r:id to slide files
+    const relsXml = await zip.file('ppt/_rels/presentation.xml.rels')?.async('string');
+    const slideFiles: string[] = [];
+    if (relsXml) {
+      for (const rId of slideRefs) {
+        const relMatch = new RegExp(
+          `<Relationship[^>]*Id="${rId}"[^>]*Target="([^"]+)"`,
+          'g',
+        ).exec(relsXml);
+        if (relMatch) {
+          slideFiles.push(`ppt/${relMatch[1]}`);
+        }
+      }
+    }
+
+    // Process each slide
+    for (let i = 0; i < slideFiles.length; i++) {
+      const slideFile = slideFiles[i];
+      const slideXml = await zip.file(slideFile)?.async('string');
+      if (!slideXml) continue;
+
+      // Add new slide to doc
+      await this.state.dispatch(
+        {
+          docId,
+          verb: 'slides.add_slide',
+          layout: 'blank',
+        },
+        {
+          organizationId: opts.organizationId,
+          workspaceId: opts.workspaceId,
+          actorUserId: opts.actorUserId,
+        },
+      );
+
+      // Read current state to get the new slide ID
+      const docState = await this.state.readState(docId, opts.actorUserId);
+      const state = docState.state as {
+        slides: Array<{ id: string }>;
+      };
+      const slideId = state.slides[state.slides.length - 1]?.id;
+      if (!slideId) continue;
+
+      // Extract text from slide
+      const textMatches = [...slideXml.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map((m) => m[1]);
+      const slideText = textMatches.join(' ').trim();
+
+      // Add a text element to the slide if there's text
+      if (slideText) {
+        await this.state.dispatch(
+          {
+            docId,
+            verb: 'slides.add_element',
+            slideId,
+            element: {
+              type: 'text',
+              x: 50,
+              y: 50,
+              width: 700,
+              height: 400,
+              text: slideText,
+              fontSize: 24,
+              fontFamily: 'Inter, Arial, sans-serif',
+              color: '#1f1f1f',
+            },
+          },
+          {
+            organizationId: opts.organizationId,
+            workspaceId: opts.workspaceId,
+            actorUserId: opts.actorUserId,
+          },
+        );
+      }
+    }
+
+    return {
+      docId,
+      version: createResult.version,
+      slidesImported: slideFiles.length,
     };
   }
 }

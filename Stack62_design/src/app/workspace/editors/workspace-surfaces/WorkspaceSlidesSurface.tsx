@@ -5,7 +5,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Ellipse, Layer, Rect, Stage, Text, Transformer } from "react-konva";
+import { Ellipse, Image, Layer, Rect, Stage, Text, Transformer } from "react-konva";
 import type Konva from "konva";
 import * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
@@ -18,6 +18,8 @@ import {
   Trash2,
   Type as TypeIcon,
   X,
+  Undo2,
+  Redo2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { dispatchWorkspaceAction } from "../../../lib/resources";
@@ -28,11 +30,12 @@ import { dispatchWorkspaceAction } from "../../../lib/resources";
  * The Y.Doc carries:
  *   - Y.Array("slides")   — [{ id, layout, background? }]
  *   - Y.Map("elements")   — "slideId:elementId" → {
- *                              type: 'text' | 'shape',
+ *                              type: 'text' | 'shape' | 'image',
  *                              shape?: 'rect' | 'ellipse',
  *                              x, y, width, height, rotation?,
  *                              text?, fontSize?, fontFamily?, color?,
- *                              fill?, stroke?
+ *                              fill?, stroke?,
+ *                              src?: string // for images
  *                            }
  *   - Y.Map("theme")      — { id, ... }
  *
@@ -60,7 +63,7 @@ interface SlideMeta {
 
 interface ElementBase {
   id: string;
-  type: "text" | "shape";
+  type: "text" | "shape" | "image";
   x: number;
   y: number;
   width: number;
@@ -83,7 +86,12 @@ interface ShapeElement extends ElementBase {
   stroke?: string;
 }
 
-type SlideElement = TextElement | ShapeElement;
+interface ImageElement extends ElementBase {
+  type: "image";
+  src?: string;
+}
+
+type SlideElement = TextElement | ShapeElement | ImageElement;
 
 export function WorkspaceSlidesSurface({
   docId,
@@ -102,6 +110,62 @@ export function WorkspaceSlidesSurface({
   const [, setElementsVersion] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [presenting, setPresenting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [undoManager, setUndoManager] = useState<Y.UndoManager | null>(null);
+
+  // Initialize undo manager
+  useEffect(() => {
+    const um = new Y.UndoManager(
+      [ydoc.getArray("slides"), ydoc.getMap("elements")],
+    );
+    setUndoManager(um);
+    return () => {
+      um.destroy();
+    };
+  }, [ydoc]);
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeSlide) return;
+    
+    try {
+      // Create form data
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("organizationId", organizationId);
+      formData.append("workspaceId", workspaceId);
+      formData.append("scope", "attachment");
+
+      // Upload file
+      const uploadRes = await fetch("/files/upload", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+
+      if (!uploadRes.ok) throw new Error("Upload failed");
+      const fileData = await uploadRes.json();
+
+      // Add image element to slide
+      void dispatch({
+        verb: "slides.add_element",
+        slideId: activeSlide.id,
+        element: {
+          type: "image",
+          x: CANVAS_W / 2 - 200,
+          y: CANVAS_H / 2 - 150,
+          width: 400,
+          height: 300,
+          src: `/files/${fileData.id}/download`,
+        },
+      });
+    } catch (err) {
+      console.error("Image upload failed:", err);
+    } finally {
+      // Reset file input
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
 
   // Observers on the Y.Doc collections.
   useEffect(() => {
@@ -290,12 +354,36 @@ export function WorkspaceSlidesSurface({
     <div className="flex h-full flex-col bg-app">
       {/* Toolbar */}
       <div className="flex shrink-0 items-center gap-1 border-b border-app bg-app-surface px-2 py-1 text-xs">
+        <ToolbarBtn
+          icon={Undo2}
+          label="Undo"
+          onClick={() => undoManager?.undo()}
+          disabled={!undoManager?.canUndo()}
+        />
+        <ToolbarBtn
+          icon={Redo2}
+          label="Redo"
+          onClick={() => undoManager?.redo()}
+          disabled={!undoManager?.canRedo()}
+        />
+        <Sep />
         <ToolbarBtn icon={Plus} label="Add slide" onClick={addSlide} />
         <Sep />
         <ToolbarBtn icon={TypeIcon} label="Add text" onClick={addText} />
         <ToolbarBtn icon={Square} label="Add rectangle" onClick={() => addShape("rect")} />
         <ToolbarBtn icon={CircleIcon} label="Add ellipse" onClick={() => addShape("ellipse")} />
-        <ToolbarBtn icon={ImageIcon} label="Insert image (coming soon)" disabled />
+        <ToolbarBtn 
+          icon={ImageIcon} 
+          label="Insert image" 
+          onClick={() => fileInputRef.current?.click()} 
+        />
+        <input 
+          ref={fileInputRef} 
+          type="file" 
+          accept="image/*" 
+          style={{ display: "none" }} 
+          onChange={handleImageUpload} 
+        />
         <div className="ml-auto" />
         <ToolbarBtn
           icon={Eye}
@@ -353,11 +441,8 @@ export function WorkspaceSlidesSurface({
               slide={activeSlide}
               onUpdate={(patch) =>
                 dispatch({
-                  verb: "slides.update_element",
-                  // No-op — we'd need a slides.update_slide verb for
-                  // background changes. Left as a TODO.
+                  verb: "slides.update_slide",
                   slideId: activeSlide.id,
-                  elementId: "__none__",
                   patch,
                 })
               }
@@ -510,6 +595,16 @@ function ElementNode({
   onDragEnd: (x: number, y: number) => void;
   onTransformEnd: (patch: Record<string, unknown>) => void;
 }) {
+  const [image, setImage] = useState<HTMLImageElement | null>(null);
+  
+  useEffect(() => {
+    if (element.type === "image" && element.src) {
+      const img = new Image();
+      img.src = element.src;
+      img.onload = () => setImage(img);
+    }
+  }, [element]);
+
   const common = {
     id: element.id,
     x: element.x,
@@ -548,6 +643,30 @@ function ElementNode({
         height={element.height}
       />
     );
+  }
+  if (element.type === "image") {
+    if (image) {
+      return (
+        <Image
+          {...common}
+          image={image}
+          width={element.width}
+          height={element.height}
+        />
+      );
+    } else {
+      return (
+        <Rect
+          {...common}
+          width={element.width}
+          height={element.height}
+          fill="#f0f0f0"
+          stroke="#ccc"
+          strokeWidth={2}
+          cornerRadius={4}
+        />
+      );
+    }
   }
   if (element.shape === "ellipse") {
     return (
@@ -593,6 +712,8 @@ function Inspector({
         <h3 className="text-[11px] font-semibold uppercase tracking-wide text-app-subtle">
           {element.type === "text"
             ? "Text"
+            : element.type === "image"
+            ? "Image"
             : `Shape (${element.shape})`}
         </h3>
         <button
@@ -653,7 +774,7 @@ function Inspector({
             />
           </div>
         </>
-      ) : (
+      ) : element.type === "shape" ? (
         <div className="grid grid-cols-2 gap-2">
           <ColorField
             label="Fill"
@@ -666,7 +787,20 @@ function Inspector({
             onChange={(v) => onUpdate({ stroke: v })}
           />
         </div>
-      )}
+      ) : element.type === "image" ? (
+        <label className="block">
+          <span className="mb-1 block text-[10px] uppercase tracking-wide text-app-faint">
+            Image source
+          </span>
+          <input
+            type="text"
+            value={element.src ?? ""}
+            onChange={(e) => onUpdate({ src: e.target.value })}
+            className="h-7 w-full rounded border border-app bg-app px-2 text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+            placeholder="Image URL"
+          />
+        </label>
+      ) : null}
     </div>
   );
 }
@@ -678,15 +812,16 @@ function SlideInspector({
   slide: SlideMeta;
   onUpdate: (patch: Record<string, unknown>) => void;
 }) {
-  void onUpdate; // background update needs a slides.update_slide verb
   return (
     <div className="space-y-2">
       <h3 className="text-[11px] font-semibold uppercase tracking-wide text-app-subtle">
         Slide
       </h3>
-      <p className="text-[11px] text-app-faint">
-        Layout: {slide.layout ?? "blank"}
-      </p>
+      <ColorField
+        label="Background"
+        value={slide.background ?? "#ffffff"}
+        onChange={(color) => onUpdate({ background: color })}
+      />
       <p className="text-[11px] text-app-faint">
         Click an element to edit it.
       </p>

@@ -42,4 +42,12 @@ export interface StorageBackend {
     key: string,
     expiresInSeconds: number,
   ): Promise<string | null>;
+  /**
+   * Optional. Returns a time-limited signed URL for uploading to the backend.
+   */
+  generateSignedUploadUrl?(
+    key: string,
+    contentType: string,
+    expiresInSeconds: number,
+  ): Promise<string | null>;
 }

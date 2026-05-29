@@ -283,6 +283,20 @@ export function applyActionToDoc(
           });
         }
         return;
+      case 'sheet.update_chart':
+        if (kind !== 'sheet') return;
+        {
+          const charts = doc.getMap('charts');
+          const cur = charts.get(action.chartId);
+          if (cur && typeof cur === 'object') {
+            charts.set(action.chartId, { ...(cur as object), ...action.patch });
+          }
+        }
+        return;
+      case 'sheet.delete_chart':
+        if (kind !== 'sheet') return;
+        doc.getMap('charts').delete(action.chartId);
+        return;
       case 'sheet.sort':
       case 'sheet.filter':
         // View-level. Recorded in the action log only.
@@ -363,6 +377,20 @@ export function applyActionToDoc(
       case 'slides.delete_element':
         if (kind !== 'slides') return;
         doc.getMap('elements').delete(`${action.slideId}:${action.elementId}`);
+        return;
+      case 'slides.update_slide':
+        if (kind !== 'slides') return;
+        {
+          const slides = doc.getArray('slides');
+          for (let i = 0; i < slides.length; i++) {
+            const slide = slides.get(i) as { id?: string };
+            if (slide?.id === action.slideId) {
+              slides.delete(i, 1);
+              slides.insert(i, [{ ...slide, ...action.patch }]);
+              break;
+            }
+          }
+        }
         return;
       case 'slides.apply_theme':
         if (kind !== 'slides') return;

@@ -8,9 +8,25 @@ import {
   themeQuartz,
   type CellValueChangedEvent,
   type ColDef,
+  type CellClickedEvent,
 } from "ag-grid-community";
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  PieChart,
+  Pie,
+  Cell,
+} from "recharts";
 import { dispatchWorkspaceAction } from "../../../lib/resources";
 import { useAppContext } from "../../../context/app-context";
+import { Undo2, Redo2, Bold, Italic, Underline } from "lucide-react";
 
 // AG Grid Community v33+ requires explicit module registration. We
 // register every community module once at file load — keeps the bundle
@@ -25,7 +41,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
  *   - `Y.Array("sheets")`  — [{ id, name, rowCount, colCount }]
  *   - `Y.Map("cells")`     — "sheetId:row:col" → { value, formula?, format? }
  *
- * AG Grid is bound to *snapshots* of that state — we materialise a 2D
+ * AG Grid is bound to *snapshots* of that state — we materialize a 2D
  * row array out of the Y.Map on every observed update. The user types
  * in a cell → AG Grid fires `onCellValueChanged` → we dispatch a
  * `sheet.set_cell` REST action, which mutates the Y.Doc server-side
@@ -60,14 +76,32 @@ export function WorkspaceSheetSurface({
   >([]);
   const [activeSheetId, setActiveSheetId] = useState<string | null>(null);
   const [, setCellsVersion] = useState(0);
+  const [charts, setCharts] = useState<
+    Array<{ id: string; sheetId: string; sourceRange: string; type: string; title?: string }>
+  >([]);
+  const [, setChartsVersion] = useState(0);
+  const [undoManager, setUndoManager] = useState<Y.UndoManager | null>(null);
+  const [selectedCell, setSelectedCell] = useState<{ row: number; col: number } | null>(null);
+
+  // Initialize undo manager for sheets, cells, and charts
+  useEffect(() => {
+    const um = new Y.UndoManager([
+      ydoc.getArray("sheets"),
+      ydoc.getMap("cells"),
+      ydoc.getMap("charts"),
+    ]);
+    setUndoManager(um);
+    return () => um.destroy();
+  }, [ydoc]);
 
   // ── Y.Doc observation ────────────────────────────────────────────
-  // Two observers: one on the sheets array (sheet add/delete/rename),
-  // one on the cells map (every cell edit). Both bump a local version
-  // counter so React re-renders.
+  // Three observers: one on the sheets array (sheet add/delete/rename),
+  // one on the cells map (every cell edit), one on charts map (chart edits). 
+  // Both bump a local version counter so React re-renders.
   useEffect(() => {
     const sheetsArr = ydoc.getArray("sheets");
     const cellsMap = ydoc.getMap("cells");
+    const chartsMap = ydoc.getMap("charts");
 
     const refreshSheets = () => {
       const next = sheetsArr.toArray() as Array<{
@@ -80,14 +114,28 @@ export function WorkspaceSheetSurface({
       setActiveSheetId((cur) => cur ?? next[0]?.id ?? null);
     };
 
+    const refreshCharts = () => {
+      const next = Array.from(chartsMap.values()) as Array<{
+        id: string;
+        sheetId: string;
+        sourceRange: string;
+        type: string;
+        title?: string;
+      }>;
+      setCharts(next);
+    };
+
     const bumpCells = () => setCellsVersion((v) => v + 1);
 
     refreshSheets();
+    refreshCharts();
     sheetsArr.observe(refreshSheets);
     cellsMap.observe(bumpCells);
+    chartsMap.observe(refreshCharts);
     return () => {
       sheetsArr.unobserve(refreshSheets);
       cellsMap.unobserve(bumpCells);
+      chartsMap.unobserve(refreshCharts);
     };
   }, [ydoc]);
 
@@ -95,6 +143,51 @@ export function WorkspaceSheetSurface({
     () => sheets.find((s) => s.id === activeSheetId) ?? sheets[0] ?? null,
     [sheets, activeSheetId],
   );
+
+  const getChartData = useCallback((sourceRange: string, sheetId: string) => {
+    const cellsMap = ydoc.getMap("cells");
+    const parts = sourceRange.split(":");
+    if (parts.length !== 2) return [];
+    const [from, to] = parts;
+    
+    // Parse from and to coordinates
+    const fromColMatch = from.match(/^[A-Z]+/i);
+    const fromRowMatch = from.match(/\d+$/);
+    const toColMatch = to.match(/^[A-Z]+/i);
+    const toRowMatch = to.match(/\d+$/);
+    
+    if (!fromColMatch || !fromRowMatch || !toColMatch || !toRowMatch) return [];
+    
+    const fromCol = colIndex(fromColMatch[0]);
+    const fromRow = Number(fromRowMatch[0]) - 1;
+    const toCol = colIndex(toColMatch[0]);
+    const toRow = Number(toRowMatch[0]) - 1;
+    
+    const r1 = Math.min(fromRow, toRow);
+    const r2 = Math.max(fromRow, toRow);
+    const c1 = Math.min(fromCol, toCol);
+    const c2 = Math.max(fromCol, toCol);
+    
+    // Build data array - assuming first row is labels, first column is categories, rest are values
+    const data: Array<Record<string, unknown>> = [];
+    for (let r = r1 + 1; r <= r2; r++) {
+      const row: Record<string, unknown> = {};
+      for (let c = c1; c <= c2; c++) {
+        const key = `${sheetId}:${r}:${c}`;
+        const cell = cellsMap.get(key) as { value?: unknown } | undefined;
+        const headerKey = `${sheetId}:${r1}:${c}`;
+        const headerCell = cellsMap.get(headerKey) as { value?: unknown } | undefined;
+        const header = String(headerCell?.value ?? colLabel(c));
+        row[header] = cell?.value;
+      }
+      data.push(row);
+    }
+    return data;
+  }, [ydoc]);
+
+  const activeSheetCharts = useMemo(() => {
+    return charts.filter(c => c.sheetId === activeSheet?.id);
+  }, [charts, activeSheet]);
 
   // ── AG Grid column + row data ────────────────────────────────────
   const columnDefs = useMemo<ColDef[]>(() => {
@@ -121,11 +214,24 @@ export function WorkspaceSheetSurface({
         editable: true,
         width: 110,
         suppressMovable: true,
-        cellStyle: { borderRight: "1px solid #e8eaed" },
+        cellStyle: (params) => {
+          const row = params.node?.rowIndex ?? 0;
+          const cell = ydoc.getMap("cells").get(`${activeSheet.id}:${row}:${c}`) as { format?: Record<string, unknown> } | undefined;
+          const style: Record<string, unknown> = { borderRight: "1px solid #e8eaed" };
+          const format = cell?.format;
+          if (format) {
+            if (format.bold) style.fontWeight = "bold";
+            if (format.italic) style.fontStyle = "italic";
+            if (format.underline) style.textDecoration = "underline";
+            if (format.backgroundColor) style.backgroundColor = format.backgroundColor;
+            if (format.color) style.color = format.color;
+          }
+          return style;
+        },
       });
     }
     return cols;
-  }, [activeSheet]);
+  }, [activeSheet, ydoc]);
 
   const rowData = useMemo<Array<Record<string, unknown>>>(() => {
     if (!activeSheet) return [];
@@ -158,6 +264,55 @@ export function WorkspaceSheetSurface({
     // fresh map state.
   }, [activeSheet, ydoc]);
 
+  // ── Cell click handler ───────────────────────────────────────────
+  const onCellClicked = useCallback(
+    (event: CellClickedEvent) => {
+      const colField = event.colDef.field;
+      if (!colField || !colField.startsWith("c")) return;
+      const col = Number(colField.slice(1));
+      const row = event.node.rowIndex ?? 0;
+      setSelectedCell({ row, col });
+      window.dispatchEvent(new CustomEvent("stack62:sheet-cell-focus", {
+        detail: { row, col }
+      }));
+    },
+    []
+  );
+
+  // ── Formatting handler ───────────────────────────────────────────
+  const applyFormatting = useCallback(
+    async (formatPatch: Record<string, unknown>) => {
+      if (!activeSheet || !selectedCell) return;
+      const cellsMap = ydoc.getMap("cells");
+      const key = `${activeSheet.id}:${selectedCell.row}:${selectedCell.col}`;
+      const currentCell = cellsMap.get(key) as {
+        value?: unknown;
+        formula?: string;
+        format?: Record<string, unknown>;
+      } | undefined;
+      const newFormat = { ...currentCell?.format, ...formatPatch };
+      try {
+        await dispatchWorkspaceAction({
+          organizationId,
+          workspaceId,
+          docId,
+          action: {
+            verb: "sheet.set_cell",
+            sheetId: activeSheet.id,
+            row: selectedCell.row,
+            col: selectedCell.col,
+            value: currentCell?.value ?? "",
+            formula: currentCell?.formula,
+            format: newFormat,
+          },
+        });
+      } catch (err) {
+        console.warn("sheet.set_cell failed", err instanceof Error ? err.message : err);
+      }
+    },
+    [activeSheet, selectedCell, docId, organizationId, workspaceId, ydoc]
+  );
+
   // ── Edit handler ────────────────────────────────────────────────
   const onCellValueChanged = useCallback(
     async (event: CellValueChangedEvent) => {
@@ -169,6 +324,11 @@ export function WorkspaceSheetSurface({
       const raw =
         event.newValue == null ? "" : String(event.newValue);
       const isFormula = raw.startsWith("=");
+      const cellsMap = ydoc.getMap("cells");
+      const key = `${activeSheet.id}:${row}:${col}`;
+      const currentCell = cellsMap.get(key) as {
+        format?: Record<string, unknown>;
+      } | undefined;
       try {
         await dispatchWorkspaceAction({
           organizationId,
@@ -181,20 +341,17 @@ export function WorkspaceSheetSurface({
             col,
             value: isFormula ? null : coerceCell(raw),
             formula: isFormula ? raw.slice(1) : undefined,
+            format: currentCell?.format,
           },
         });
       } catch (err) {
         // Roll back the optimistic AG Grid edit on failure.
         const prev =
-          (ydoc.getMap("cells").get(`${activeSheet.id}:${row}:${col}`) as
+          (cellsMap.get(key) as
             | { value?: unknown }
             | undefined)?.value ?? "";
         event.node.setDataValue(colField, prev);
-        // eslint-disable-next-line no-console
-        console.warn(
-          "sheet.set_cell failed",
-          err instanceof Error ? err.message : err,
-        );
+        console.warn("sheet.set_cell failed", err instanceof Error ? err.message : err);
       }
     },
     [activeSheet, docId, organizationId, workspaceId, ydoc],
@@ -214,12 +371,95 @@ export function WorkspaceSheetSurface({
     // cells is the only thing the eye expects in a grid. We don't
     // let the user's app-wide dark theme bleed in here.
     <div className="flex h-full flex-col bg-[#f6f8fa] text-[#1f1f1f]">
+      {/* Toolbar */}
+      <div className="flex shrink-0 items-center gap-1 border-b border-[#d0d7de] bg-white px-2 py-1 text-[11px]">
+        <button
+          type="button"
+          onClick={() => undoManager?.undo()}
+          disabled={!undoManager?.canUndo()}
+          title="Undo"
+          className={`flex items-center gap-1 rounded px-2 py-1 transition ${
+            !undoManager?.canUndo()
+              ? "text-[#57606a] opacity-40"
+              : "text-[#1f1f1f] hover:bg-[#f6f8fa]"
+          }`}
+        >
+          <Undo2 className="h-3.5 w-3.5" />
+          <span className="hidden md:inline">Undo</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => undoManager?.redo()}
+          disabled={!undoManager?.canRedo()}
+          title="Redo"
+          className={`flex items-center gap-1 rounded px-2 py-1 transition ${
+            !undoManager?.canRedo()
+              ? "text-[#57606a] opacity-40"
+              : "text-[#1f1f1f] hover:bg-[#f6f8fa]"
+          }`}
+        >
+          <Redo2 className="h-3.5 w-3.5" />
+          <span className="hidden md:inline">Redo</span>
+        </button>
+        <div className="mx-1 h-5 w-px bg-[#d0d7de]" />
+        <button
+          type="button"
+          onClick={() => applyFormatting({ bold: !getCurrentFormat("bold") })}
+          disabled={!selectedCell}
+          title="Bold"
+          className={`flex items-center gap-1 rounded px-2 py-1 transition ${
+            !selectedCell
+              ? "text-[#57606a] opacity-40"
+              : getCurrentFormat("bold")
+                ? "bg-blue-100 text-blue-800"
+                : "text-[#1f1f1f] hover:bg-[#f6f8fa]"
+          }`}
+        >
+          <Bold className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => applyFormatting({ italic: !getCurrentFormat("italic") })}
+          disabled={!selectedCell}
+          title="Italic"
+          className={`flex items-center gap-1 rounded px-2 py-1 transition ${
+            !selectedCell
+              ? "text-[#57606a] opacity-40"
+              : getCurrentFormat("italic")
+                ? "bg-blue-100 text-blue-800"
+                : "text-[#1f1f1f] hover:bg-[#f6f8fa]"
+          }`}
+        >
+          <Italic className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => applyFormatting({ underline: !getCurrentFormat("underline") })}
+          disabled={!selectedCell}
+          title="Underline"
+          className={`flex items-center gap-1 rounded px-2 py-1 transition ${
+            !selectedCell
+              ? "text-[#57606a] opacity-40"
+              : getCurrentFormat("underline")
+                ? "bg-blue-100 text-blue-800"
+                : "text-[#1f1f1f] hover:bg-[#f6f8fa]"
+          }`}
+        >
+          <Underline className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
       {/* Formula bar */}
       <FormulaBar
         ydoc={ydoc}
         sheetId={activeSheet.id}
         onCommit={async (row, col, raw) => {
           const isFormula = raw.startsWith("=");
+          const cellsMap = ydoc.getMap("cells");
+          const key = `${activeSheet.id}:${row}:${col}`;
+          const currentCell = cellsMap.get(key) as {
+            format?: Record<string, unknown>;
+          } | undefined;
           await dispatchWorkspaceAction({
             organizationId,
             workspaceId,
@@ -231,6 +471,7 @@ export function WorkspaceSheetSurface({
               col,
               value: isFormula ? null : coerceCell(raw),
               formula: isFormula ? raw.slice(1) : undefined,
+              format: currentCell?.format,
             },
           });
         }}
@@ -244,6 +485,7 @@ export function WorkspaceSheetSurface({
           columnDefs={columnDefs}
           rowData={rowData}
           onCellValueChanged={onCellValueChanged}
+          onCellClicked={onCellClicked}
           singleClickEdit={false}
           stopEditingWhenCellsLoseFocus
           rowHeight={28}
@@ -257,6 +499,89 @@ export function WorkspaceSheetSurface({
           // workloads.
         />
       </div>
+
+      {/* Charts */}
+      {activeSheetCharts.length > 0 && (
+        <div className="flex flex-wrap gap-4 border-t border-[#d0d7de] bg-white p-4">
+          {activeSheetCharts.map((chart) => {
+            const chartData = getChartData(chart.sourceRange, chart.sheetId);
+            const keys = Object.keys(chartData[0] || {});
+            const categoryKey = keys[0] || 'name';
+            const valueKeys = keys.slice(1);
+            const colors = ['#1a73e8', '#34a853', '#fbbc04', '#ea4335', '#9334e6'];
+            
+            const renderChart = () => {
+              switch (chart.type.toLowerCase()) {
+                case 'line':
+                  return (
+                    <LineChart width={400} height={300} data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey={categoryKey} />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      {valueKeys.map((key, i) => (
+                        <Line key={key} type="monotone" dataKey={key} stroke={colors[i % colors.length]} activeDot={{ r: 8 }} />
+                      ))}
+                    </LineChart>
+                  );
+                case 'bar':
+                  return (
+                    <BarChart width={400} height={300} data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey={categoryKey} />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      {valueKeys.map((key, i) => (
+                        <Bar key={key} dataKey={key} fill={colors[i % colors.length]} />
+                      ))}
+                    </BarChart>
+                  );
+                case 'pie':
+                  return (
+                    <PieChart width={400} height={300}>
+                      <Pie
+                        data={chartData}
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={100}
+                        fill="#8884d8"
+                        label={(entry) => String(entry[categoryKey])}
+                        dataKey={valueKeys[0] || 'value'}
+                      >
+                        {chartData.map((_, index) => (
+                          <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  );
+                default:
+                  return (
+                    <BarChart width={400} height={300} data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey={categoryKey} />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      {valueKeys.map((key, i) => (
+                        <Bar key={key} dataKey={key} fill={colors[i % colors.length]} />
+                      ))}
+                    </BarChart>
+                  );
+              }
+            };
+            
+            return (
+              <div key={chart.id} className="rounded border border-[#d0d7de] bg-white p-2">
+                {chart.title && <h4 className="mb-2 text-xs font-semibold text-[#1f1f1f]">{chart.title}</h4>}
+                {renderChart()}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Sheet tabs */}
       {sheets.length > 1 && (
@@ -279,6 +604,12 @@ export function WorkspaceSheetSurface({
       )}
     </div>
   );
+
+  function getCurrentFormat(key: string) {
+    if (!activeSheet || !selectedCell) return false;
+    const cell = ydoc.getMap("cells").get(`${activeSheet.id}:${selectedCell.row}:${selectedCell.col}`) as { format?: Record<string, unknown> } | undefined;
+    return !!cell?.format?.[key];
+  }
 }
 
 // ── Formula bar ──────────────────────────────────────────────────
