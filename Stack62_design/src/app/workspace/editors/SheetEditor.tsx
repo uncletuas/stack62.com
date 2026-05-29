@@ -16,8 +16,8 @@ import {
   Bold,
   Italic,
   Underline,
-  TextColor,
-  FillColor,
+  Type,
+  Palette,
   AlignLeft,
   AlignCenter,
   AlignRight,
@@ -410,10 +410,10 @@ export function SheetEditor({
         <div className="mx-1 h-6 w-px bg-[#dadce0]" />
 
         <button className="h-8 w-8 grid place-items-center text-[#5f6368] hover:bg-[#f1f3f4] rounded">
-          <TextColor size={18} />
+          <Type size={18} />
         </button>
         <button className="h-8 w-8 grid place-items-center text-[#5f6368] hover:bg-[#f1f3f4] rounded">
-          <FillColor size={18} />
+          <Palette size={18} />
         </button>
         <div className="mx-1 h-6 w-px bg-[#dadce0]" />
 
