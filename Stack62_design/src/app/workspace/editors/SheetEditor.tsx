@@ -6,7 +6,14 @@ import {
   useState,
 } from "react";
 import { AgGridReact } from "ag-grid-react";
-import type { ColDef, GridApi, GridOptions } from "ag-grid-community";
+import {
+  AllCommunityModule,
+  ModuleRegistry,
+  themeQuartz,
+  type ColDef,
+  type GridApi,
+  type GridOptions,
+} from "ag-grid-community";
 import {
   Undo2,
   Redo2,
@@ -26,6 +33,9 @@ import {
 } from "lucide-react";
 import "ag-grid-community/styles/ag-grid.min.css";
 import "ag-grid-community/styles/ag-theme-quartz.min.css";
+
+// Register AG Grid modules
+ModuleRegistry.registerModules([AllCommunityModule]);
 
 export type SheetCell = {
   v?: string;
@@ -194,10 +204,33 @@ export function SheetEditor({
     setWorkbook(parseWorkbook(text));
   }, [text]);
 
+  // Reset selected cell when active sheet changes
+  useEffect(() => {
+    setSelectedCell(null);
+    setFormulaBarValue("");
+  }, [activeSheetIndex]);
+
   const activeSheet = workbook.sheets[activeSheetIndex];
 
   const columnDefs = useMemo<ColDef[]>(() => {
-    const cols: ColDef[] = [];
+    const cols: ColDef[] = [
+      {
+        headerName: "",
+        field: "rowNumber",
+        width: 50,
+        pinned: "left",
+        editable: false,
+        sortable: false,
+        filter: false,
+        resizable: false,
+        cellStyle: {
+          backgroundColor: "#f1f3f4",
+          color: "#5f6368",
+          textAlign: "center",
+          fontWeight: 500,
+        },
+      },
+    ];
     for (let c = 0; c < DEFAULT_COLS; c++) {
       cols.push({
         field: `col${c}`,
@@ -246,6 +279,7 @@ export function SheetEditor({
   }, [onChange]);
 
   const onCellValueChanged = useCallback((params: any) => {
+    if (params.colDef.field === "rowNumber") return;
     const rowIdx = params.rowIndex;
     const colIdx = parseInt(params.colDef.field.slice(3), 10);
     setWorkbook((prev) => {
@@ -263,6 +297,7 @@ export function SheetEditor({
   }, [activeSheetIndex, emit]);
 
   const onCellClicked = useCallback((params: any) => {
+    if (params.colDef.field === "rowNumber") return;
     const colIdx = parseInt(params.colDef.field.slice(3), 10);
     const rowIdx = params.rowIndex;
     setSelectedCell({ row: rowIdx, col: colIdx });
@@ -300,12 +335,15 @@ export function SheetEditor({
     rowHeight: 28,
     headerHeight: 28,
     enableRangeSelection: true,
+    getRowId: (params) => `row-${params.data.rowNumber}`,
     onGridReady: (params) => {
       gridApiRef.current = params.api;
     },
     onCellValueChanged,
     onCellClicked,
     suppressColumnVirtualisation: true,
+    singleClickEdit: false,
+    stopEditingWhenCellsLoseFocus: true,
   };
 
   const currentCellStyle = selectedCell ? activeSheet.rows[selectedCell.row]?.[selectedCell.col] : {};
@@ -315,9 +353,6 @@ export function SheetEditor({
       {/* Google-style top bar */}
       <div className="flex h-12 items-center gap-2 border-b border-[#dadce0] bg-white px-3">
         <div className="flex items-center gap-2">
-          <div className="h-8 w-8 bg-[#34a853] rounded flex items-center justify-center">
-            <span className="text-white font-bold text-sm">S</span>
-          </div>
           <input
             type="text"
             value={title || "Untitled spreadsheet"}
@@ -327,36 +362,6 @@ export function SheetEditor({
         </div>
 
         <div className="ml-auto flex items-center gap-1">
-          <button className="h-8 px-3 text-sm font-medium text-[#5f6368] hover:bg-[#f1f3f4] rounded">
-            File
-          </button>
-          <button className="h-8 px-3 text-sm font-medium text-[#5f6368] hover:bg-[#f1f3f4] rounded">
-            Edit
-          </button>
-          <button className="h-8 px-3 text-sm font-medium text-[#5f6368] hover:bg-[#f1f3f4] rounded">
-            View
-          </button>
-          <button className="h-8 px-3 text-sm font-medium text-[#5f6368] hover:bg-[#f1f3f4] rounded">
-            Insert
-          </button>
-          <button className="h-8 px-3 text-sm font-medium text-[#5f6368] hover:bg-[#f1f3f4] rounded">
-            Format
-          </button>
-          <button className="h-8 px-3 text-sm font-medium text-[#5f6368] hover:bg-[#f1f3f4] rounded">
-            Data
-          </button>
-          <button className="h-8 px-3 text-sm font-medium text-[#5f6368] hover:bg-[#f1f3f4] rounded">
-            Tools
-          </button>
-          <button className="h-8 px-3 text-sm font-medium text-[#5f6368] hover:bg-[#f1f3f4] rounded">
-            Extensions
-          </button>
-          <button className="h-8 px-3 text-sm font-medium text-[#5f6368] hover:bg-[#f1f3f4] rounded">
-            Help
-          </button>
-        </div>
-
-        <div className="ml-4 flex items-center gap-1">
           <button className="h-8 w-8 grid place-items-center text-[#5f6368] hover:bg-[#f1f3f4] rounded-full">
             <Undo2 size={18} />
           </button>
@@ -381,12 +386,6 @@ export function SheetEditor({
 
       {/* Toolbar */}
       <div className="flex h-12 items-center gap-1 border-b border-[#dadce0] bg-white px-3">
-        <button className="h-8 w-8 grid place-items-center text-[#5f6368] hover:bg-[#f1f3f4] rounded">
-          <Undo2 size={18} />
-        </button>
-        <button className="h-8 w-8 grid place-items-center text-[#5f6368] hover:bg-[#f1f3f4] rounded">
-          <Redo2 size={18} />
-        </button>
         <div className="mx-1 h-6 w-px bg-[#dadce0]" />
 
         <button
@@ -491,6 +490,7 @@ export function SheetEditor({
             rowData={rowData}
             columnDefs={columnDefs}
             gridOptions={gridOptions}
+            theme={themeQuartz}
             rowSelection="multiple"
           />
         </div>

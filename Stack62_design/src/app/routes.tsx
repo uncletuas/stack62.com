@@ -11,11 +11,20 @@ import {
   SignUpIndividual,
   SignUpOrganization,
 } from "./public/SignUp";
+import { SheetEditor } from "./workspace/editors/SheetEditor";
+
+function TestSheetPage() {
+  return <SheetEditor text="" onChange={() => {}} title="Test Spreadsheet" />;
+}
 
 export const router = createBrowserRouter([
   {
     path: "/",
     Component: LandingPage,
+  },
+  {
+    path: "/test-sheet",
+    Component: TestSheetPage,
   },
   {
     path: "/pricing",

@@ -625,7 +625,15 @@ export function FilesExplorerEditor() {
   // Close the options menu when clicking elsewhere.
   useEffect(() => {
     if (!showOptionsMenu) return;
-    const onDoc = () => setShowOptionsMenu(false);
+    const onDoc = (e: MouseEvent) => {
+      // Check if click is anywhere inside either of our menus
+      const target = e.target as HTMLElement;
+      const isInsideOptionsMenu = target.closest('[role="menu"]') !== null;
+      if (!isInsideOptionsMenu) {
+        setShowOptionsMenu(false);
+        setShowNewSubmenu(false);
+      }
+    };
     window.addEventListener("click", onDoc);
     return () => window.removeEventListener("click", onDoc);
   }, [showOptionsMenu]);
@@ -633,7 +641,15 @@ export function FilesExplorerEditor() {
   // Close the new submenu when clicking elsewhere.
   useEffect(() => {
     if (!showNewSubmenu) return;
-    const onDoc = () => setShowNewSubmenu(false);
+    // The main menu's handler already covers this, but we'll keep this
+    // for safety and in case we ever separate the menus
+    const onDoc = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const isInsideSubmenu = target.closest('[role="menu"]') !== null;
+      if (!isInsideSubmenu) {
+        setShowNewSubmenu(false);
+      }
+    };
     window.addEventListener("click", onDoc);
     return () => window.removeEventListener("click", onDoc);
   }, [showNewSubmenu]);
@@ -717,7 +733,7 @@ export function FilesExplorerEditor() {
                   {showNewSubmenu && (
                     <div
                       role="menu"
-                      className="absolute left-full top-0 ml-1 w-56 overflow-hidden rounded-md border border-app bg-app-elevated shadow-lg"
+                      className="absolute right-full top-0 mr-1 w-56 overflow-hidden rounded-md border border-app bg-app-elevated shadow-lg"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <NewMenuItem
