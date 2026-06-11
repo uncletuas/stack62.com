@@ -7,6 +7,8 @@ import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
+import Underline from "@tiptap/extension-underline";
+import TextAlign from "@tiptap/extension-text-align";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import {
@@ -201,6 +203,8 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
               ? "Start typing — your Coworker can also edit alongside you."
               : "Connecting…",
         }),
+        Underline,
+        TextAlign.configure({ types: ["heading", "paragraph"] }),
       ],
       editorProps: {
         attributes: {
@@ -260,7 +264,6 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
         <WorkspaceSheetSurface
           docId={docId}
           ydoc={ydoc}
-          provider={providerRef.current}
           organizationId={currentOrganization?.id ?? ""}
           workspaceId={currentWorkspace?.id ?? ""}
         />
@@ -278,13 +281,8 @@ export function WorkspaceDocEditor({ tab }: { tab: EditorTab }) {
       );
     }
     return (
-      <div className="min-h-0 flex-1 overflow-auto bg-[#f1f3f4] py-6">
-        <div className="mx-auto" style={{ width: pageSize === "a4" ? "8.27in" : "8.5in" }}>
-          <PageContainer
-            editor={editor}
-            pageSize={pageSize}
-          />
-        </div>
+      <div className="min-h-0 flex-1 overflow-auto bg-[#e8eaed] py-8 px-4">
+        <PageContainer editor={editor} pageSize={pageSize} />
       </div>
     );
   })();
@@ -622,7 +620,7 @@ function Toolbar({
         icon={UnderlineIcon}
         label="Underline"
         active={editor.isActive("underline")}
-        onClick={() => editor.chain().focus().toggleMark("underline").run()}
+        onClick={() => editor.chain().focus().toggleUnderline().run()}
       />
       <Btn
         icon={Strikethrough}
@@ -660,9 +658,9 @@ function Toolbar({
 
       <Sep />
 
-      <Btn icon={AlignLeft} label="Align left" onClick={() => editor.chain().focus().setTextAlign?.("left").run()} />
-      <Btn icon={AlignCenter} label="Align center" onClick={() => editor.chain().focus().setTextAlign?.("center").run()} />
-      <Btn icon={AlignRight} label="Align right" onClick={() => editor.chain().focus().setTextAlign?.("right").run()} />
+      <Btn icon={AlignLeft} label="Align left" active={editor.isActive({ textAlign: "left" })} onClick={() => editor.chain().focus().setTextAlign("left").run()} />
+      <Btn icon={AlignCenter} label="Align center" active={editor.isActive({ textAlign: "center" })} onClick={() => editor.chain().focus().setTextAlign("center").run()} />
+      <Btn icon={AlignRight} label="Align right" active={editor.isActive({ textAlign: "right" })} onClick={() => editor.chain().focus().setTextAlign("right").run()} />
 
       <Sep />
 
@@ -765,6 +763,16 @@ function hashColor(seed: string): string {
   return palette[hash % palette.length];
 }
 
+// Page dimensions at 96 dpi
+const PAGE_PX = {
+  letter: { w: 816, h: 1056 },  // 8.5 × 11 in
+  a4:     { w: 794, h: 1123 },  // 8.27 × 11.69 in
+  legal:  { w: 816, h: 1344 },  // 8.5 × 14 in
+} as const;
+
+const PAGE_MARGIN = 96;  // 1 inch at 96 dpi
+const PAGE_GAP    = 24;  // gap between page sheets
+
 function PageContainer({
   editor,
   pageSize,
@@ -772,78 +780,64 @@ function PageContainer({
   editor: ReturnType<typeof useEditor>;
   pageSize: "letter" | "a4" | "legal";
 }) {
-  const [pageCount, setPageCount] = useState(1);
+  const { w, h } = PAGE_PX[pageSize];
+  const usableH   = h - 2 * PAGE_MARGIN;
+
+  const [pages, setPages] = useState(1);
 
   useEffect(() => {
     if (!editor) return;
-
-    const updatePageCount = () => {
-      const contentHeight = editor.view.dom.scrollHeight;
-      const pageHeightInches = pageSize === "a4" ? 11.69 : pageSize === "legal" ? 14 : 11;
-      const contentHeightInches = contentHeight / 96;
-      const usablePageHeightInches = pageHeightInches - 2;
-      const numPages = Math.max(1, Math.ceil(contentHeightInches / usablePageHeightInches));
-      setPageCount(numPages);
+    const recalc = () => {
+      const raw = editor.view.dom.scrollHeight;
+      setPages(Math.max(1, Math.ceil(raw / usableH)));
     };
-
-    updatePageCount();
-
-    const observer = new MutationObserver(updatePageCount);
-    if (editor.view.dom) observer.observe(editor.view.dom, { childList: true, subtree: true, characterData: true });
-    
-    editor.on('update', updatePageCount);
-    
+    recalc();
+    editor.on("update", recalc);
+    const obs = new ResizeObserver(recalc);
+    obs.observe(editor.view.dom);
     return () => {
-      observer.disconnect();
-      editor.off('update', updatePageCount);
+      editor.off("update", recalc);
+      obs.disconnect();
     };
-  }, [editor, pageSize]);
+  }, [editor, pageSize, usableH]);
 
-  const pageHeight = useMemo(() => {
-    if (pageSize === "a4") return "11.69in";
-    if (pageSize === "legal") return "14in";
-    return "11in";
-  }, [pageSize]);
-
-  const pageHeightPx = useMemo(() => {
-    if (pageSize === "a4") return 11.69 * 96;
-    if (pageSize === "legal") return 14 * 96;
-    return 11 * 96;
-  }, [pageSize]);
-
-  const gapPx = 24; // gap between pages
+  const totalH = pages * h + (pages - 1) * PAGE_GAP;
 
   return (
-    <div className="flex flex-col gap-6">
-      {Array.from({ length: pageCount }).map((_, index) => (
+    <div
+      className="relative mx-auto"
+      style={{ width: w, minHeight: totalH }}
+    >
+      {/* White page sheets — visual only, behind the editor */}
+      {Array.from({ length: pages }).map((_, i) => (
         <div
-          key={index}
-          className="relative bg-white shadow-[0_2px_8px_rgba(0,0,0,0.12)]"
+          key={i}
           style={{
-            height: pageHeight,
-            overflow: "hidden",
+            position:      "absolute",
+            top:           i * (h + PAGE_GAP),
+            left:          0,
+            right:         0,
+            height:        h,
+            background:    "white",
+            boxShadow:     "0 1px 3px rgba(60,64,67,0.15), 0 2px 6px rgba(60,64,67,0.1)",
+            pointerEvents: "none",
+            zIndex:        0,
           }}
-        >
-          <div
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              width: "100%",
-              transform: `translateY(-${index * (pageHeightPx + gapPx)}px)`,
-            }}
-          >
-            <EditorContent
-              editor={editor}
-              className="workspace-doc-prose relative z-10"
-              style={{
-                padding: "1in 1in",
-                lineHeight: 1.65,
-              }}
-            />
-          </div>
-        </div>
+        />
       ))}
+
+      {/* Single editor instance overlaid on all pages */}
+      <div style={{ position: "relative", zIndex: 1 }}>
+        <EditorContent
+          editor={editor}
+          className="workspace-doc-prose"
+          style={{
+            padding:    `${PAGE_MARGIN}px`,
+            minHeight:  totalH,
+            background: "transparent",
+          }}
+        />
+      </div>
     </div>
   );
 }

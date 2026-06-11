@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import type { ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
 import { Button } from "../components/ui/button";
+import { Logo } from "../components/Logo";
 import { useAppContext } from "../context/app-context";
 import { useTheme } from "../context/theme-context";
 
@@ -154,36 +155,5 @@ function FooterCol({
 }
 
 export function BrandMark({ size = 28 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 32 32"
-      xmlns="http://www.w3.org/2000/svg"
-      className="rounded-lg shadow-sm"
-    >
-      <defs>
-        <linearGradient id="s62g" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#0F172A" />
-          <stop offset="100%" stopColor="#1E293B" />
-        </linearGradient>
-      </defs>
-      <rect width="32" height="32" rx="8" fill="url(#s62g)" />
-      <path
-        d="M9 11.5c0-1.93 1.79-3.5 4-3.5h6c2.21 0 4 1.57 4 3.5S21.21 15 19 15h-6"
-        stroke="#fff"
-        strokeWidth="2"
-        fill="none"
-        strokeLinecap="round"
-      />
-      <path
-        d="M23 20.5c0 1.93-1.79 3.5-4 3.5h-6c-2.21 0-4-1.57-4-3.5S10.79 17 13 17h6"
-        stroke="#fff"
-        strokeWidth="2"
-        fill="none"
-        strokeLinecap="round"
-        opacity="0.8"
-      />
-    </svg>
-  );
+  return <Logo size={size} />;
 }

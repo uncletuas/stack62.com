@@ -61,7 +61,7 @@ export class OfficeTools {
             kind: {
               type: 'string',
               enum: ['document', 'sheet', 'slides'],
-              description: 'document = TipTap-based rich text. sheet = AG Grid spreadsheet. slides = Konva slide deck.',
+              description: 'document = TipTap-based rich text. sheet = Fortune Sheet Google-Sheets-clone (400+ formulas, charts, conditional formatting, data validation, freeze panes, merge cells). slides = Konva slide deck.',
             },
             title: {
               type: 'string',
@@ -105,7 +105,34 @@ export class OfficeTools {
 
       tool(
         'office.dispatch_action',
-        "Dispatch a single typed mutation to an AI-native workspace doc. This is THE way you edit Stack62 documents, sheets, and presentations — never UI clicks. Provide a verb (e.g. 'doc.insert_block', 'sheet.set_cell', 'slides.add_element') and the matching payload. See docs/AI_NATIVE_WORKSPACE.md for the full action schema. Returns the new version number; the editor surfaces the change to any connected human user automatically.",
+        `Dispatch a single typed mutation to an AI-native workspace doc (sheet, document, or presentation).
+This is THE way you edit Stack62 spreadsheets — never UI clicks.
+
+SHEET verbs and their payloads (Google Sheets parity):
+  sheet.set_cell      — { sheetId, row, col, value?, formula?, format?: {bold,italic,underline,strike,align,color,background,fontSize,fontFamily,numberFormat} }
+  sheet.set_range     — { sheetId, fromRow, fromCol, rows: value[][] } — bulk-fill a rectangle
+  sheet.add_sheet     — { name, rowCount?, colCount? }
+  sheet.rename_sheet  — { sheetId, name }
+  sheet.delete_sheet  — { sheetId }
+  sheet.add_row       — { sheetId, afterRow? }
+  sheet.delete_row    — { sheetId, row }
+  sheet.add_column    — { sheetId, afterCol? }
+  sheet.delete_column — { sheetId, col }
+  sheet.sort          — { sheetId, column, direction:'asc'|'desc' }
+  sheet.filter        — { sheetId, column, predicate:{op,value} }
+  sheet.add_chart     — { sheetId, sourceRange:'A1:C10', type:'bar'|'line'|'pie'|'area'|'scatter', title? }
+  sheet.update_chart  — { chartId, patch }
+  sheet.delete_chart  — { chartId }
+  sheet.set_merges    — { sheetId, merges: { "r_c": {r,c,rs,cs} } } — merge/unmerge cells (rs/cs=row/col span)
+  sheet.set_freeze    — { sheetId, freeze: { row?:{row_focus,row_count}, column?:{col_focus,col_count} } | null }
+  sheet.set_row_height — { sheetId, row, height } — in pixels
+  sheet.set_col_width  — { sheetId, col, width }  — in pixels
+  sheet.set_conditional_formats — { sheetId, rules: [...] } — full replacement of all CF rules
+  sheet.set_data_validations    — { sheetId, validations: {"r_c": {type:'dropdown'|'number'|'text'|'date'|'checkbox', value1, value2?, hintText?}} }
+  sheet.clear_range   — { sheetId, fromRow, fromCol, toRow, toCol, clearType?:'all'|'values'|'formats' }
+  sheet.set_named_range — { sheetId, name, range:'A1:C10' | null } — null deletes the named range
+
+Always call office.workspace_read first to get sheetIds. Returns the new version number; changes appear live in any open browser tab.`,
         {
           properties: {
             docId: {

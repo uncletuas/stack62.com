@@ -253,6 +253,82 @@ const SheetDeleteColumnSchema = z.object({
   col: positiveIntSchema,
 });
 
+// Extended Google Sheets-parity actions ─────────────────────────
+
+const SheetSetMergesSchema = z.object({
+  verb: z.literal('sheet.set_merges'),
+  sheetId: uuidSchema,
+  /** Map from "r_c" key to {r,c,rs,cs} — rs/cs are row/col span counts. Pass {} to clear all merges. */
+  merges: z.record(
+    z.string(),
+    z.object({ r: positiveIntSchema, c: positiveIntSchema, rs: z.number().int().positive(), cs: z.number().int().positive() }),
+  ),
+});
+
+const SheetSetFreezeSchema = z.object({
+  verb: z.literal('sheet.set_freeze'),
+  sheetId: uuidSchema,
+  /** Null clears the freeze. */
+  freeze: z
+    .object({
+      row: z
+        .object({ row_focus: positiveIntSchema, row_count: positiveIntSchema })
+        .optional(),
+      column: z
+        .object({ col_focus: positiveIntSchema, col_count: positiveIntSchema })
+        .optional(),
+    })
+    .nullable(),
+});
+
+const SheetSetRowHeightSchema = z.object({
+  verb: z.literal('sheet.set_row_height'),
+  sheetId: uuidSchema,
+  row: positiveIntSchema,
+  height: z.number().positive().max(1000),
+});
+
+const SheetSetColWidthSchema = z.object({
+  verb: z.literal('sheet.set_col_width'),
+  sheetId: uuidSchema,
+  col: positiveIntSchema,
+  width: z.number().positive().max(2000),
+});
+
+const SheetSetConditionalFormatsSchema = z.object({
+  verb: z.literal('sheet.set_conditional_formats'),
+  sheetId: uuidSchema,
+  /** Full replacement of all conditional-format rules on this sheet. Pass [] to clear. */
+  rules: z.array(z.record(z.string(), z.unknown())),
+});
+
+const SheetSetDataValidationsSchema = z.object({
+  verb: z.literal('sheet.set_data_validations'),
+  sheetId: uuidSchema,
+  /** Map from "r_c" key to validation rule. Pass {} to clear all. */
+  validations: z.record(z.string(), z.unknown()),
+});
+
+const SheetClearRangeSchema = z.object({
+  verb: z.literal('sheet.clear_range'),
+  sheetId: uuidSchema,
+  /** Inclusive zero-based coordinates. */
+  fromRow: positiveIntSchema,
+  fromCol: positiveIntSchema,
+  toRow: positiveIntSchema,
+  toCol: positiveIntSchema,
+  /** What to clear. Defaults to 'all'. */
+  clearType: z.enum(['all', 'values', 'formats']).optional(),
+});
+
+const SheetSetNamedRangeSchema = z.object({
+  verb: z.literal('sheet.set_named_range'),
+  sheetId: uuidSchema,
+  name: z.string().min(1).max(64),
+  /** A1-notation range, e.g. "A1:C10". Pass null to delete the named range. */
+  range: z.string().nullable(),
+});
+
 // Slide actions ----------------------------------------------------
 
 const SlidesAddSlideSchema = z.object({
@@ -333,6 +409,14 @@ export const WorkspaceActionPayloadSchema = z.discriminatedUnion('verb', [
   SheetDeleteRowSchema,
   SheetAddColumnSchema,
   SheetDeleteColumnSchema,
+  SheetSetMergesSchema,
+  SheetSetFreezeSchema,
+  SheetSetRowHeightSchema,
+  SheetSetColWidthSchema,
+  SheetSetConditionalFormatsSchema,
+  SheetSetDataValidationsSchema,
+  SheetClearRangeSchema,
+  SheetSetNamedRangeSchema,
   SlidesAddSlideSchema,
   SlidesDeleteSlideSchema,
   SlidesAddElementSchema,
@@ -403,6 +487,14 @@ export const WORKSPACE_ACTION_VERBS = [
   'sheet.delete_row',
   'sheet.add_column',
   'sheet.delete_column',
+  'sheet.set_merges',
+  'sheet.set_freeze',
+  'sheet.set_row_height',
+  'sheet.set_col_width',
+  'sheet.set_conditional_formats',
+  'sheet.set_data_validations',
+  'sheet.clear_range',
+  'sheet.set_named_range',
   'slides.add_slide',
   'slides.delete_slide',
   'slides.add_element',

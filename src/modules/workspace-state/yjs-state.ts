@@ -97,12 +97,20 @@ export function makeFreshDoc(
         {
           id: randomUUID(),
           name: 'Sheet1',
-          rowCount: 100,
+          rowCount: 200,
           colCount: 26,
         },
       ]);
       doc.getMap('cells');
       doc.getMap('charts');
+      // Extended Google Sheets-parity state maps
+      doc.getMap('merges');
+      doc.getMap('freezes');
+      doc.getMap('rowHeights');
+      doc.getMap('colWidths');
+      doc.getMap('conditionalFormats');
+      doc.getMap('dataValidations');
+      doc.getMap('namedRanges');
       if (Array.isArray(initial)) {
         const sheetId = (sheets.get(0) as { id: string }).id;
         const cells = doc.getMap('cells');
@@ -221,11 +229,19 @@ export function applyActionToDoc(
       // ── Sheet ───────────────────────────────────────────────
       case 'sheet.add_sheet':
         if (kind !== 'sheet') return;
+        // Ensure extended maps exist
+        doc.getMap('merges');
+        doc.getMap('freezes');
+        doc.getMap('rowHeights');
+        doc.getMap('colWidths');
+        doc.getMap('conditionalFormats');
+        doc.getMap('dataValidations');
+        doc.getMap('namedRanges');
         doc.getArray('sheets').push([
           {
             id: randomUUID(),
             name: action.name,
-            rowCount: action.rowCount ?? 100,
+            rowCount: action.rowCount ?? 200,
             colCount: action.colCount ?? 26,
           },
         ]);
@@ -410,7 +426,7 @@ export function applyActionToDoc(
           const sheetId = action.sheetId;
           const keysToUpdate: Array<{ oldKey: string; newKey: string; value: unknown }> = [];
           const keysToDelete: string[] = [];
-          
+
           for (const key of Array.from(cells.keys())) {
             if (key.startsWith(`${sheetId}:`)) {
               const parts = key.split(':');
@@ -430,7 +446,7 @@ export function applyActionToDoc(
               }
             }
           }
-          
+
           // Delete old keys, then insert new ones
           for (const key of keysToDelete) {
             cells.delete(key);
@@ -439,7 +455,7 @@ export function applyActionToDoc(
             cells.delete(oldKey);
             cells.set(newKey, value);
           }
-          
+
           // Update sheet's column count
           const arr = doc.getArray('sheets');
           for (let i = 0; i < arr.length; i++) {
@@ -450,6 +466,75 @@ export function applyActionToDoc(
               arr.insert(i, [{ ...s, colCount: newCount }]);
               break;
             }
+          }
+        }
+        return;
+
+      // ── Extended Google Sheets-parity actions ────────────────
+
+      case 'sheet.set_merges':
+        if (kind !== 'sheet') return;
+        doc.getMap('merges').set(action.sheetId, action.merges);
+        return;
+
+      case 'sheet.set_freeze':
+        if (kind !== 'sheet') return;
+        if (action.freeze == null) {
+          doc.getMap('freezes').delete(action.sheetId);
+        } else {
+          doc.getMap('freezes').set(action.sheetId, action.freeze);
+        }
+        return;
+
+      case 'sheet.set_row_height':
+        if (kind !== 'sheet') return;
+        doc.getMap('rowHeights').set(`${action.sheetId}:${action.row}`, action.height);
+        return;
+
+      case 'sheet.set_col_width':
+        if (kind !== 'sheet') return;
+        doc.getMap('colWidths').set(`${action.sheetId}:${action.col}`, action.width);
+        return;
+
+      case 'sheet.set_conditional_formats':
+        if (kind !== 'sheet') return;
+        doc.getMap('conditionalFormats').set(action.sheetId, action.rules);
+        return;
+
+      case 'sheet.set_data_validations':
+        if (kind !== 'sheet') return;
+        doc.getMap('dataValidations').set(action.sheetId, action.validations);
+        return;
+
+      case 'sheet.clear_range': {
+        if (kind !== 'sheet') return;
+        const cells = doc.getMap('cells');
+        const clearType = action.clearType ?? 'all';
+        for (let r = action.fromRow; r <= action.toRow; r++) {
+          for (let c = action.fromCol; c <= action.toCol; c++) {
+            const key = `${action.sheetId}:${r}:${c}`;
+            const existing = cells.get(key) as { value?: unknown; formula?: string; format?: unknown } | undefined;
+            if (!existing) continue;
+            if (clearType === 'all') {
+              cells.delete(key);
+            } else if (clearType === 'values') {
+              cells.set(key, { ...existing, value: null, formula: undefined });
+            } else if (clearType === 'formats') {
+              cells.set(key, { ...existing, format: undefined });
+            }
+          }
+        }
+        return;
+      }
+
+      case 'sheet.set_named_range':
+        if (kind !== 'sheet') return;
+        {
+          const named = doc.getMap('namedRanges');
+          if (action.range == null) {
+            named.delete(action.name);
+          } else {
+            named.set(action.name, { sheetId: action.sheetId, range: action.range });
           }
         }
         return;
@@ -575,6 +660,13 @@ export function snapshotDoc(doc: Y.Doc, kind: WorkspaceDocKind): unknown {
       sheets: doc.getArray('sheets').toArray(),
       cells: doc.getMap('cells').toJSON(),
       charts: Array.from(doc.getMap('charts').values()),
+      merges: doc.getMap('merges').toJSON(),
+      freezes: doc.getMap('freezes').toJSON(),
+      rowHeights: doc.getMap('rowHeights').toJSON(),
+      colWidths: doc.getMap('colWidths').toJSON(),
+      conditionalFormats: doc.getMap('conditionalFormats').toJSON(),
+      dataValidations: doc.getMap('dataValidations').toJSON(),
+      namedRanges: doc.getMap('namedRanges').toJSON(),
     };
   }
   return {

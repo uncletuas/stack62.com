@@ -35,6 +35,11 @@ import Link from "@tiptap/extension-link";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import Placeholder from "@tiptap/extension-placeholder";
+import UnderlineExt from "@tiptap/extension-underline";
+import TextAlign from "@tiptap/extension-text-align";
+import TextStyle from "@tiptap/extension-text-style";
+import Color from "@tiptap/extension-color";
+import Highlight from "@tiptap/extension-highlight";
 
 const FONT_FAMILIES = [
   { value: "'Inter', 'Arial', sans-serif", label: "Inter" },
@@ -123,6 +128,7 @@ export function DocsEditor({
 }) {
   const lastEmittedRef = useRef<string>("");
   const [layout, setLayout] = useState<DocsLayout>(DEFAULT_LAYOUT);
+  const [docPageCount, setDocPageCount] = useState(1);
 
   const editor = useEditor({
     extensions: [
@@ -146,6 +152,11 @@ export function DocsEditor({
       TaskList,
       TaskItem.configure({ nested: true }),
       Placeholder.configure({ placeholder: "Type something..." }),
+      UnderlineExt,
+      TextAlign.configure({ types: ["heading", "paragraph"] }),
+      TextStyle,
+      Color,
+      Highlight.configure({ multicolor: true }),
     ],
     content: looksLikeHtml(text) ? text : textToHtml(text),
     editable: !readOnly,
@@ -276,19 +287,35 @@ export function DocsEditor({
     return () => window.removeEventListener("stack62:doc-command", listener);
   }, [handleCommand]);
 
-  const pageStyle = useMemo(() => {
+  // Track content height to calculate page count
+  useEffect(() => {
+    if (!editor) return;
     const size = PAGE_SIZES[layout.pageSize];
     const portrait = layout.orientation === "portrait";
-    const widthIn = portrait ? size.widthIn : size.heightIn;
-    const heightIn = portrait ? size.heightIn : size.widthIn;
-    return {
-      width: `${widthIn}in`,
-      minHeight: `${heightIn}in`,
-      padding: `${layout.marginIn}in`,
-      fontFamily: layout.fontFamily,
-      fontSize: `${layout.fontSize}px`,
-    } as const;
-  }, [layout]);
+    const pageHPx = Math.round((portrait ? size.heightIn : size.widthIn) * 96);
+    const marginPx = Math.round(layout.marginIn * 96);
+    const usableH = pageHPx - 2 * marginPx;
+    const update = () => {
+      const raw = editor.view.dom.scrollHeight;
+      setDocPageCount(Math.max(1, Math.ceil(raw / usableH)));
+    };
+    update();
+    editor.on("update", update);
+    const obs = new ResizeObserver(update);
+    obs.observe(editor.view.dom);
+    return () => { editor.off("update", update); obs.disconnect(); };
+  }, [editor, layout.pageSize, layout.orientation, layout.marginIn]);
+
+  // Page dimensions computed for rendering
+  const pageDims = useMemo(() => {
+    const size = PAGE_SIZES[layout.pageSize];
+    const portrait = layout.orientation === "portrait";
+    const wPx = Math.round((portrait ? size.widthIn : size.heightIn) * 96);
+    const hPx = Math.round((portrait ? size.heightIn : size.widthIn) * 96);
+    const marginPx = Math.round(layout.marginIn * 96);
+    const gap = 24;
+    return { wPx, hPx, marginPx, gap };
+  }, [layout.pageSize, layout.orientation, layout.marginIn]);
 
   const insertLink = useCallback(async () => {
     if (!editor) return;
@@ -568,16 +595,55 @@ export function DocsEditor({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto py-6">
+      <div className="min-h-0 flex-1 overflow-auto bg-[#e8eaed] py-6">
         <div
-          className="mx-auto bg-white text-[#1f1f1f] shadow-[0_2px_8px rgba(0,0,0,0.15)]"
           style={{
-            ...pageStyle,
             transform: `scale(${Math.max(0.5, zoom / 100)})`,
             transformOrigin: "top center",
           }}
         >
-          <EditorContent editor={editor} />
+          {/* Multi-page canvas: separate white page sheets + single editor overlay */}
+          <div
+            className="relative mx-auto"
+            style={{
+              width: pageDims.wPx,
+              minHeight: docPageCount * pageDims.hPx + (docPageCount - 1) * pageDims.gap,
+            }}
+          >
+            {/* Page background sheets */}
+            {Array.from({ length: docPageCount }).map((_, i) => (
+              <div
+                key={i}
+                style={{
+                  position:      "absolute",
+                  top:           i * (pageDims.hPx + pageDims.gap),
+                  left:          0,
+                  right:         0,
+                  height:        pageDims.hPx,
+                  background:    "white",
+                  boxShadow:     "0 1px 3px rgba(60,64,67,0.15), 0 2px 6px rgba(60,64,67,0.1)",
+                  pointerEvents: "none",
+                  zIndex:        0,
+                }}
+              />
+            ))}
+
+            {/* Single editor instance overlaid on all pages */}
+            <EditorContent
+              editor={editor}
+              className="docs-editor"
+              style={{
+                position:   "relative",
+                zIndex:     1,
+                padding:    `${pageDims.marginPx}px`,
+                minHeight:  docPageCount * pageDims.hPx + (docPageCount - 1) * pageDims.gap,
+                fontFamily: layout.fontFamily,
+                fontSize:   `${layout.fontSize}px`,
+                color:      "#1f1f1f",
+                background: "transparent",
+              }}
+            />
+          </div>
         </div>
       </div>
 

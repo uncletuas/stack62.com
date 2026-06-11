@@ -14,7 +14,6 @@ import {
   FileDown,
   FolderOpen,
   HelpCircle,
-  Layers,
   LogOut,
   Mail,
   PanelLeft,
@@ -24,8 +23,8 @@ import {
   Search,
   Sparkles,
   Upload,
-  User as UserIcon,
 } from "lucide-react";
+import { Logo } from "../components/Logo";
 import { useAppContext } from "../context/app-context";
 import {
   auditExportCsvUrl,
@@ -258,11 +257,8 @@ export function TitleBar() {
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-app bg-app-surface px-3 text-sm">
-      {/* Logo */}
       <span className="flex items-center gap-1.5 font-semibold tracking-tight text-app">
-        <span className="grid h-6 w-6 place-items-center rounded-md bg-accent text-accent-fg">
-          <Layers className="h-3.5 w-3.5" />
-        </span>
+        <Logo size={24} />
         Stack62
       </span>
 

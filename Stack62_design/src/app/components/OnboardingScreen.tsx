@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { Building2, Layers } from 'lucide-react';
 import { useAppContext } from '../context/app-context';
+import { Logo } from './Logo';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -59,10 +60,10 @@ export function OnboardingScreen() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-app p-6">
       <div className="w-full max-w-lg">
-        {/* Logo / brand */}
-        <div className="mb-8 text-center">
+        <div className="mb-8 flex flex-col items-center gap-2">
+          <Logo size={44} />
           <p className="text-2xl font-bold tracking-tight text-app">Stack62</p>
-          <p className="mt-1 text-sm text-app-muted">Your AI-powered business operations platform</p>
+          <p className="text-sm text-app-muted">Your AI-powered business operations platform</p>
         </div>
 
         {/* Progress */}
