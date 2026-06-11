@@ -4,19 +4,19 @@
 # (render.yaml) overrides `dockerCommand` per service to pick which one.
 # ───────────────────────────────────────────────────────────────────────
 
-FROM node:20-alpine AS deps
+FROM node:20-slim AS deps
 WORKDIR /usr/src/app
 COPY package*.json ./
 # Install all deps (incl. dev) so we can run `nest build` in the next stage.
 RUN npm ci --include=dev
 
-FROM node:20-alpine AS builder
+FROM node:20-slim AS builder
 WORKDIR /usr/src/app
 COPY --from=deps /usr/src/app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
-FROM node:20-alpine AS runner
+FROM node:20-slim AS runner
 WORKDIR /usr/src/app
 ENV NODE_ENV=production
 # Render exposes PORT to the container; main.ts honours it. We also

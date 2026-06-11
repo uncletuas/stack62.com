@@ -12,11 +12,23 @@
  * fire-and-forget errors to Sentry.
  */
 import * as Sentry from '@sentry/node';
-import { nodeProfilingIntegration } from '@sentry/profiling-node';
 
 const dsn = process.env.SENTRY_DSN;
 
 if (dsn) {
+  // Profiling uses a native addon that may not be available on all platforms
+  // (e.g. Alpine musl). Load it lazily so a missing binary doesn't crash startup.
+  let profilingIntegrations: Sentry.Integration[] = [];
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { nodeProfilingIntegration } = require('@sentry/profiling-node') as {
+      nodeProfilingIntegration: () => Sentry.Integration;
+    };
+    profilingIntegrations = [nodeProfilingIntegration()];
+  } catch {
+    console.warn('[sentry] profiling-node unavailable on this platform — profiling disabled');
+  }
+
   Sentry.init({
     dsn,
     environment:
@@ -25,7 +37,7 @@ if (dsn) {
       process.env.SENTRY_RELEASE ||
       process.env.RENDER_GIT_COMMIT?.slice(0, 8) ||
       'dev',
-    integrations: [nodeProfilingIntegration()],
+    integrations: profilingIntegrations,
     tracesSampleRate: Number(
       process.env.SENTRY_TRACES_SAMPLE_RATE || '0.1',
     ),
