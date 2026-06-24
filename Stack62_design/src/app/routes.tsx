@@ -1,5 +1,6 @@
 import { createBrowserRouter, Navigate } from "react-router";
 import { OAuthCallbackScreen } from "./components/OAuthCallbackScreen";
+import { AssemblyGate } from "./assembly/AssemblyGate";
 import { AppGate } from "./public/AppGate";
 import { InviteAccept } from "./public/InviteAccept";
 import { LandingPage } from "./public/LandingPage";
@@ -73,6 +74,10 @@ export const router = createBrowserRouter([
   {
     path: "/app/*",
     Component: AppGate,
+  },
+  {
+    path: "/assembly/*",
+    Component: AssemblyGate,
   },
   {
     path: "*",

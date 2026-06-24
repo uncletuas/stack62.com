@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { UsersService } from '../users/users.service';
+import type { JwtUser } from './interfaces/jwt-user.interface';
 
 interface JwtPayload {
   sub: string;
@@ -27,7 +28,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: JwtPayload) {
+  async validate(payload: JwtPayload): Promise<JwtUser> {
     const user = await this.usersService
       .findById(payload.sub)
       .catch(() => null);
@@ -36,11 +37,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Invalid authentication token.');
     }
 
+    // platformRole is read from the live user row (not the token) so a
+    // revoked/granted admin role takes effect immediately, without
+    // waiting for the JWT to expire.
     return {
       userId: user.id,
       email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,
+      platformRole: user.platformRole ?? null,
     };
   }
 }

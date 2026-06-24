@@ -1,5 +1,6 @@
 import { Column, Entity, Index } from 'typeorm';
 import { AppBaseEntity } from '../../../shared/database/base.entity';
+import type { PlatformRole } from '../../../shared/access-control/platform-roles';
 
 @Entity({ name: 'users' })
 export class UserEntity extends AppBaseEntity {
@@ -26,6 +27,19 @@ export class UserEntity extends AppBaseEntity {
 
   @Column({ length: 30, default: 'active' })
   status!: string;
+
+  /**
+   * Platform (Assembly) role. Null for ordinary customers; set only for
+   * Loopital staff who may reach the administrative backend. See
+   * `shared/access-control/platform-roles.ts`.
+   */
+  @Column({
+    name: 'platform_role',
+    type: 'varchar',
+    length: 40,
+    nullable: true,
+  })
+  platformRole!: PlatformRole | null;
 
   // ── Email verification ────────────────────────────────────────────
   // Verified email = user clicked the link in their welcome email.

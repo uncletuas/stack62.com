@@ -45,6 +45,7 @@ import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SearchModule } from './modules/search/search.module';
 import { BillingModule } from './modules/billing/billing.module';
+import { AdminModule } from './modules/admin/admin.module';
 
 @Module({
   imports: [
@@ -159,6 +160,7 @@ import { BillingModule } from './modules/billing/billing.module';
     EngineModule,
     CoworkerModule,
     BillingModule,
+    AdminModule,
   ],
 })
 export class AppModule {}

@@ -18,6 +18,7 @@ import { WorkflowDefinitionEntity } from '../../modules/workflows/entities/workf
 import { WorkspaceEntity } from '../../modules/workspaces/entities/workspace.entity';
 import { AccessControlService } from './access-control.service';
 import { TenantAccessGuard } from './access-control.guard';
+import { PlatformRoleGuard } from './platform-role.guard';
 
 @Global()
 @Module({
@@ -41,7 +42,7 @@ import { TenantAccessGuard } from './access-control.guard';
       WorkspaceEntity,
     ]),
   ],
-  providers: [AccessControlService, TenantAccessGuard],
-  exports: [AccessControlService, TenantAccessGuard],
+  providers: [AccessControlService, TenantAccessGuard, PlatformRoleGuard],
+  exports: [AccessControlService, TenantAccessGuard, PlatformRoleGuard],
 })
 export class AccessControlModule {}
