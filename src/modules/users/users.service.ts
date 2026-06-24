@@ -68,7 +68,6 @@ export class UsersService {
       firstName: user.firstName,
       lastName: user.lastName,
       status: user.status,
-      platformRole: user.platformRole ?? null,
       avatarFileId: user.avatarFileId,
       emailVerifiedAt: user.emailVerifiedAt,
       createdAt: user.createdAt,
