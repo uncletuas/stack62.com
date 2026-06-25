@@ -103,11 +103,16 @@ export class OllamaClient {
     return this.healthy;
   }
 
-  async complete(messages: ChatMessage[], opts?: { json?: boolean }): Promise<string> {
+  async complete(
+    messages: ChatMessage[],
+    opts?: { json?: boolean },
+  ): Promise<string> {
     const mode = this.mode();
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), DEFAULT_TIMEOUT_MS);
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
     const key = this.apiKey();
     if (key) headers.Authorization = `Bearer ${key}`;
 
@@ -234,7 +239,9 @@ export class OllamaClient {
       if (data.tool && !data.tool.input) data.tool.input = {};
       return data;
     } catch {
-      this.logger.warn(`Ollama returned non-JSON tool plan: ${stripped.slice(0, 200)}`);
+      this.logger.warn(
+        `Ollama returned non-JSON tool plan: ${stripped.slice(0, 200)}`,
+      );
       return fallback;
     }
   }

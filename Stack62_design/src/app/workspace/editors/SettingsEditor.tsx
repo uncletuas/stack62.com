@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Bell, Bot, Building2, Camera, CheckCircle2, ExternalLink, FileDown, Key, Landmark, Loader2, LogOut, Mail, MessageCircle, Monitor, Moon, Palette, Plug, Save, ShieldCheck, Smartphone, Sun, Trash2, User, X, XCircle } from "lucide-react";
+import { Bell, Bot, Building2, Camera, CheckCircle2, Clock, ExternalLink, FileDown, Key, Landmark, Loader2, LogOut, Mail, MessageCircle, Monitor, Moon, Palette, Phone, Plug, RefreshCw, Save, ShieldCheck, Smartphone, Sun, Trash2, User, X, XCircle } from "lucide-react";
 import { appDialog } from "../../components/app-dialog";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -11,22 +11,29 @@ import {
   clearCurrentUserAvatar,
   disconnectIntegrationConnection,
   fetchCoworker,
+  fetchEmailAgent,
   fetchIntegrationConnections,
-  fetchOrganizations,
+  fetchWhatsAppAgent,
   fetchWhatsAppPhoneNumbers,
-  googleOAuthUrl,
-  metaOAuthUrl,
+  fetchWhatsAppWebStatus,
   quickBooksOAuthUrl,
   resendCurrentUserVerification,
   selectWhatsAppPhoneNumber,
+  startWhatsAppWebLink,
   updateCoworker,
+  updateEmailAgent,
   updateCurrentUserProfile,
   updateOrgSettings,
+  updateWhatsAppAgent,
   uploadCurrentUserAvatar,
   userAvatarUrl,
+  whatsAppWebLogout,
   type Coworker,
+  type EmailAgentConfig,
   type IntegrationConnection,
+  type WhatsAppAgentConfig,
   type WhatsAppPhoneNumberOption,
+  type WhatsAppWebStatus,
 } from "../../lib/resources";
 import { useWorkspace } from "../workspace-context";
 
@@ -43,8 +50,8 @@ import { useWorkspace } from "../workspace-context";
  */
 type SettingsSection =
   | "account"
-  | "organization"
   | "coworker"
+  | "whatsapp"
   | "integrations"
   | "security"
   | "billing";
@@ -55,10 +62,10 @@ const SECTIONS: Array<{
   description: string;
   icon: typeof User;
 }> = [
-  { key: "account", label: "Account", description: "Profile and appearance", icon: User },
-  { key: "organization", label: "Organization", description: "Org and workspace settings", icon: Building2 },
+  { key: "account", label: "Account", description: "Profile, organization, and appearance", icon: User },
   { key: "coworker", label: "Coworker", description: "AI behaviour and tools", icon: Bot },
-  { key: "integrations", label: "Integrations", description: "Connect Slack, Google, etc.", icon: Plug },
+  { key: "whatsapp", label: "WhatsApp", description: "Link a device and auto-replies", icon: MessageCircle },
+  { key: "integrations", label: "Integrations", description: "Connect Google, WhatsApp, etc.", icon: Plug },
   { key: "security", label: "Security", description: "Sessions, MFA, audit", icon: ShieldCheck },
   { key: "billing", label: "Billing", description: "Plan, seats, invoices", icon: Landmark },
 ];
@@ -68,11 +75,11 @@ function normalizeSection(raw: string | undefined): SettingsSection {
     case "profile":
     case "appearance":
     case "account":
-      return "account";
     case "workspace":
     case "organization":
-      return "organization";
+      return "account";
     case "coworker":
+    case "whatsapp":
     case "integrations":
     case "security":
     case "billing":
@@ -194,16 +201,12 @@ export function SettingsDialog() {
               {section === "account" && (
                 <div className="space-y-6">
                   <ProfileSection />
+                  <OrganizationSection />
                   <AppearanceSection />
                 </div>
               )}
-              {section === "organization" && (
-                <div className="space-y-6">
-                  <OrganizationSection />
-                  <WorkspaceSection />
-                </div>
-              )}
               {section === "coworker" && <CoworkerSection />}
+              {section === "whatsapp" && <WhatsAppSection />}
               {section === "integrations" && <IntegrationsSection />}
               {section === "security" && <SecuritySection />}
               {section === "billing" && <BillingSection />}
@@ -247,41 +250,31 @@ function IntegrationsSection() {
       if (event.data?.type !== "stack62.integration.connected") return;
       void reload();
     };
+    const onConnected = () => void reload();
     window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
+    window.addEventListener("stack62:email-connected", onConnected);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      window.removeEventListener("stack62:email-connected", onConnected);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentOrganization?.id, currentWorkspace?.id]);
 
   const providers = [
     {
-      key: "google-workspace",
-      name: "Google Workspace",
-      description: "Gmail, Calendar, Meet, Drive, Docs, and Sheets through Google sign-in.",
-      icon: Plug,
-      start: "google" as const,
-      button: "Sign in with Google",
-    },
-    {
-      key: "whatsapp-cloud",
-      name: "WhatsApp Business",
-      description: "Official WhatsApp Business Platform connection for customer messages and approved replies.",
-      note:
-        "This opens Meta Business onboarding, then you choose or verify a business phone number. WhatsApp Web QR login is not used for the audited business API.",
-      icon: MessageCircle,
-      start: "meta" as const,
-      button: "Connect WhatsApp Business",
-    },
-    {
       key: "quickbooks",
       name: "QuickBooks",
       description: "Customers, invoices, and accounting access through Intuit sign-in.",
       icon: Landmark,
+      kind: "oauth" as const,
       start: "quickbooks" as const,
       button: "Sign in with Intuit",
     },
   ];
 
-  const startOAuth = async (provider: (typeof providers)[number]) => {
+  const startOAuth = async (
+    provider: Extract<(typeof providers)[number], { kind: "oauth" }>,
+  ) => {
     if (!currentOrganization) return;
     try {
       const redirectUri = `${window.location.origin}/oauth/callback/${provider.start}`;
@@ -290,12 +283,7 @@ function IntegrationsSection() {
         workspaceId: currentWorkspace?.id,
         redirectUri,
       };
-      const result =
-        provider.start === "google"
-          ? await googleOAuthUrl(basePayload)
-          : provider.start === "meta"
-            ? await metaOAuthUrl(basePayload)
-            : await quickBooksOAuthUrl(basePayload);
+      const result = await quickBooksOAuthUrl(basePayload);
       window.open(result.url, "stack62_integration_oauth", "width=720,height=760");
       appendRunLog({
         level: "ok",
@@ -317,6 +305,7 @@ function IntegrationsSection() {
 
   return (
     <section className="space-y-3">
+      <EmailConnectionCard connections={connections} onChanged={reload} />
       {loading ? (
         <div className="grid h-40 place-items-center text-app-faint">
           <Loader2 className="h-5 w-5 animate-spin" />
@@ -329,6 +318,7 @@ function IntegrationsSection() {
           const Icon = provider.icon;
           const ready =
             connection?.providerKey === "google-workspace" ||
+            connection?.providerKey === "smtp-email" ||
             connection?.config?.setupStatus === "ready";
           return (
             <div
@@ -359,11 +349,6 @@ function IntegrationsSection() {
                     )}
                   </div>
                   <p className="mt-1 text-xs text-app-faint">{provider.description}</p>
-                  {"note" in provider && provider.note && (
-                    <p className="mt-2 rounded-md border border-app bg-app px-2 py-1.5 text-[11px] leading-4 text-app-subtle">
-                      {provider.note}
-                    </p>
-                  )}
                   {connection?.config?.displayPhoneNumber && (
                     <p className="mt-2 text-xs text-emerald-200">
                       Sending number: {String(connection.config.displayPhoneNumber)}
@@ -433,6 +418,7 @@ function IntegrationsSection() {
           );
         })
       )}
+      <EmailAssistantCard />
       {picker && (
         <WhatsAppNumberPicker
           numbers={picker.numbers}
@@ -452,6 +438,223 @@ function IntegrationsSection() {
         />
       )}
     </section>
+  );
+}
+
+/**
+ * Email connection: shows connected mailboxes and launches the guided
+ * "Connect your email" wizard (EmailConnectDialog) — no hardcoded marketplace.
+ */
+function EmailConnectionCard({
+  connections,
+  onChanged,
+}: {
+  connections: IntegrationConnection[];
+  onChanged: () => void;
+}) {
+  const { appendRunLog } = useWorkspace();
+  const mailboxes = connections.filter(
+    (c) =>
+      (c.providerKey === "google-workspace" ||
+        c.providerKey === "smtp-email") &&
+      c.status !== "disconnected",
+  );
+
+  const providerLabel = (key: string) =>
+    key === "google-workspace" ? "Gmail (Google)" : "Email (SMTP/IMAP)";
+
+  const disconnect = async (id: string) => {
+    try {
+      await disconnectIntegrationConnection(id);
+      appendRunLog({ level: "ok", text: "Mailbox disconnected.", source: "integrations" });
+      onChanged();
+    } catch (err) {
+      appendRunLog({
+        level: "error",
+        text: `Disconnect failed: ${(err as Error).message}`,
+        source: "integrations",
+      });
+    }
+  };
+
+  return (
+    <Card icon={Mail} title="Email">
+      <p className="mb-3 text-xs text-app-faint">
+        Connect your own mailbox so you and your coworker can send and read
+        email from it.
+      </p>
+      {mailboxes.length > 0 && (
+        <div className="mb-3 space-y-2">
+          {mailboxes.map((c) => (
+            <div
+              key={c.id}
+              className="flex items-center gap-2 rounded-md border border-app bg-app p-2.5 text-xs"
+            >
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium text-app">
+                  {c.name || providerLabel(c.providerKey)}
+                </span>
+                <span className="text-app-faint">
+                  {providerLabel(c.providerKey)}
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => void disconnect(c.id)}
+                className="rounded px-2 py-1 text-rose-500 hover:bg-rose-500/10"
+              >
+                Disconnect
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <Button
+        size="sm"
+        onClick={() =>
+          window.dispatchEvent(new CustomEvent("stack62:open-email-connect"))
+        }
+        className="gap-1.5"
+      >
+        <Plug className="h-3.5 w-3.5" />
+        {mailboxes.length > 0 ? "Connect another mailbox" : "Connect email"}
+      </Button>
+    </Card>
+  );
+}
+
+/**
+ * Email assistant: lets the coworker proactively read incoming mail and draft
+ * (or auto-send) replies. Per-workspace config, mirroring the WhatsApp card.
+ */
+function EmailAssistantCard() {
+  const { currentOrganization, currentWorkspace } = useAppContext();
+  const { appendRunLog } = useWorkspace();
+  const [config, setConfig] = useState<EmailAgentConfig | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!currentOrganization || !currentWorkspace) return;
+    let live = true;
+    fetchEmailAgent({
+      organizationId: currentOrganization.id,
+      workspaceId: currentWorkspace.id,
+    })
+      .then((c) => {
+        if (live) setConfig(c);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [currentOrganization?.id, currentWorkspace?.id]);
+
+  if (!currentOrganization || !currentWorkspace || !config) return null;
+
+  const patch = (next: Partial<EmailAgentConfig>) =>
+    setConfig((cur) => (cur ? { ...cur, ...next } : cur));
+
+  const save = async () => {
+    if (!config) return;
+    setSaving(true);
+    try {
+      const saved = await updateEmailAgent({
+        organizationId: currentOrganization.id,
+        workspaceId: currentWorkspace.id,
+        enabled: config.enabled,
+        autoSend: config.autoSend,
+        responseSchedule: config.responseSchedule,
+        tone: config.tone ?? undefined,
+        identityName: config.identityName ?? undefined,
+        identityRole: config.identityRole ?? undefined,
+        signature: config.signature ?? undefined,
+        businessInfo: config.businessInfo ?? undefined,
+        maxAutoRepliesPerDay: config.maxAutoRepliesPerDay,
+      });
+      setConfig(saved);
+      appendRunLog({
+        level: "ok",
+        text: "Email assistant settings saved.",
+        source: "integrations",
+      });
+    } catch (err) {
+      appendRunLog({
+        level: "error",
+        text: `Save failed: ${(err as Error).message}`,
+        source: "integrations",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card title="Email assistant" icon={Mail}>
+      <p className="mb-3 text-xs text-app-faint">
+        Let your coworker watch your connected mailbox, summarise new email, and
+        prepare replies. Drafts wait for your approval in the Email inbox unless
+        you turn on auto-send.
+      </p>
+      <div className="space-y-2">
+        <Toggle
+          label="Monitor incoming email"
+          description="Read new mail and prepare a reply for each."
+          checked={config.enabled}
+          onChange={(v) => patch({ enabled: v })}
+        />
+        <Toggle
+          label="Auto-send replies"
+          description="Send automatically instead of leaving a draft for approval."
+          checked={config.autoSend}
+          onChange={(v) => patch({ autoSend: v })}
+        />
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Replies as (name)">
+            <Input
+              value={config.identityName ?? ""}
+              onChange={(e) => patch({ identityName: e.target.value })}
+              className="border-app bg-app"
+              placeholder="e.g. Ada"
+            />
+          </Field>
+          <Field label="Role">
+            <Input
+              value={config.identityRole ?? ""}
+              onChange={(e) => patch({ identityRole: e.target.value })}
+              className="border-app bg-app"
+              placeholder="e.g. support for Acme"
+            />
+          </Field>
+        </div>
+        <Field label="Signature (optional)">
+          <Input
+            value={config.signature ?? ""}
+            onChange={(e) => patch({ signature: e.target.value })}
+            className="border-app bg-app"
+            placeholder="— Ada, Acme Support"
+          />
+        </Field>
+        <Field label="Business information the coworker can use">
+          <textarea
+            value={config.businessInfo ?? ""}
+            onChange={(e) => patch({ businessInfo: e.target.value })}
+            rows={4}
+            className="w-full resize-y rounded-md border border-app bg-app px-3 py-2 text-sm focus:border-accent focus:outline-none"
+            placeholder="Hours, pricing, policies, FAQs… the source of truth for replies."
+          />
+        </Field>
+        <div className="flex justify-end">
+          <Button size="sm" disabled={saving} onClick={() => void save()}>
+            {saving ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              "Save"
+            )}
+          </Button>
+        </div>
+      </div>
+    </Card>
   );
 }
 
@@ -514,6 +717,471 @@ function WhatsAppNumberPicker({
         </div>
       </div>
     </div>
+  );
+}
+
+function WhatsAppSection() {
+  const { currentOrganization, currentWorkspace } = useAppContext();
+  if (!currentOrganization || !currentWorkspace) {
+    return <p className="text-sm text-app-faint">Select a workspace first.</p>;
+  }
+  return (
+    <div className="space-y-6">
+      <WhatsAppDeviceCard
+        organizationId={currentOrganization.id}
+        workspaceId={currentWorkspace.id}
+      />
+      <WhatsAppAutoReplyCard
+        organizationId={currentOrganization.id}
+        workspaceId={currentWorkspace.id}
+      />
+      <p className="rounded-lg border border-app bg-app-hover p-3 text-xs text-app-faint">
+        Your WhatsApp chats now live in the chat panel — open the Coworker and
+        switch to the <span className="font-medium text-app">WhatsApp</span> tab
+        to read and reply to conversations.
+      </p>
+    </div>
+  );
+}
+
+/** Link a phone number as a companion device using the pairing code. */
+function WhatsAppDeviceCard({
+  organizationId,
+  workspaceId,
+}: {
+  organizationId: string;
+  workspaceId: string;
+}) {
+  const { appendRunLog } = useWorkspace();
+  const [connectionId, setConnectionId] = useState<string | null>(null);
+  const [status, setStatus] = useState<WhatsAppWebStatus | null>(null);
+  const [phone, setPhone] = useState("");
+  const [code, setCode] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void fetchIntegrationConnections({ organizationId, workspaceId })
+      .then((rows) => {
+        if (!live) return;
+        const conn = rows.find(
+          (r) => r.providerKey === "whatsapp-web" && r.status !== "disconnected",
+        );
+        if (conn) setConnectionId(conn.id);
+      })
+      .finally(() => live && setLoading(false));
+    return () => {
+      live = false;
+    };
+  }, [organizationId, workspaceId]);
+
+  // Poll status while a link exists and isn't ready yet.
+  useEffect(() => {
+    if (!connectionId) return;
+    let live = true;
+    const tick = async () => {
+      try {
+        const s = await fetchWhatsAppWebStatus(connectionId);
+        if (!live) return;
+        setStatus(s);
+        if (s.pairingCode) setCode(s.pairingCode);
+      } catch {
+        /* ignore transient errors */
+      }
+    };
+    void tick();
+    const timer = setInterval(() => {
+      if (status?.status === "ready") return;
+      void tick();
+    }, 3000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [connectionId, status?.status]);
+
+  const startLink = async () => {
+    const digits = phone.replace(/[^0-9]/g, "");
+    if (digits.length < 8) {
+      setError("Enter the full phone number including country code.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await startWhatsAppWebLink({
+        organizationId,
+        workspaceId,
+        phoneNumber: digits,
+        connectionId: connectionId ?? undefined,
+      });
+      setConnectionId(result.connectionId);
+      setCode(result.pairingCode);
+      if (!result.pairingCode) {
+        setError(
+          "WhatsApp did not return a code. Wait a few seconds and tap “New code”.",
+        );
+      }
+      appendRunLog({
+        level: "ok",
+        text: `Pairing code ready: ${result.pairingCode ?? "—"}`,
+        source: "whatsapp",
+      });
+    } catch (err) {
+      const message = (err as Error).message || "Request failed.";
+      setError(message);
+      // eslint-disable-next-line no-console
+      console.error("WhatsApp link failed:", err);
+      appendRunLog({
+        level: "error",
+        text: `Could not start link: ${message}`,
+        source: "whatsapp",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const unlink = async () => {
+    if (!connectionId) return;
+    setBusy(true);
+    try {
+      await whatsAppWebLogout(connectionId);
+      setConnectionId(null);
+      setStatus(null);
+      setCode(null);
+      appendRunLog({ level: "ok", text: "WhatsApp device unlinked.", source: "whatsapp" });
+    } catch (err) {
+      appendRunLog({
+        level: "error",
+        text: `Unlink failed: ${(err as Error).message}`,
+        source: "whatsapp",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const ready = status?.status === "ready";
+
+  return (
+    <Card icon={Smartphone} title="Link a device">
+      {loading ? (
+        <Loader2 className="h-4 w-4 animate-spin text-app-faint" />
+      ) : ready ? (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs text-emerald-300">
+            <CheckCircle2 className="h-4 w-4" />
+            <span>
+              Linked{status?.phoneNumber ? ` · +${status.phoneNumber}` : ""}. The
+              coworker can send and receive on this WhatsApp account.
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => void unlink()}
+            className="gap-1 border-rose-900/70 text-rose-200 hover:bg-rose-950/30"
+          >
+            <X className="h-3.5 w-3.5" /> Unlink device
+          </Button>
+        </div>
+      ) : code ? (
+        <div className="space-y-3">
+          <p className="text-xs text-app-subtle">
+            On the phone: <strong>WhatsApp → Settings → Linked devices → Link a
+            device → “Link with phone number instead”</strong>, then enter:
+          </p>
+          <div className="flex items-center gap-3">
+            <code className="rounded-md border border-app bg-app px-4 py-2 text-lg font-bold tracking-[0.3em] text-app">
+              {code}
+            </code>
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] text-amber-300">
+              <Clock className="h-3 w-3" />
+              {status?.status === "connecting" ? "connecting…" : "waiting for phone…"}
+            </span>
+          </div>
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => void startLink()} className="gap-1">
+            <RefreshCw className="h-3.5 w-3.5" /> New code
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-xs text-app-faint">
+            Enter a phone number with country code. You’ll get a one-time code to
+            type into WhatsApp on that phone — like adding any other device.
+          </p>
+          <Field label="Phone number (with country code)">
+            <div className="flex items-center gap-2">
+              <Phone className="h-4 w-4 text-app-faint" />
+              <Input
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+234 803 000 0000"
+                className="border-app bg-app-surface"
+              />
+            </div>
+          </Field>
+          <Button size="sm" disabled={busy} onClick={() => void startLink()} className="gap-1">
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Smartphone className="h-3.5 w-3.5" />}
+            {busy ? "Requesting code…" : "Get pairing code"}
+          </Button>
+          {busy && (
+            <p className="text-[11px] text-app-faint">
+              Asking WhatsApp for a code — this can take up to 15 seconds.
+            </p>
+          )}
+          {error && (
+            <p className="flex items-start gap-1.5 rounded-md border border-rose-900/60 bg-rose-950/20 p-2 text-[11px] text-rose-200">
+              <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              {error}
+            </p>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/** Configure how the coworker auto-replies on WhatsApp. */
+function WhatsAppAutoReplyCard({
+  organizationId,
+  workspaceId,
+}: {
+  organizationId: string;
+  workspaceId: string;
+}) {
+  const { appendRunLog } = useWorkspace();
+  const [config, setConfig] = useState<WhatsAppAgentConfig | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    void fetchWhatsAppAgent(organizationId, workspaceId)
+      .then((c) => live && setConfig(c))
+      .catch(() => live && setConfig(null));
+    return () => {
+      live = false;
+    };
+  }, [organizationId, workspaceId]);
+
+  const patch = (next: Partial<WhatsAppAgentConfig>) =>
+    setConfig((c) => (c ? { ...c, ...next } : c));
+
+  const hours = config?.businessHours ?? {
+    timezone: "Africa/Lagos",
+    days: [1, 2, 3, 4, 5],
+    start: "09:00",
+    end: "17:00",
+  };
+  const patchHours = (next: Partial<typeof hours>) =>
+    patch({ businessHours: { ...hours, ...next } });
+
+  const save = async () => {
+    if (!config) return;
+    setBusy(true);
+    try {
+      const saved = await updateWhatsAppAgent({
+        organizationId,
+        workspaceId,
+        autoReplyEnabled: config.autoReplyEnabled,
+        responseSchedule: config.responseSchedule,
+        businessHours: config.businessHours ?? hours,
+        tone: config.tone,
+        responseDelaySeconds: config.responseDelaySeconds,
+        identityName: config.identityName,
+        identityRole: config.identityRole,
+        signature: config.signature,
+        businessInfo: config.businessInfo,
+        awayMessage: config.awayMessage,
+        maxAutoRepliesPerDay: config.maxAutoRepliesPerDay,
+      });
+      setConfig(saved);
+      appendRunLog({ level: "ok", text: "WhatsApp auto-reply saved.", source: "whatsapp" });
+    } catch (err) {
+      appendRunLog({
+        level: "error",
+        text: `Save failed: ${(err as Error).message}`,
+        source: "whatsapp",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!config) {
+    return (
+      <Card icon={Bot} title="Automatic replies">
+        <Loader2 className="h-4 w-4 animate-spin text-app-faint" />
+      </Card>
+    );
+  }
+
+  return (
+    <Card icon={Bot} title="Automatic replies">
+      <Toggle
+        label="Let the coworker reply automatically"
+        description="When on, incoming WhatsApp messages get an AI reply using the settings below."
+        checked={config.autoReplyEnabled}
+        onChange={(v) => patch({ autoReplyEnabled: v })}
+      />
+
+      <Field label="When to reply">
+        <select
+          value={config.responseSchedule}
+          onChange={(e) =>
+            patch({ responseSchedule: e.target.value as WhatsAppAgentConfig["responseSchedule"] })
+          }
+          className="h-9 w-full rounded-md border border-app bg-app-surface px-2 text-sm"
+        >
+          <option value="always">Always</option>
+          <option value="business_hours">Only during business hours</option>
+          <option value="after_hours">Only outside business hours</option>
+        </select>
+      </Field>
+
+      {config.responseSchedule !== "always" && (
+        <div className="space-y-2 rounded-md border border-app bg-app p-3">
+          <Field label="Timezone">
+            <Input
+              value={hours.timezone}
+              onChange={(e) => patchHours({ timezone: e.target.value })}
+              placeholder="Africa/Lagos"
+              className="border-app bg-app-surface"
+            />
+          </Field>
+          <div className="flex flex-wrap gap-1">
+            {WEEKDAYS.map((label, idx) => {
+              const active = hours.days.includes(idx);
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() =>
+                    patchHours({
+                      days: active
+                        ? hours.days.filter((d) => d !== idx)
+                        : [...hours.days, idx].sort((a, b) => a - b),
+                    })
+                  }
+                  className={`rounded-md px-2 py-1 text-[11px] ${
+                    active ? "bg-accent text-accent-fg" : "bg-app-hover text-app-muted"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-2">
+            <Input
+              type="time"
+              value={hours.start}
+              onChange={(e) => patchHours({ start: e.target.value })}
+              className="h-8 border-app bg-app-surface text-sm"
+            />
+            <span className="text-xs text-app-faint">to</span>
+            <Input
+              type="time"
+              value={hours.end}
+              onChange={(e) => patchHours({ end: e.target.value })}
+              className="h-8 border-app bg-app-surface text-sm"
+            />
+          </div>
+        </div>
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Coworker name (shown in replies)">
+          <Input
+            value={config.identityName ?? ""}
+            onChange={(e) => patch({ identityName: e.target.value })}
+            placeholder="Ada"
+            className="border-app bg-app-surface"
+          />
+        </Field>
+        <Field label="Role / who they are">
+          <Input
+            value={config.identityRole ?? ""}
+            onChange={(e) => patch({ identityRole: e.target.value })}
+            placeholder="customer support for Acme Stores"
+            className="border-app bg-app-surface"
+          />
+        </Field>
+      </div>
+
+      <Field label="Manner of response (tone)">
+        <textarea
+          value={config.tone ?? ""}
+          onChange={(e) => patch({ tone: e.target.value })}
+          rows={2}
+          placeholder="Warm, helpful, and professional. Keep replies short."
+          className="w-full rounded-md border border-app bg-app-surface p-2 text-sm"
+        />
+      </Field>
+
+      <Field label="What the coworker should know about the business">
+        <textarea
+          value={config.businessInfo ?? ""}
+          onChange={(e) => patch({ businessInfo: e.target.value })}
+          rows={5}
+          placeholder="Hours, location, products & prices, delivery, return policy, FAQs… the coworker answers only from this."
+          className="w-full rounded-md border border-app bg-app-surface p-2 text-sm"
+        />
+      </Field>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Response delay (seconds)">
+          <Input
+            type="number"
+            min={0}
+            max={600}
+            value={config.responseDelaySeconds}
+            onChange={(e) => patch({ responseDelaySeconds: Number(e.target.value) })}
+            className="border-app bg-app-surface"
+          />
+        </Field>
+        <Field label="Max auto-replies / chat / day (0 = unlimited)">
+          <Input
+            type="number"
+            min={0}
+            max={100}
+            value={config.maxAutoRepliesPerDay}
+            onChange={(e) => patch({ maxAutoRepliesPerDay: Number(e.target.value) })}
+            className="border-app bg-app-surface"
+          />
+        </Field>
+      </div>
+
+      <Field label="Signature (optional)">
+        <Input
+          value={config.signature ?? ""}
+          onChange={(e) => patch({ signature: e.target.value })}
+          placeholder="— Ada, Acme Support"
+          className="border-app bg-app-surface"
+        />
+      </Field>
+
+      <Field label="Away message (sent outside the reply window)">
+        <textarea
+          value={config.awayMessage ?? ""}
+          onChange={(e) => patch({ awayMessage: e.target.value })}
+          rows={2}
+          placeholder="Thanks for your message! We're away right now and will reply during business hours."
+          className="w-full rounded-md border border-app bg-app-surface p-2 text-sm"
+        />
+      </Field>
+
+      <Button onClick={() => void save()} disabled={busy} className="gap-1">
+        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+        Save auto-reply settings
+      </Button>
+    </Card>
   );
 }
 
@@ -835,89 +1503,69 @@ function EmailVerificationStatus({
 }
 
 function OrganizationSection() {
-  const { currentOrganization } = useAppContext();
+  const { currentOrganization, currentWorkspace } = useAppContext();
   const { appendRunLog } = useWorkspace();
-  const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("");
   const [busy, setBusy] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!currentOrganization) return;
-    void fetchOrganizations()
-      .then((all) => {
-        const org = all.find((o) => o.id === currentOrganization.id);
-        if (org) setApiKey(org.openrouterApiKey ?? "");
-      })
-      .finally(() => setLoading(false));
-  }, [currentOrganization]);
 
   if (!currentOrganization) {
     return <p className="text-sm text-app-faint">Select an organization first.</p>;
   }
 
   return (
-    <Card icon={Building2} title={currentOrganization.name}>
-      {loading ? (
-        <Loader2 className="h-4 w-4 animate-spin text-app-faint" />
-      ) : (
-        <>
-          <Field label="OpenRouter API key">
-            <Input
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-or-…"
-              className="border-app bg-app-surface font-mono"
-            />
-          </Field>
-          <Field label="Preferred model">
-            <Input
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="anthropic/claude-3.5-sonnet"
-              className="border-app bg-app-surface font-mono"
-            />
-          </Field>
-          <Button
-            onClick={async () => {
-              setBusy(true);
-              try {
-                await updateOrgSettings(currentOrganization.id, {
-                  openrouterApiKey: apiKey || null,
-                  preferredModel: model || null,
-                });
-                appendRunLog({
-                  level: "ok",
-                  text: "Organization settings saved",
-                  source: "settings",
-                });
-              } catch (err) {
-                appendRunLog({
-                  level: "error",
-                  text: `Save failed: ${(err as Error).message}`,
-                  source: "settings",
-                });
-              } finally {
-                setBusy(false);
-              }
-            }}
-            disabled={busy}
-            className="gap-1"
-          >
-            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-            Save
-          </Button>
-        </>
+    <Card icon={Building2} title="Organization">
+      <Field label="Organization name">
+        <Input
+          value={currentOrganization.name}
+          readOnly
+          className="border-app bg-app-surface"
+        />
+      </Field>
+      {currentWorkspace && (
+        <Field label="Workspace">
+          <Input
+            value={currentWorkspace.name}
+            readOnly
+            className="border-app bg-app-surface"
+          />
+        </Field>
       )}
-    </Card>
-  );
-}
-
-function WorkspaceSection() {
-  const { currentWorkspace } = useAppContext();
-  return (
-    <Card icon={Building2} title={currentWorkspace?.name ?? "Workspace"}>
-      <p className="text-xs text-app-faint">—</p>
+      <Field label="Preferred model">
+        <Input
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          placeholder="anthropic/claude-3.5-sonnet"
+          className="border-app bg-app-surface font-mono"
+        />
+      </Field>
+      <Button
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await updateOrgSettings(currentOrganization.id, {
+              preferredModel: model || null,
+            });
+            appendRunLog({
+              level: "ok",
+              text: "Organization settings saved",
+              source: "settings",
+            });
+          } catch (err) {
+            appendRunLog({
+              level: "error",
+              text: `Save failed: ${(err as Error).message}`,
+              source: "settings",
+            });
+          } finally {
+            setBusy(false);
+          }
+        }}
+        disabled={busy}
+        className="gap-1"
+      >
+        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+        Save
+      </Button>
     </Card>
   );
 }

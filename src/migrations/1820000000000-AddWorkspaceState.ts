@@ -69,12 +69,8 @@ export class AddWorkspaceState1820000000000 implements MigrationInterface {
       `DROP INDEX IF EXISTS "IDX_workspace_action_log_doc"`,
     );
     await queryRunner.query(`DROP TABLE IF EXISTS "workspace_action_log"`);
-    await queryRunner.query(
-      `DROP INDEX IF EXISTS "IDX_workspace_docs_kind"`,
-    );
-    await queryRunner.query(
-      `DROP INDEX IF EXISTS "IDX_workspace_docs_tenant"`,
-    );
+    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_workspace_docs_kind"`);
+    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_workspace_docs_tenant"`);
     await queryRunner.query(`DROP TABLE IF EXISTS "workspace_docs"`);
   }
 }

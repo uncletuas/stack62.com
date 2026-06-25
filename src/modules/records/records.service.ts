@@ -89,14 +89,22 @@ export class RecordsService {
       );
     }
 
-    await this.logRecordObject('record_collection.create', collection, actorUserId, {
-      fieldCount: fields.length,
-    });
+    await this.logRecordObject(
+      'record_collection.create',
+      collection,
+      actorUserId,
+      {
+        fieldCount: fields.length,
+      },
+    );
 
     return { ...collection, fields };
   }
 
-  async listCollections(filters: ListRecordCollectionsDto, actorUserId: string) {
+  async listCollections(
+    filters: ListRecordCollectionsDto,
+    actorUserId: string,
+  ) {
     const qb = this.collectionsRepository.createQueryBuilder('collection');
     await this.accessControlService.applyTenantScopeToQueryBuilder(
       qb,
@@ -124,7 +132,8 @@ export class RecordsService {
     const collection = await this.collectionsRepository.findOne({
       where: { id: collectionId },
     });
-    if (!collection) throw new NotFoundException('Record collection not found.');
+    if (!collection)
+      throw new NotFoundException('Record collection not found.');
     await this.accessControlService.assertResolvedAccess(actorUserId, {
       resource: 'record',
       action: 'read',
@@ -148,7 +157,8 @@ export class RecordsService {
     const collection = await this.collectionsRepository.findOne({
       where: { id: collectionId },
     });
-    if (!collection) throw new NotFoundException('Record collection not found.');
+    if (!collection)
+      throw new NotFoundException('Record collection not found.');
     await this.accessControlService.assertResolvedAccess(actorUserId, {
       resource: 'record',
       action: 'update',
@@ -272,7 +282,10 @@ export class RecordsService {
       targetType: 'record_item',
       targetId: updated.id,
       origin: 'user',
-      metadata: { collectionId: collection.id, collectionName: collection.name },
+      metadata: {
+        collectionId: collection.id,
+        collectionName: collection.name,
+      },
     });
     await this.auditService.log({
       organizationId: collection.organizationId,
@@ -508,7 +521,8 @@ export class RecordsService {
     const collection = await this.collectionsRepository.findOne({
       where: { id: collectionId },
     });
-    if (!collection) throw new NotFoundException('Record collection not found.');
+    if (!collection)
+      throw new NotFoundException('Record collection not found.');
     await this.accessControlService.assertResolvedAccess(actorUserId, {
       resource: 'record',
       action: 'update',
@@ -531,7 +545,11 @@ export class RecordsService {
     const errors: string[] = [];
     for (const field of fields) {
       const value = data[field.key];
-      if (!partial && field.required && (value === null || value === undefined || value === '')) {
+      if (
+        !partial &&
+        field.required &&
+        (value === null || value === undefined || value === '')
+      ) {
         errors.push(`${field.name} is required.`);
       }
       if (value === null || value === undefined || value === '') continue;

@@ -60,7 +60,7 @@ export class RealtimeVoiceController {
           // The client can override these per-session via the data channel.
           voice: 'verse',
           instructions:
-            "You are the Stack62 Coworker. Be concise, friendly, and act on what the user asks. When the user wants to schedule something, capture the time clearly and confirm before scheduling.",
+            'You are the Stack62 Coworker. Be concise, friendly, and act on what the user asks. When the user wants to schedule something, capture the time clearly and confirm before scheduling.',
         }),
       },
     );

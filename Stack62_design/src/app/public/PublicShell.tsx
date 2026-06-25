@@ -38,8 +38,8 @@ export function PublicShell({ children }: { children: ReactNode }) {
             </span>
           </Link>
           <nav className="hidden md:flex items-center gap-7 text-sm text-slate-600 dark:text-slate-300">
-            <Link to="/#solutions" className="hover:text-slate-900 dark:hover:text-white transition">Solutions</Link>
-            <Link to="/#how-it-works" className="hover:text-slate-900 dark:hover:text-white transition">How it works</Link>
+            <Link to="/#how" className="hover:text-slate-900 dark:hover:text-white transition">How it works</Link>
+            <Link to="/#features" className="hover:text-slate-900 dark:hover:text-white transition">Features</Link>
             <Link to="/pricing" className="hover:text-slate-900 dark:hover:text-white transition">Pricing</Link>
             <Link to="/#faq" className="hover:text-slate-900 dark:hover:text-white transition">FAQ</Link>
           </nav>
@@ -83,15 +83,15 @@ export function PublicShell({ children }: { children: ReactNode }) {
           <FooterCol
             heading="Product"
             links={[
-              { label: "Solutions", to: "/#solutions" },
-              { label: "How it works", to: "/#how-it-works" },
+              { label: "How it works", to: "/#how" },
+              { label: "Features", to: "/#features" },
               { label: "Pricing", to: "/pricing" },
             ]}
           />
           <FooterCol
             heading="Company"
             links={[
-              { label: "Trust & security", to: "/#trust" },
+              { label: "Loopital", to: "https://loopital.com" },
               { label: "Contact", to: "mailto:hello@stack62.com" },
             ]}
           />
@@ -108,7 +108,14 @@ export function PublicShell({ children }: { children: ReactNode }) {
           <div className="max-w-7xl mx-auto px-6 py-6 flex flex-col md:flex-row items-center justify-between text-xs text-slate-500 dark:text-slate-400">
             <p>© {new Date().getFullYear()} Stack62. All rights reserved.</p>
             <p className="mt-2 md:mt-0">
-              Run smarter. Decide faster. Let your coworker handle the rest.
+              A{" "}
+              <a
+                href="https://loopital.com"
+                className="font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
+              >
+                Loopital
+              </a>{" "}
+              product.
             </p>
           </div>
         </div>

@@ -1,11 +1,4 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  Post,
-} from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   IsBoolean,
@@ -64,10 +57,7 @@ export class FileSharingController {
     @Body() body: CreateShareDto,
     @CurrentUser() user: JwtUser,
   ) {
-    return this.fileSharing.createShare(
-      { ...body, fileId },
-      user.userId,
-    );
+    return this.fileSharing.createShare({ ...body, fileId }, user.userId);
   }
 
   @Get('files/:fileId/shares')

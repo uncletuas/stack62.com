@@ -4,7 +4,7 @@ import * as crypto from 'node:crypto';
 
 /**
  * Symmetric AES-256-GCM encryption for secrets stored at rest
- * (Slack bot tokens, integration API keys, password-grade fields
+ * (integration API keys, OAuth tokens, password-grade fields
  * persisted in jsonb columns).
  *
  * Key derivation: HKDF-SHA256(JWT_SECRET, salt="stack62-secret-v1").
@@ -48,7 +48,7 @@ export class SecretEncryptionService {
         Buffer.from('stack62-secret-encryption'),
         32,
       );
-      this.key = Buffer.from(derived as ArrayBuffer);
+      this.key = Buffer.from(derived);
     }
   }
 

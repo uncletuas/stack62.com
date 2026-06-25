@@ -245,7 +245,11 @@ export class AccessControlService {
         break;
       case 'document':
         if (resourceId) {
-          await this.assertDocumentAccess(userId, resourceId, requirement.action);
+          await this.assertDocumentAccess(
+            userId,
+            resourceId,
+            requirement.action,
+          );
           return;
         }
         break;
@@ -263,7 +267,11 @@ export class AccessControlService {
         break;
       case 'coworker':
         if (resourceId) {
-          await this.assertCoworkerAccess(userId, resourceId, requirement.action);
+          await this.assertCoworkerAccess(
+            userId,
+            resourceId,
+            requirement.action,
+          );
           return;
         }
         break;

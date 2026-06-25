@@ -69,7 +69,7 @@ export class WorkspaceTools {
       ),
       tool(
         'workspace.open',
-        "Open a file, folder, system, document, or other workspace item in the user's interface. Use this when the user says \"open X\", \"show me Y\", or \"pull up Z\" and you know which entity they mean. The frontend interprets the returned intent and switches the active tab.",
+        'Open a file, folder, system, document, or other workspace item in the user\'s interface. Use this when the user says "open X", "show me Y", "play Z", or "pull up Z" and you know which entity they mean. The frontend interprets the returned intent and switches the active tab. Opening a \'file\' that is a video, audio clip, image, PDF, or presentation renders it in the multimedia player (with playback, fullscreen, and slideshow controls) — use this to play media for the user.',
         {
           properties: {
             target: {

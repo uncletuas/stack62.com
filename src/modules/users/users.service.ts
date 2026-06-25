@@ -1,6 +1,7 @@
 import {
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -16,6 +17,8 @@ export interface CreateUserInput {
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @InjectRepository(UserEntity)
     private readonly usersRepository: Repository<UserEntity>,
@@ -59,6 +62,45 @@ export class UsersService {
     }
 
     return user;
+  }
+
+  /**
+   * Best-effort signup geography for analytics. Stores the signup IP
+   * immediately and resolves the country in the background (free, keyless
+   * ip-api.com lookup with a short timeout). Never throws — geography is a
+   * nice-to-have, not part of the registration contract.
+   */
+  async recordSignupGeo(userId: string, ip?: string | null): Promise<void> {
+    const cleanIp = (ip ?? '').trim();
+    if (!cleanIp) return;
+    try {
+      await this.usersRepository.update({ id: userId }, { signupIp: cleanIp });
+    } catch {
+      return;
+    }
+    // Private/loopback addresses have no public geo — skip the lookup.
+    if (/^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|::1|fc|fd)/i.test(cleanIp)) {
+      return;
+    }
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2500);
+      const res = await fetch(
+        `http://ip-api.com/json/${encodeURIComponent(cleanIp)}?fields=countryCode`,
+        { signal: controller.signal },
+      );
+      clearTimeout(timer);
+      if (!res.ok) return;
+      const body = (await res.json()) as { countryCode?: string };
+      if (body.countryCode && /^[A-Z]{2}$/.test(body.countryCode)) {
+        await this.usersRepository.update(
+          { id: userId },
+          { country: body.countryCode },
+        );
+      }
+    } catch {
+      this.logger.debug(`Geo lookup skipped for ${userId}`);
+    }
   }
 
   sanitize(user: UserEntity) {

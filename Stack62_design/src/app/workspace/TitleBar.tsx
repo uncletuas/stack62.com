@@ -13,6 +13,7 @@ import {
   Download,
   FileDown,
   FolderOpen,
+  Globe,
   HelpCircle,
   LogOut,
   Mail,
@@ -121,15 +122,8 @@ export function TitleBar() {
 
   const fileItems: MenuItem[] = [
     {
-      label: "New email",
-      icon: Mail,
-      onSelect: () =>
-        window.dispatchEvent(new CustomEvent("stack62:open-email")),
-    },
-    {
       label: "Import files",
       icon: Upload,
-      separatorAbove: true,
       onSelect: () => fileInputRef.current?.click(),
     },
     {
@@ -310,8 +304,16 @@ export function TitleBar() {
         <Search className="h-4 w-4" />
       </button>
 
-      {/* Right side: bell + profile */}
+      {/* Right side: browser + bell + profile */}
       <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => navigate({ kind: "browser", title: "Browser" })}
+          className="grid h-7 w-7 place-items-center rounded-md text-app-subtle hover:bg-app-hover hover:text-app"
+          title="Open web browser"
+        >
+          <Globe className="h-4 w-4" />
+        </button>
         <NotificationsBell open={notifOpen} setOpen={setNotifOpen} />
         <ProfileMenu
           fileItems={fileItems}
@@ -660,6 +662,20 @@ function ProfileMenu({
               />
             </button>
           </div>
+          {/* Email opens the connect/setup popover, not a tab. */}
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              window.dispatchEvent(
+                new CustomEvent("stack62:open-email-connect"),
+              );
+            }}
+            className="flex w-full items-center gap-2 border-b border-app px-4 py-2.5 text-left text-sm text-app hover:bg-app-hover"
+          >
+            <Mail className="h-3.5 w-3.5 text-app-muted" />
+            Email
+          </button>
           {/* Settings opens the modal dialog directly. */}
           <button
             type="button"

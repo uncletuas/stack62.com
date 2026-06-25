@@ -14,10 +14,11 @@ describe('ReportsService', () => {
         rows.push(row);
         return row;
       }),
-      findOne: jest.fn(async ({ where }: { where: Record<string, unknown> }) =>
-        rows.find((row) =>
-          Object.entries(where).every(([key, value]) => row[key] === value),
-        ) ?? null,
+      findOne: jest.fn(
+        async ({ where }: { where: Record<string, unknown> }) =>
+          rows.find((row) =>
+            Object.entries(where).every(([key, value]) => row[key] === value),
+          ) ?? null,
       ),
       find: jest.fn(async () => rows),
       createQueryBuilder: jest.fn(),
@@ -39,7 +40,10 @@ describe('ReportsService', () => {
         metadata: null,
       },
     ]);
-    const access = { assertResolvedAccess: jest.fn().mockResolvedValue(undefined), applyTenantScopeToQueryBuilder: jest.fn() };
+    const access = {
+      assertResolvedAccess: jest.fn().mockResolvedValue(undefined),
+      applyTenantScopeToQueryBuilder: jest.fn(),
+    };
     const documents = {
       create: jest.fn().mockResolvedValue({ id: 'document-1' }),
     };

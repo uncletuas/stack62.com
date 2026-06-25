@@ -33,7 +33,7 @@ export class EmbeddingService {
   isConfigured(): boolean {
     return Boolean(
       this.configService.get<string>('OPENROUTER_API_KEY') ||
-        this.configService.get<string>('OPENAI_API_KEY'),
+      this.configService.get<string>('OPENAI_API_KEY'),
     );
   }
 
@@ -58,7 +58,9 @@ export class EmbeddingService {
       this.configService.get<string>('OPENROUTER_API_KEY') ||
       this.configService.get<string>('OPENAI_API_KEY');
     if (!apiKey) {
-      throw new ServiceUnavailableException('No embedding provider configured.');
+      throw new ServiceUnavailableException(
+        'No embedding provider configured.',
+      );
     }
 
     const baseUrl =

@@ -213,7 +213,10 @@ export class FoldersService {
     return visible;
   }
 
-  async getFolder(folderId: string, actorUserId: string): Promise<FolderEntity> {
+  async getFolder(
+    folderId: string,
+    actorUserId: string,
+  ): Promise<FolderEntity> {
     const folder = await this.requireFolder(folderId);
     await this.assertPermission(folderId, actorUserId, 'read');
     return folder;
@@ -249,7 +252,9 @@ export class FoldersService {
     await this.assertPermission(payload.folderId, actorUserId, 'share');
 
     if (payload.subjectType === 'user' && !payload.userId) {
-      throw new BadRequestException('userId is required when subjectType=user.');
+      throw new BadRequestException(
+        'userId is required when subjectType=user.',
+      );
     }
     if (payload.subjectType === 'role' && !payload.role) {
       throw new BadRequestException('role is required when subjectType=role.');
@@ -294,7 +299,10 @@ export class FoldersService {
 
   async listAcls(folderId: string, actorUserId: string) {
     await this.assertPermission(folderId, actorUserId, 'read');
-    return this.aclRepo.find({ where: { folderId }, order: { createdAt: 'DESC' } });
+    return this.aclRepo.find({
+      where: { folderId },
+      order: { createdAt: 'DESC' },
+    });
   }
 
   // ── Permission resolution ─────────────────────────────────────────────
@@ -368,10 +376,7 @@ export class FoldersService {
         matches = true;
       }
       if (!matches) continue;
-      if (
-        !best ||
-        PERMISSION_ORDER[acl.permission] > PERMISSION_ORDER[best]
-      ) {
+      if (!best || PERMISSION_ORDER[acl.permission] > PERMISSION_ORDER[best]) {
         best = acl.permission;
       }
     }

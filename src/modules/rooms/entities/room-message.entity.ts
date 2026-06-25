@@ -4,9 +4,8 @@ import { AppBaseEntity } from '../../../shared/database/base.entity';
 export type RoomMessageAuthorKind = 'user' | 'coworker' | 'system';
 
 /**
- * A single message in a Room. Slack-compatible enough that we can later
- * sync to Slack via the bridge (next batch). `parentMessageId` enables
- * threads; we keep it nullable until threading lands in the UI.
+ * A single message in a Room. `parentMessageId` enables threads; we
+ * keep it nullable until threading lands in the UI.
  */
 @Entity({ name: 'room_messages' })
 @Index(['roomId', 'createdAt'])

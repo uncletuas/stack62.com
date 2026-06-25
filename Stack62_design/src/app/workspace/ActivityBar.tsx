@@ -68,21 +68,20 @@ export function ActivityBar({
             aria-label={label}
             aria-current={active ? "page" : undefined}
             onClick={() => click(key)}
-            className={`relative mb-0.5 flex h-11 w-11 flex-col items-center justify-center gap-0.5 rounded-md text-[10px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:h-12 sm:w-12 ${
+            className={`relative mb-0.5 flex h-11 w-11 items-center justify-center rounded-md transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:h-12 sm:w-12 ${
               active
                 ? "bg-accent-soft text-accent"
                 : "text-app-subtle hover:bg-app-hover hover:text-app"
             }`}
           >
             <span className="relative">
-              <Icon className="h-4 w-4" aria-hidden />
+              <Icon className="h-5 w-5" aria-hidden />
               {showBadge && (
                 <span className="absolute -right-1.5 -top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-rose-500 text-[8px] font-bold text-white">
                   {decisionCount > 9 ? "9+" : decisionCount}
                 </span>
               )}
             </span>
-            <span className="hidden leading-none sm:inline">{label}</span>
           </button>
         );
       })}
@@ -90,10 +89,9 @@ export function ActivityBar({
         title="Settings"
         aria-label="Settings"
         onClick={openSettings}
-        className="mt-auto flex h-11 w-11 flex-col items-center justify-center gap-0.5 rounded-md text-[10px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent text-app-subtle hover:bg-app-hover hover:text-app sm:h-12 sm:w-12"
+        className="mt-auto flex h-11 w-11 items-center justify-center rounded-md transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent text-app-subtle hover:bg-app-hover hover:text-app sm:h-12 sm:w-12"
       >
-        <Settings className="h-4 w-4" aria-hidden />
-        <span className="hidden leading-none sm:inline">Settings</span>
+        <Settings className="h-5 w-5" aria-hidden />
       </button>
     </aside>
   );

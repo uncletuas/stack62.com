@@ -18,7 +18,12 @@ export class MeetingBotTranscriptEntity extends AppBaseEntity {
   ordinal!: number;
 
   /** Speaker label as it appeared in Meet's captions ("You", "Alice"). */
-  @Column({ name: 'speaker_label', type: 'varchar', length: 120, nullable: true })
+  @Column({
+    name: 'speaker_label',
+    type: 'varchar',
+    length: 120,
+    nullable: true,
+  })
   speakerLabel!: string | null;
 
   @Column({ type: 'text' })

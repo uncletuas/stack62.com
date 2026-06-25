@@ -27,7 +27,8 @@ export class PlanTools {
             },
             autoApply: {
               type: 'boolean',
-              description: 'Set true unless the user explicitly asks to only draft.',
+              description:
+                'Set true unless the user explicitly asks to only draft.',
             },
           },
           required: ['prompt'],

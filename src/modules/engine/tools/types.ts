@@ -39,6 +39,12 @@ export interface ToolDefinition {
   sensitive?: boolean;
   auditAction?: string;
   responseSchema?: Record<string, unknown>;
+  /**
+   * When set, the tool is only exposed to the model if the org has a
+   * connection providing this capability (see ToolRegistry.specsGated).
+   * e.g. `send_email` => requires a connected mailbox.
+   */
+  requiresCapability?: string;
   handler: (
     input: Record<string, unknown>,
     ctx: ToolContext,
@@ -68,16 +74,22 @@ export function tool(
     permission: metadata?.permission,
     requiresConfirmation:
       metadata?.requiresConfirmation ?? inferActionLevel(name) >= 3,
-    sensitive: metadata?.sensitive ?? /\b(send|delete|share|payment)\b/i.test(name),
+    sensitive:
+      metadata?.sensitive ?? /\b(send|delete|share|payment)\b/i.test(name),
     auditAction: metadata?.auditAction,
     responseSchema: metadata?.responseSchema,
+    requiresCapability: metadata?.requiresCapability,
     handler,
   };
 }
 
 function inferActionLevel(name: string): 1 | 2 | 3 | 4 {
   if (/\b(draft|prepare|suggest)\b/i.test(name)) return 2;
-  if (/\b(create|update|assign|edit|send|book|share|delete|apply|deploy|run|pause|resume|stop)\b/i.test(name)) {
+  if (
+    /\b(create|update|assign|edit|send|book|share|delete|apply|deploy|run|pause|resume|stop)\b/i.test(
+      name,
+    )
+  ) {
     return 3;
   }
   return 1;
@@ -96,7 +108,10 @@ export function validateToolInput(
     return { ok: false, error: 'Tool input must be an object.' };
   }
   const obj = input as Record<string, unknown>;
-  const schema = spec.input_schema as { required?: string[]; properties?: Record<string, unknown> };
+  const schema = spec.input_schema as {
+    required?: string[];
+    properties?: Record<string, unknown>;
+  };
   for (const key of schema.required ?? []) {
     if (!(key in obj) || obj[key] === undefined || obj[key] === null) {
       return { ok: false, error: `Missing required field "${key}".` };

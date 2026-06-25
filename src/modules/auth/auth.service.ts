@@ -24,7 +24,10 @@ export class AuthService {
     private readonly configService: ConfigService,
   ) {}
 
-  async register(payload: RegisterDto): Promise<AuthResponseDto> {
+  async register(
+    payload: RegisterDto,
+    signupIp?: string | null,
+  ): Promise<AuthResponseDto> {
     const passwordHash = await argon2.hash(payload.password);
     const user = await this.usersService.create({
       email: payload.email,
@@ -32,6 +35,9 @@ export class AuthService {
       firstName: payload.firstName,
       lastName: payload.lastName,
     });
+
+    // Best-effort signup geography for analytics — never blocks registration.
+    void this.usersService.recordSignupGeo(user.id, signupIp);
 
     await this.activityService.log({
       actorUserId: user.id,

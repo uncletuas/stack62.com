@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { EmailConversationService } from '../../integrations/email-conversation.service';
 import { IntegrationsService } from '../../integrations/integrations.service';
 import { ProviderRuntimeService } from '../../integrations/provider-runtime.service';
 import { tool, type ToolDefinition } from './types';
@@ -8,6 +9,7 @@ export class IntegrationTools {
   constructor(
     private readonly integrations: IntegrationsService,
     private readonly runtime: ProviderRuntimeService,
+    private readonly emailConversations: EmailConversationService,
   ) {}
 
   build(): ToolDefinition[] {
@@ -46,7 +48,7 @@ export class IntegrationTools {
       ),
       tool(
         'integrations.send_email',
-        'Send a transactional email via the connected email provider.',
+        "Send an email from the organization's own connected mailbox (Gmail or SMTP). Use only when the user explicitly asks to email someone — never proactively. To attach files (a document the user uploaded, a report you generated, an image), pass their file ids in attachmentFileIds — uploaded files appear in the prompt as 'file:<id>'.",
         {
           properties: {
             to: {
@@ -57,10 +59,21 @@ export class IntegrationTools {
             subject: { type: 'string' },
             text: { type: 'string', description: 'Plain-text body.' },
             html: { type: 'string', description: 'Optional HTML body.' },
+            attachmentFileIds: {
+              type: 'array',
+              items: { type: 'string' },
+              description:
+                'Optional stored file ids to attach (e.g. from an uploaded file referenced as file:<id>, or one you created).',
+            },
           },
           required: ['to', 'subject'],
         },
         async (input, ctx) => {
+          const attachmentFileIds = Array.isArray(input.attachmentFileIds)
+            ? (input.attachmentFileIds as unknown[])
+                .filter((v): v is string => typeof v === 'string')
+                .slice(0, 10)
+            : undefined;
           const result = await this.runtime.sendEmail(
             {
               organizationId: ctx.organizationId,
@@ -73,36 +86,189 @@ export class IntegrationTools {
               subject: String(input.subject ?? ''),
               text: typeof input.text === 'string' ? input.text : undefined,
               html: typeof input.html === 'string' ? input.html : undefined,
+              attachmentFileIds,
             },
           );
           return {
             output: result,
-            summary: `Email sent to ${(input.to as string[])?.length ?? 0} recipient(s).`,
+            summary: `Email sent to ${(input.to as string[])?.length ?? 0} recipient(s)${
+              attachmentFileIds?.length
+                ? ` with ${attachmentFileIds.length} attachment(s)`
+                : ''
+            }.`,
           };
         },
+        { actionLevel: 3, sensitive: true, requiresCapability: 'send_email' },
+      ),
+      tool(
+        'integrations.list_inbox',
+        "List recent incoming email threads from the organization's connected mailbox (most recent first, with unread counts). Use this to check for new email or find a thread before reading it.",
+        {
+          properties: {
+            limit: {
+              type: 'number',
+              description: 'Max threads to return (default 20).',
+            },
+          },
+        },
+        async (input, ctx) => {
+          const rows = await this.emailConversations.listConversations(
+            {
+              organizationId: ctx.organizationId,
+              workspaceId: ctx.workspaceId ?? undefined,
+            },
+            ctx.actorUserId,
+          );
+          const limit =
+            typeof input.limit === 'number' ? Math.min(input.limit, 100) : 20;
+          const items = rows.slice(0, limit).map((c) => ({
+            conversationId: c.id,
+            from: c.counterpartyName
+              ? `${c.counterpartyName} <${c.counterpartyEmail}>`
+              : c.counterpartyEmail,
+            subject: c.subject,
+            preview: c.lastMessagePreview,
+            unread: c.unreadCount,
+            lastMessageAt: c.lastMessageAt,
+          }));
+          const unread = rows.reduce((n, c) => n + c.unreadCount, 0);
+          return {
+            output: { conversations: items },
+            summary: `${rows.length} thread${rows.length === 1 ? '' : 's'}, ${unread} unread.`,
+          };
+        },
+        { actionLevel: 1, requiresCapability: 'send_email' },
+      ),
+      tool(
+        'integrations.read_email',
+        'Read the full message history of one incoming email thread (oldest→newest). Pass the conversationId from integrations.list_inbox.',
+        {
+          properties: {
+            conversationId: { type: 'string' },
+          },
+          required: ['conversationId'],
+        },
+        async (input, ctx) => {
+          const { conversation, messages } =
+            await this.emailConversations.listMessages(
+              String(input.conversationId),
+              ctx.actorUserId,
+            );
+          return {
+            output: {
+              from: conversation.counterpartyName
+                ? `${conversation.counterpartyName} <${conversation.counterpartyEmail}>`
+                : conversation.counterpartyEmail,
+              subject: conversation.subject,
+              messages: messages.map((m) => ({
+                direction: m.direction,
+                authoredBy: m.authoredBy,
+                status: m.status,
+                subject: m.subject,
+                body: m.bodyText,
+                at: m.receivedAt ?? m.createdAt,
+              })),
+            },
+            summary: `${messages.length} message(s) in thread with ${conversation.counterpartyEmail}.`,
+          };
+        },
+        { actionLevel: 1, requiresCapability: 'send_email' },
       ),
       tool(
         'integrations.send_whatsapp',
-        'Send a WhatsApp message via the connected WhatsApp Cloud account.',
+        'Send a WhatsApp message. Uses the linked WhatsApp device (phone-number pairing) when one is connected, otherwise the WhatsApp Cloud account. To send a photo, video, audio, or document, pass attachmentFileId (the stored file id, e.g. from an uploaded file referenced as file:<id>); message then becomes the caption. Media sending requires a linked device.',
         {
           properties: {
-            to: { type: 'string', description: 'Phone number with country code (no +).' },
-            message: { type: 'string' },
+            to: {
+              type: 'string',
+              description: 'Phone number with country code (no +).',
+            },
+            message: {
+              type: 'string',
+              description:
+                'Message text, or the caption when sending media. Optional if attachmentFileId is set.',
+            },
+            attachmentFileId: {
+              type: 'string',
+              description:
+                'Optional stored file id to send as a media attachment (image/video/audio/document).',
+            },
+            asVoiceNote: {
+              type: 'boolean',
+              description:
+                'Send the attachment as a voice note (push-to-talk). Use with an audio attachmentFileId.',
+            },
+            asSticker: {
+              type: 'boolean',
+              description:
+                'Send the image attachment as a sticker instead of a photo.',
+            },
           },
-          required: ['to', 'message'],
+          required: ['to'],
         },
         async (input, ctx) => {
-          const result = await this.runtime.sendWhatsApp(
-            {
-              organizationId: ctx.organizationId,
-              workspaceId: ctx.workspaceId,
-              actorUserId: ctx.actorUserId,
-              source: 'engine',
-            },
-            { to: String(input.to), message: String(input.message) },
-          );
+          const dispatchCtx = {
+            organizationId: ctx.organizationId,
+            workspaceId: ctx.workspaceId,
+            actorUserId: ctx.actorUserId,
+            source: 'engine',
+          } as const;
+          const attachmentFileId =
+            typeof input.attachmentFileId === 'string'
+              ? input.attachmentFileId
+              : undefined;
+          if (attachmentFileId) {
+            const result = await this.runtime.sendWhatsAppMedia(
+              { ...dispatchCtx, actorUserId: ctx.actorUserId },
+              {
+                to: String(input.to),
+                fileId: attachmentFileId,
+                caption:
+                  typeof input.message === 'string' ? input.message : undefined,
+                ptt: input.asVoiceNote === true,
+                forceType: input.asSticker === true ? 'sticker' : undefined,
+              },
+            );
+            return { output: result, summary: 'WhatsApp media sent.' };
+          }
+          const result = await this.runtime.sendWhatsApp(dispatchCtx, {
+            to: String(input.to),
+            message: typeof input.message === 'string' ? input.message : '',
+          });
           return { output: result, summary: 'WhatsApp message sent.' };
         },
+      ),
+      tool(
+        'integrations.import_drive_file',
+        "Import a file from the user's connected Google Drive into the Stack62 file store, returning its stored file id. Use this to fetch a Drive file the user references so you can then attach/send it (via send_email, send_whatsapp, or rooms.send_message). Find the Drive fileId with integrations.gmail_search-style listing or ask the user.",
+        {
+          properties: {
+            driveFileId: {
+              type: 'string',
+              description: 'The Google Drive file id to import.',
+            },
+          },
+          required: ['driveFileId'],
+        },
+        async (input, ctx) => {
+          const stored = await this.integrations.importGoogleDriveFile(
+            {
+              organizationId: ctx.organizationId,
+              workspaceId: ctx.workspaceId ?? undefined,
+              fileId: String(input.driveFileId),
+            },
+            ctx.actorUserId,
+          );
+          return {
+            output: {
+              fileId: stored.id,
+              filename: stored.filename,
+              mimeType: stored.mimeType,
+            },
+            summary: `Imported "${stored.filename}" from Google Drive (file:${stored.id}).`,
+          };
+        },
+        { actionLevel: 2 },
       ),
       tool(
         'integrations.send_sms',
@@ -125,36 +291,6 @@ export class IntegrationTools {
             { to: String(input.to), body: String(input.body) },
           );
           return { output: result, summary: 'SMS sent.' };
-        },
-      ),
-      tool(
-        'integrations.post_slack',
-        'Post a message to a Slack channel via the connected Slack workspace.',
-        {
-          properties: {
-            channel: {
-              type: 'string',
-              description: 'Channel ID or name (e.g. "#general"). Falls back to default channel.',
-            },
-            text: { type: 'string' },
-          },
-          required: ['text'],
-        },
-        async (input, ctx) => {
-          const result = await this.runtime.postSlack(
-            {
-              organizationId: ctx.organizationId,
-              workspaceId: ctx.workspaceId,
-              actorUserId: ctx.actorUserId,
-              source: 'engine',
-            },
-            {
-              channel:
-                typeof input.channel === 'string' ? input.channel : undefined,
-              text: String(input.text),
-            },
-          );
-          return { output: result, summary: 'Slack message posted.' };
         },
       ),
       tool(
@@ -252,7 +388,10 @@ export class IntegrationTools {
         'Upload an object to the connected S3 bucket. Body is sent as UTF-8 text — base64 encode binaries first.',
         {
           properties: {
-            key: { type: 'string', description: 'Object key (path inside the bucket).' },
+            key: {
+              type: 'string',
+              description: 'Object key (path inside the bucket).',
+            },
             body: { type: 'string' },
             contentType: { type: 'string' },
           },
@@ -280,7 +419,7 @@ export class IntegrationTools {
       ),
       tool(
         'integrations.api_call',
-        'Make an authenticated API call against any connected provider (HubSpot, Notion, Airtable, Calendly, Mailchimp, Salesforce, Slack, etc.). Use when there is no dedicated tool for the action you need. Path is provider-relative (e.g. "crm/v3/objects/contacts" for HubSpot).',
+        'Make an authenticated API call against any connected provider (HubSpot, Notion, Airtable, Calendly, Mailchimp, Salesforce, etc.). Use when there is no dedicated tool for the action you need. Path is provider-relative (e.g. "crm/v3/objects/contacts" for HubSpot).',
         {
           properties: {
             providerKey: {
@@ -288,7 +427,10 @@ export class IntegrationTools {
               description:
                 'Provider key as listed by integrations.list (e.g. "hubspot", "notion").',
             },
-            path: { type: 'string', description: 'Provider-relative path or full URL.' },
+            path: {
+              type: 'string',
+              description: 'Provider-relative path or full URL.',
+            },
             method: {
               type: 'string',
               enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
@@ -497,7 +639,10 @@ export class IntegrationTools {
         {
           properties: {
             from: { type: 'string', description: 'Sender phone number.' },
-            message: { type: 'string', description: 'The inbound message text.' },
+            message: {
+              type: 'string',
+              description: 'The inbound message text.',
+            },
             context: { type: 'object' },
           },
           required: ['from', 'message'],
@@ -662,12 +807,16 @@ export class IntegrationTools {
         'Create an invoice in QuickBooks for a given customer. lineAmount is in dollars.',
         {
           properties: {
-            customerId: { type: 'string', description: 'QuickBooks Customer Id.' },
+            customerId: {
+              type: 'string',
+              description: 'QuickBooks Customer Id.',
+            },
             lineAmount: { type: 'number' },
             description: { type: 'string' },
             itemId: {
               type: 'string',
-              description: 'QuickBooks Item Id (defaults to "1" — the standard service item).',
+              description:
+                'QuickBooks Item Id (defaults to "1" — the standard service item).',
             },
           },
           required: ['customerId', 'lineAmount'],
@@ -714,12 +863,19 @@ export class IntegrationTools {
       ),
       tool(
         'integrations.paystack_initialize',
-        'Internal-only: initialize a Paystack transaction for Stack62 subscription/payment processing.',
+        'Create a Paystack payment link to collect money from a customer (invoices, orders, subscriptions). Amount is in kobo (NGN minor unit) — multiply naira by 100. Returns an authorizationUrl to send to the customer.',
         {
           properties: {
-            email: { type: 'string' },
-            amountKobo: { type: 'number' },
-            reference: { type: 'string' },
+            email: { type: 'string', description: "Customer's email address." },
+            amountKobo: {
+              type: 'number',
+              description: 'Amount in kobo (e.g. ₦5,000 = 500000).',
+            },
+            reference: {
+              type: 'string',
+              description:
+                'Optional unique reference to reconcile this payment.',
+            },
             callbackUrl: { type: 'string' },
             metadata: { type: 'object' },
           },
@@ -747,7 +903,41 @@ export class IntegrationTools {
               metadata: (input.metadata ?? {}) as Record<string, unknown>,
             },
           );
-          return { output: result, summary: 'Paystack initialized.' };
+          return {
+            output: result,
+            summary: result.authorizationUrl
+              ? `Paystack payment link ready: ${result.authorizationUrl}`
+              : 'Paystack initialized.',
+          };
+        },
+      ),
+      tool(
+        'integrations.paystack_verify',
+        'Verify the status of a Paystack transaction by its reference. Use after a customer pays (or when a webhook fires) to confirm the money was received before marking an invoice/order as paid.',
+        {
+          properties: {
+            reference: {
+              type: 'string',
+              description:
+                'The transaction reference returned by paystack_initialize.',
+            },
+          },
+          required: ['reference'],
+        },
+        async (input, ctx) => {
+          const result = await this.runtime.paystackVerify(
+            {
+              organizationId: ctx.organizationId,
+              workspaceId: ctx.workspaceId,
+              actorUserId: ctx.actorUserId,
+              source: 'engine',
+            },
+            { reference: String(input.reference) },
+          );
+          return {
+            output: result,
+            summary: `Paystack payment is ${result.paymentStatus ?? 'unknown'}.`,
+          };
         },
       ),
     ];

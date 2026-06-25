@@ -75,7 +75,10 @@ export class JobTools {
             triggerConfig: {
               type: 'object',
               properties: {
-                runAt: { type: 'string', description: 'ISO-8601 one-shot time.' },
+                runAt: {
+                  type: 'string',
+                  description: 'ISO-8601 one-shot time.',
+                },
                 rrule: { type: 'string', description: 'RFC5545 RRULE.' },
               },
             },
@@ -102,7 +105,7 @@ export class JobTools {
               systemId:
                 typeof input.systemId === 'string'
                   ? input.systemId
-                  : ctx.systemId ?? undefined,
+                  : (ctx.systemId ?? undefined),
               title: String(input.title),
               instructions: String(input.instructions),
               triggerType:
@@ -139,7 +142,10 @@ export class JobTools {
           required: ['jobId'],
         },
         async (input, ctx) => {
-          await this.jobsService.triggerNow(String(input.jobId), ctx.actorUserId);
+          await this.jobsService.triggerNow(
+            String(input.jobId),
+            ctx.actorUserId,
+          );
           return {
             output: { ok: true },
             summary: `Job scheduled for immediate run.`,
@@ -173,7 +179,10 @@ export class JobTools {
             String(input.jobId),
             ctx.actorUserId,
           );
-          return { output: { id: j.id, status: j.status }, summary: `Resumed.` };
+          return {
+            output: { id: j.id, status: j.status },
+            summary: `Resumed.`,
+          };
         },
       ),
       tool(

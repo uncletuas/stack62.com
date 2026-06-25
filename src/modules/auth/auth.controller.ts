@@ -1,14 +1,7 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Post,
-  Query,
-  Res,
-} from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Req, Res } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { Public } from '../../shared/decorators/public.decorator';
 import { AuthService } from './auth.service';
 import { GoogleOAuthService } from './google-oauth.service';
@@ -28,8 +21,8 @@ export class AuthController {
 
   @Public()
   @Post('register')
-  register(@Body() payload: RegisterDto) {
-    return this.authService.register(payload);
+  register(@Body() payload: RegisterDto, @Req() req: Request) {
+    return this.authService.register(payload, clientIp(req));
   }
 
   @Public()
@@ -121,4 +114,12 @@ export class AuthController {
       );
     }
   }
+}
+
+function clientIp(req: Request): string | undefined {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.length > 0) {
+    return forwarded.split(',')[0].trim();
+  }
+  return req.ip;
 }

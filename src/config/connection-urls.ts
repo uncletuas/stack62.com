@@ -123,4 +123,3 @@ export function resolveRedis(): RedisConnection {
     tls: asBool(getEnv('REDIS_TLS'), false),
   };
 }
-

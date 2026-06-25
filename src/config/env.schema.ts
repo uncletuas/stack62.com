@@ -62,6 +62,39 @@ export const envSchema = z.object({
     .int()
     .nonnegative()
     .default(100),
+  // ── Frontier provider (high-level tasks). OpenAI primary by owner choice;
+  // OpenRouter/Anthropic remain configurable fallbacks. ──────────────────
+  OPENAI_API_KEY: z.string().optional(),
+  OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
+  // Premium model for hard reasoning / generation; cheap model for mid tasks.
+  OPENAI_MODEL: z.string().default('gpt-4o'),
+  OPENAI_MODEL_CHEAP: z.string().default('gpt-4o-mini'),
+  ANTHROPIC_MODEL: z.string().optional(),
+  // ── Local intelligence tier (self-hosted, $0 marginal cost). ───────────
+  // Reachable via OLLAMA_BASE_URL (native) or SELF_HOSTED_LLM_URL (OpenAI API).
+  OLLAMA_BASE_URL: z.string().default('http://localhost:11434'),
+  OLLAMA_MODEL: z.string().default('llama3.1'),
+  SELF_HOSTED_LLM_URL: z.string().optional(),
+  SELF_HOSTED_LLM_MODEL: z.string().optional(),
+  SELF_HOSTED_LLM_API_KEY: z.string().optional(),
+  // ── Embeddings (defaults to self-hosted Ollama nomic-embed-text). ──────
+  EMBEDDING_MODEL: z.string().default('nomic-embed-text'),
+  EMBEDDING_DIMENSIONS: z.coerce.number().int().positive().default(768),
+  OPENAI_EMBEDDING_BASE_URL: z.string().optional(),
+  // ── Cost-saving intelligence router. ───────────────────────────────────
+  // Master switch for Tier 0/1/1.5 local routing (already read by the engine).
+  STACK62_ROUTER_ENABLED: booleanFromString(true),
+  // Tier-2 local conversational answers (advice/Q&A/drafting on the local model
+  // at $0). Only actions escalate to the frontier. Set false to always escalate.
+  STACK62_LOCAL_CHAT_ENABLED: booleanFromString(true),
+  // Semantic response/intent cache — replays prior local resolutions at $0.
+  AI_RESPONSE_CACHE_ENABLED: booleanFromString(true),
+  AI_RESPONSE_CACHE_THRESHOLD: z.coerce.number().default(0.92),
+  AI_RESPONSE_CACHE_TTL_HOURS: z.coerce.number().int().positive().default(168),
+  // Per-org monthly frontier spend cap (USD). 0 = unlimited. When near the
+  // cap the budget governor forces the downgrade ladder (frontier→mini→local).
+  AI_MONTHLY_BUDGET_USD: z.coerce.number().nonnegative().default(0),
+  AI_BUDGET_WARN_RATIO: z.coerce.number().default(0.8),
   STUDIO_ARTIFACTS_DIR: z.string().default('generated/studio'),
   STUDIO_MAX_ARTIFACTS_PER_REQUEST: z.coerce
     .number()
@@ -83,7 +116,7 @@ export const envSchema = z.object({
   RUNNER_DOCKER_NETWORK: z.string().default('bridge'),
   RUNNER_DOCKER_CPUS: z.string().default('0.5'),
   RUNNER_DOCKER_PIDS_LIMIT: z.coerce.number().int().positive().default(128),
-  RUNNER_ALLOWED_DEPENDENCIES: z.string().default('express,better-sqlite3'),
+  RUNNER_ALLOWED_DEPENDENCIES: z.string().default('express,pg'),
   RUNNER_PROCESS_TIMEOUT_MS: z.coerce
     .number()
     .int()
@@ -96,14 +129,44 @@ export const envSchema = z.object({
     .int()
     .positive()
     .default(15000),
+  // Incoming-email polling (Gmail + SMTP/IMAP) for the inbox + proactive coworker.
+  EMAIL_POLLING_ENABLED: booleanFromString(true),
+  EMAIL_POLLING_INTERVAL_MS: z.coerce.number().int().positive().default(120000),
   RESEND_API_KEY: z.string().optional(),
   RESEND_FROM_EMAIL: z.string().email().optional(),
+  // SMTP transport — send from a normal email account (Gmail, business
+  // mailbox, etc.) without verifying a domain on a transactional provider.
+  // When SMTP_HOST + SMTP_USER + SMTP_PASSWORD are set, EmailSenderService
+  // prefers SMTP over Resend.
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().positive().default(587),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASSWORD: z.string().optional(),
+  // true => implicit TLS (port 465); false => STARTTLS (port 587). Left
+  // undefined when unset so EmailSenderService can infer it from the port.
+  SMTP_SECURE: z
+    .string()
+    .optional()
+    .transform((v) =>
+      v === undefined || v.trim() === ''
+        ? undefined
+        : v.toLowerCase() === 'true',
+    ),
+  // Envelope From. Falls back to RESEND_FROM_EMAIL, then SMTP_USER.
+  SMTP_FROM_EMAIL: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.length > 0 ? v : undefined))
+    .pipe(z.string().email().optional()),
   META_WHATSAPP_ACCESS_TOKEN: z.string().optional(),
   META_WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
   META_APP_ID: z.string().optional(),
   META_APP_SECRET: z.string().optional(),
   META_REDIRECT_URI: z.string().optional(),
   META_WHATSAPP_CONFIGURATION_ID: z.string().optional(),
+  // WhatsApp "Link a device" (Baileys companion-device) flow. Defaults on;
+  // set to false to disable phone-number pairing on a deployment.
+  WHATSAPP_WEB_ENABLED: booleanFromString(true),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GOOGLE_REDIRECT_URI: z.string().optional(),
@@ -132,6 +195,21 @@ export const envSchema = z.object({
     .positive()
     .default(2555),
   SECURITY_SSO_REQUIRED: booleanFromString(false),
+  // ── Admin / operations console (assembly.loopital.com). Staff auth uses a
+  // SEPARATE signing secret + JWT audience from customers, so a leaked
+  // customer token can never reach /v1/admin/*. Falls back to a dev default;
+  // production MUST set a non-default value (enforced below). ───────────────
+  ADMIN_JWT_SECRET: z
+    .string()
+    .min(16)
+    .default('stack62-admin-development-secret'),
+  ADMIN_JWT_EXPIRES_IN: z.string().default('8h'),
+  ADMIN_2FA_CHALLENGE_EXPIRES_IN: z.string().default('10m'),
+  // One-off bootstrap of the first super_admin via `npm run admin:seed`.
+  ADMIN_SEED_EMAIL: z.string().email().optional(),
+  ADMIN_SEED_PASSWORD: z.string().optional(),
+  ADMIN_SEED_FIRST_NAME: z.string().default('Platform'),
+  ADMIN_SEED_LAST_NAME: z.string().default('Owner'),
   CLAUDE_CODE_BIN: z.string().optional(),
   CLAUDE_CODE_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
   CLAUDE_CODE_MAX_BYTES: z.coerce
@@ -148,6 +226,20 @@ export const envSchema = z.object({
     .default(4 * 1024 * 1024),
   THROTTLE_TTL: z.coerce.number().int().positive().default(60),
   THROTTLE_LIMIT: z.coerce.number().int().positive().default(60),
+  // In-app web browser (server-side Playwright/Chromium). When disabled the
+  // browser editor + coworker web.* tools are unavailable and the backend
+  // never launches Chromium (useful for deployments without the browser layer).
+  BROWSER_ENABLED: booleanFromString(true),
+  BROWSER_MAX_SESSIONS: z.coerce.number().int().positive().default(10),
+  BROWSER_SESSION_IDLE_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(5 * 60 * 1000),
+  BROWSER_NAV_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+  BROWSER_VIEWPORT_WIDTH: z.coerce.number().int().positive().default(1280),
+  BROWSER_VIEWPORT_HEIGHT: z.coerce.number().int().positive().default(800),
+  BROWSER_DEFAULT_ENGINE: z.string().default('duckduckgo'),
 });
 
 export type AppEnvironment = z.infer<typeof envSchema>;
@@ -178,6 +270,12 @@ export function validateEnv(config: Record<string, unknown>) {
       );
     }
 
+    if (env.ADMIN_JWT_SECRET === 'stack62-admin-development-secret') {
+      productionErrors.push(
+        'ADMIN_JWT_SECRET must be set to a non-default secret in production',
+      );
+    }
+
     // DATABASE_SYNC=true is needed for first-deploy bootstrap before any
     // migrations exist for fresh tables. Warn (don't block) so a hosted
     // platform like Render can come up cleanly; turn this off and switch
@@ -204,7 +302,6 @@ export function validateEnv(config: Record<string, unknown>) {
   }
 
   for (const warning of productionWarnings) {
-    // eslint-disable-next-line no-console
     console.warn(`[env] ${warning}`);
   }
 

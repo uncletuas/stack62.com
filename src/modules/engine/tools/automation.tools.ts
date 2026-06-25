@@ -68,7 +68,10 @@ export class AutomationTools {
             },
             startsAt: { type: 'string', description: 'ISO-8601 timestamp.' },
             endsAt: { type: 'string' },
-            recurrenceRule: { type: 'string', description: 'Optional RFC5545 RRULE.' },
+            recurrenceRule: {
+              type: 'string',
+              description: 'Optional RFC5545 RRULE.',
+            },
             metadata: { type: 'object' },
           },
           required: ['title', 'kind', 'startsAt'],
@@ -97,7 +100,11 @@ export class AutomationTools {
             ctx.actorUserId,
           );
           return {
-            output: { id: sched.id, title: sched.title, startsAt: sched.startsAt },
+            output: {
+              id: sched.id,
+              title: sched.title,
+              startsAt: sched.startsAt,
+            },
             summary: `Scheduled "${sched.title}".`,
           };
         },
@@ -276,16 +283,14 @@ export class AutomationTools {
               systemId:
                 typeof input.systemId === 'string'
                   ? input.systemId
-                  : ctx.systemId ?? undefined,
+                  : (ctx.systemId ?? undefined),
               title: String(input.title),
               description:
                 typeof input.description === 'string'
                   ? input.description
                   : undefined,
               priority:
-                typeof input.priority === 'string'
-                  ? input.priority
-                  : 'normal',
+                typeof input.priority === 'string' ? input.priority : 'normal',
               dueAt:
                 typeof input.dueAt === 'string'
                   ? new Date(input.dueAt)

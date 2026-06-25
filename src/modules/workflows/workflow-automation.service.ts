@@ -50,10 +50,10 @@ export class WorkflowAutomationService
     // circular import between WorkflowsModule and EngineModule. The class
     // reference is loaded at runtime via require so the type-only import
     // above stays type-only.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { EngineService: EngineServiceClass } = require(
-      '../engine/engine.service',
-    );
+
+    const {
+      EngineService: EngineServiceClass,
+    } = require('../engine/engine.service');
     return this.moduleRef.get<EngineService>(EngineServiceClass, {
       strict: false,
     });
@@ -316,7 +316,8 @@ export class WorkflowAutomationService
         actorUserId: run.startedByUserId,
       },
       prompt: instructions,
-      autopilot: typeof config.autopilot === 'boolean' ? config.autopilot : true,
+      autopilot:
+        typeof config.autopilot === 'boolean' ? config.autopilot : true,
     });
     for await (const event of iterator) {
       if (event.type === 'message.complete' && typeof event.text === 'string') {

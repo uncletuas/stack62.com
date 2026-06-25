@@ -37,11 +37,13 @@ export class CalendarTools {
           properties: {
             daysAhead: {
               type: 'number',
-              description: 'How many days into the future to scan. Defaults to 14, max 60.',
+              description:
+                'How many days into the future to scan. Defaults to 14, max 60.',
             },
             query: {
               type: 'string',
-              description: 'Optional text filter — events whose title contains this string.',
+              description:
+                'Optional text filter — events whose title contains this string.',
             },
             maxResults: {
               type: 'number',
@@ -90,9 +92,7 @@ export class CalendarTools {
             start: e.start?.dateTime || e.start?.date,
             end: e.end?.dateTime || e.end?.date,
             location: e.location,
-            attendees: (e.attendees ?? [])
-              .map((a) => a.email)
-              .filter(Boolean),
+            attendees: (e.attendees ?? []).map((a) => a.email).filter(Boolean),
             url: e.htmlLink,
           }));
           return {
@@ -111,7 +111,8 @@ export class CalendarTools {
             title: { type: 'string' },
             startIso: {
               type: 'string',
-              description: 'ISO-8601 start datetime (e.g. 2026-05-20T14:00:00-04:00).',
+              description:
+                'ISO-8601 start datetime (e.g. 2026-05-20T14:00:00-04:00).',
             },
             endIso: { type: 'string', description: 'ISO-8601 end datetime.' },
             description: { type: 'string' },
@@ -134,7 +135,9 @@ export class CalendarTools {
           }
           const body: GoogleCalendarEvent = {
             summary: String(input.title),
-            description: input.description ? String(input.description) : undefined,
+            description: input.description
+              ? String(input.description)
+              : undefined,
             location: input.location ? String(input.location) : undefined,
             start: { dateTime: String(input.startIso) },
             end: { dateTime: String(input.endIso) },
@@ -157,7 +160,9 @@ export class CalendarTools {
           );
           if (!response.ok) {
             const text = await response.text().catch(() => '');
-            throw new Error(`Calendar create failed (${response.status}): ${text.slice(0, 200)}`);
+            throw new Error(
+              `Calendar create failed (${response.status}): ${text.slice(0, 200)}`,
+            );
           }
           const created = (await response.json()) as GoogleCalendarEvent;
           return {
@@ -181,9 +186,7 @@ export class CalendarTools {
    * for now (Google access tokens last ~1 hour; we surface a clear
    * error if expired so the user knows to re-auth).
    */
-  private async getGoogleToken(
-    organizationId: string,
-  ): Promise<string | null> {
+  private async getGoogleToken(organizationId: string): Promise<string | null> {
     try {
       const connection = await this.integrations.resolveConnection(
         organizationId,
@@ -194,10 +197,7 @@ export class CalendarTools {
       if (!creds) return null;
       // Credential shape from the Google OAuth callback: { accessToken,
       // refreshToken, expiresAt, ... }
-      const token =
-        (creds as Record<string, unknown>).accessToken ??
-        (creds as Record<string, unknown>).access_token ??
-        null;
+      const token = creds.accessToken ?? creds.access_token ?? null;
       return typeof token === 'string' ? token : null;
     } catch (err) {
       this.logger.warn(

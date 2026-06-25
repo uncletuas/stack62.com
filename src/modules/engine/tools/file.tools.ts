@@ -242,8 +242,15 @@ export class FileTools {
               systemId:
                 typeof input.systemId === 'string'
                   ? input.systemId
-                  : ctx.systemId ?? undefined,
-              format: input.format as 'docx' | 'xlsx' | 'pptx' | 'pdf' | 'png' | 'md' | 'txt',
+                  : (ctx.systemId ?? undefined),
+              format: input.format as
+                | 'docx'
+                | 'xlsx'
+                | 'pptx'
+                | 'pdf'
+                | 'png'
+                | 'md'
+                | 'txt',
               title: String(input.title),
               prompt:
                 typeof input.prompt === 'string' ? input.prompt : undefined,

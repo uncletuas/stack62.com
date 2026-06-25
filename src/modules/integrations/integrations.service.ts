@@ -10,6 +10,13 @@ import { AccessControlService } from '../../shared/access-control/access-control
 import { CryptoService } from '../../shared/security/crypto.service';
 import { ActivityService } from '../activity/activity.service';
 import { AuditService } from '../audit/audit.service';
+import {
+  EmailSenderService,
+  type EmailAttachment,
+} from '../file-sharing/email-sender.service';
+import { FilesService } from '../files/files.service';
+import type { NormalizedInboundEmail } from './email-reader.types';
+import { WhatsAppConversationService } from './whatsapp-conversation.service';
 import { CreateIntegrationConnectionDto } from './dto/create-integration-connection.dto';
 import { DispatchWebhookDto } from './dto/dispatch-webhook.dto';
 import { InitializePaymentDto } from './dto/initialize-payment.dto';
@@ -45,6 +52,21 @@ import {
   USER_OAUTH_PROVIDER_KEYS,
 } from './integration-marketplace';
 
+interface GmailPayload {
+  mimeType?: string;
+  headers?: Array<{ name?: string; value?: string }>;
+  body?: { data?: string };
+  parts?: GmailPayload[];
+}
+
+interface GmailMessage {
+  id: string;
+  threadId?: string;
+  snippet?: string;
+  internalDate?: string;
+  payload?: GmailPayload;
+}
+
 interface MetaBusinessResponse {
   data?: Array<{
     id: string;
@@ -79,6 +101,9 @@ export class IntegrationsService {
     private readonly auditService: AuditService,
     private readonly configService: ConfigService,
     private readonly cryptoService: CryptoService,
+    private readonly whatsAppConversations: WhatsAppConversationService,
+    private readonly emailSender: EmailSenderService,
+    private readonly files: FilesService,
   ) {}
 
   listMarketplace() {
@@ -116,10 +141,10 @@ export class IntegrationsService {
         ['GOOGLE_CLIENT_ID', 'GOOGLE_WORKSPACE_CLIENT_ID'],
         ['GOOGLE_REDIRECT_URI'],
       ]),
-      report('whatsapp-cloud', [
-        ['META_APP_ID'],
-        ['META_REDIRECT_URI'],
-      ]),
+      report('whatsapp-cloud', [['META_APP_ID'], ['META_REDIRECT_URI']]),
+      // WhatsApp "Link a device" needs no operator env vars — the coworker
+      // links their own account with a pairing code, so it's always available.
+      report('whatsapp-web', []),
       report('quickbooks', [
         ['QUICKBOOKS_CLIENT_ID', 'INTUIT_CLIENT_ID'],
         ['QUICKBOOKS_REDIRECT_URI', 'INTUIT_REDIRECT_URI'],
@@ -273,42 +298,218 @@ export class IntegrationsService {
     };
   }
 
+  /** Compose-UI endpoint: send from the org's own connected mailbox. */
   async sendEmail(payload: SendEmailDto, actorUserId?: string | null) {
-    const apiKey = this.configService.get<string>('RESEND_API_KEY');
-    const from = this.configService.get<string>('RESEND_FROM_EMAIL');
-    if (!apiKey || !from) {
-      throw new BadRequestException(
-        'Resend is not configured. Set RESEND_API_KEY and RESEND_FROM_EMAIL.',
-      );
-    }
-
-    const result = await this.postJson<{ id?: string }>(
-      'https://api.resend.com/emails',
+    return this.sendOrgEmail(
       {
-        from,
+        organizationId: payload.organizationId,
+        workspaceId: payload.workspaceId ?? null,
+        actorUserId: actorUserId ?? null,
+      },
+      {
         to: payload.to,
         subject: payload.subject,
         text: payload.text,
         html: payload.html,
+        metadata: payload.metadata,
+        attachmentFileIds: payload.attachmentFileIds,
       },
-      { Authorization: `Bearer ${apiKey}` },
+    );
+  }
+
+  /** True when the org has an active mailbox the Coworker can send through. */
+  async hasEmailConnection(
+    organizationId: string,
+    workspaceId?: string | null,
+  ): Promise<boolean> {
+    for (const providerKey of ['google-workspace', 'smtp-email', 'resend']) {
+      const conn = await this.resolveConnection(
+        organizationId,
+        providerKey,
+        workspaceId,
+      );
+      if (conn) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Single per-org email sender. Resolves the org's connected mailbox and
+   * sends through it — Gmail (OAuth) first, then SMTP, then Resend. There is
+   * NO deployment-wide fallback here: user/coworker email must go from the
+   * user's own account, never a shared Stack62 key. Used by both the Compose
+   * UI endpoint and the Coworker email tool (via ProviderRuntimeService).
+   */
+  async sendOrgEmail(
+    ctx: {
+      organizationId: string;
+      workspaceId?: string | null;
+      actorUserId?: string | null;
+    },
+    input: {
+      to: string[];
+      subject: string;
+      text?: string;
+      html?: string;
+      metadata?: Record<string, unknown>;
+      /** Stored file ids to attach (resolved to bytes from the file store). */
+      attachmentFileIds?: string[];
+    },
+  ): Promise<{ provider: string; id: string | null; ok: true }> {
+    const to = (input.to ?? []).filter((t) => typeof t === 'string' && t);
+    if (to.length === 0) {
+      throw new BadRequestException('No recipients provided.');
+    }
+    const subject = input.subject ?? '';
+    const text = input.text ?? this.htmlToText(input.html ?? '');
+    const html = input.html ?? this.renderEmailHtml(text);
+    const attachments = await this.loadEmailAttachments(
+      input.attachmentFileIds,
+      ctx.actorUserId,
     );
 
+    let provider: string;
+    let id: string | null;
+
+    const google = await this.resolveConnection(
+      ctx.organizationId,
+      'google-workspace',
+      ctx.workspaceId,
+    );
+    const smtp = google
+      ? null
+      : await this.resolveConnection(
+          ctx.organizationId,
+          'smtp-email',
+          ctx.workspaceId,
+        );
+    const resend =
+      google || smtp
+        ? null
+        : await this.resolveConnection(
+            ctx.organizationId,
+            'resend',
+            ctx.workspaceId,
+          );
+
+    if (google) {
+      const token = await this.ensureFreshGoogleToken(google);
+      id = await this.sendGmailRaw(token, {
+        to,
+        subject,
+        body: text,
+        attachments,
+      });
+      provider = 'google-workspace';
+    } else if (smtp) {
+      const creds = this.decryptCredentials(smtp);
+      if (!creds?.host || !creds?.username || !creds?.password) {
+        throw new BadRequestException(
+          'SMTP connection is missing host/username/password. Reconnect it.',
+        );
+      }
+      const result = await this.emailSender.sendSmtp(
+        {
+          host: String(creds.host),
+          port: creds.port ? Number(creds.port) : undefined,
+          username: String(creds.username),
+          password: String(creds.password),
+          secure: typeof creds.secure === 'boolean' ? creds.secure : undefined,
+          fromEmail:
+            (smtp.config?.fromEmail as string | undefined) ?? undefined,
+          fromName: (smtp.config?.fromName as string | undefined) ?? undefined,
+        },
+        { to, subject, text, html, attachments },
+      );
+      if (!result.ok) {
+        throw new BadRequestException(
+          `Email send failed${result.error ? `: ${result.error}` : '.'}`,
+        );
+      }
+      id = result.id;
+      provider = 'smtp-email';
+    } else if (resend) {
+      const creds = this.decryptCredentials(resend);
+      const apiKey = creds?.apiKey as string | undefined;
+      const from = resend.config?.fromEmail as string | undefined;
+      if (!apiKey || !from) {
+        throw new BadRequestException(
+          'Resend connection is missing apiKey or fromEmail. Reconnect it.',
+        );
+      }
+      const data = await this.postJson<{ id?: string }>(
+        'https://api.resend.com/emails',
+        {
+          from,
+          to,
+          subject,
+          text,
+          html,
+          ...(attachments.length
+            ? {
+                attachments: attachments.map((a) => ({
+                  filename: a.filename,
+                  content: a.content.toString('base64'),
+                })),
+              }
+            : {}),
+        },
+        { Authorization: `Bearer ${apiKey}` },
+      );
+      id = data.id ?? null;
+      provider = 'resend';
+    } else {
+      throw new BadRequestException(
+        'No email account is connected. Connect your email under ' +
+          'Tools → Marketplace (Sign in with Google or add SMTP) to send email.',
+      );
+    }
+
     await this.logIntegrationDispatch({
-      organizationId: payload.organizationId,
-      workspaceId: payload.workspaceId ?? null,
-      actorUserId,
-      providerKey: 'resend',
+      organizationId: ctx.organizationId,
+      workspaceId: ctx.workspaceId ?? null,
+      actorUserId: ctx.actorUserId,
+      providerKey: provider,
       action: 'integration.email.send',
-      targetId: result.id ?? 'resend-email',
+      targetId: id ?? 'email',
       metadata: {
-        toCount: payload.to.length,
-        subject: payload.subject,
-        ...this.safeMetadata(payload.metadata),
+        toCount: to.length,
+        subject,
+        ...this.safeMetadata(input.metadata),
       },
     });
 
-    return { provider: 'resend', id: result.id ?? null, ok: true };
+    return { provider, id, ok: true };
+  }
+
+  /** Crude HTML→text fallback for when only an HTML body is supplied. */
+  private htmlToText(html: string): string {
+    return html
+      .replace(/<br\s*\/?>(?=)/gi, '\n')
+      .replace(/<\/p>/gi, '\n\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .trim();
+  }
+
+  /** Wrap plain text in a minimal branded HTML template. */
+  private renderEmailHtml(text: string): string {
+    const escape = (input: string) =>
+      input
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    const paras = (text || '')
+      .split(/\n{2,}/)
+      .map((para) => `<p>${escape(para).replace(/\n/g, '<br />')}</p>`)
+      .join('');
+    return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#222;">${paras}<p style="margin-top:32px;color:#888;font-size:12px;">Sent via Stack62.</p></div>`;
   }
 
   async sendWhatsApp(payload: SendWhatsAppDto, actorUserId?: string | null) {
@@ -404,13 +605,19 @@ export class IntegrationsService {
         'https://www.googleapis.com/auth/gmail.send',
         'https://www.googleapis.com/auth/calendar.events',
         'https://www.googleapis.com/auth/drive.file',
+        // Read-only access so the user can browse + attach their existing
+        // Drive files (not just app-created ones) in the attachment picker.
+        'https://www.googleapis.com/auth/drive.readonly',
       ].join(' '),
     );
     url.searchParams.set('state', state);
     return { url: url.toString(), state };
   }
 
-  async completeGoogleOAuth(payload: GoogleOAuthCallbackDto, actorUserId: string) {
+  async completeGoogleOAuth(
+    payload: GoogleOAuthCallbackDto,
+    actorUserId: string,
+  ) {
     const state = this.decodeOAuthState(payload.state);
     if (state.actorUserId !== actorUserId) {
       throw new BadRequestException('OAuth state does not match this user.');
@@ -504,7 +711,8 @@ export class IntegrationsService {
     });
     const appId = this.configService.get<string>('META_APP_ID');
     const redirectUri =
-      payload.redirectUri ?? this.configService.get<string>('META_REDIRECT_URI');
+      payload.redirectUri ??
+      this.configService.get<string>('META_REDIRECT_URI');
     if (!appId || !redirectUri) {
       throw new BadRequestException(
         'WhatsApp Business onboarding is not configured for this Stack62 app. Set META_APP_ID and META_REDIRECT_URI. Official WhatsApp Cloud API onboarding starts through Meta Business; WhatsApp Web QR login is not supported for this business integration.',
@@ -555,7 +763,8 @@ export class IntegrationsService {
     const appId = this.configService.get<string>('META_APP_ID');
     const appSecret = this.configService.get<string>('META_APP_SECRET');
     const redirectUri =
-      payload.redirectUri ?? this.configService.get<string>('META_REDIRECT_URI');
+      payload.redirectUri ??
+      this.configService.get<string>('META_REDIRECT_URI');
     if (!appId || !appSecret || !redirectUri) {
       throw new BadRequestException(
         'WhatsApp Business onboarding is not configured for this Stack62 app. Set META_APP_ID, META_APP_SECRET and META_REDIRECT_URI. Official WhatsApp Cloud API onboarding starts through Meta Business; WhatsApp Web QR login is not supported for this business integration.',
@@ -760,20 +969,24 @@ export class IntegrationsService {
       targetType: 'integration_connection',
       targetId: connection.id,
       origin: 'user',
-      afterData: { providerKey: 'quickbooks', realmId: payload.realmId ?? null },
+      afterData: {
+        providerKey: 'quickbooks',
+        realmId: payload.realmId ?? null,
+      },
     });
     return connection;
   }
 
   async gmailSearch(payload: GmailSearchDto, actorUserId: string) {
     const { token } = await this.getGoogleAccess(payload, actorUserId, 'read');
-    const url = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages');
+    const url = new URL(
+      'https://gmail.googleapis.com/gmail/v1/users/me/messages',
+    );
     url.searchParams.set('q', payload.q);
     url.searchParams.set('maxResults', '10');
-    const data = await this.getJson<{ messages?: Array<{ id: string; threadId: string }> }>(
-      url.toString(),
-      token,
-    );
+    const data = await this.getJson<{
+      messages?: Array<{ id: string; threadId: string }>;
+    }>(url.toString(), token);
     await this.logIntegrationDispatch({
       organizationId: payload.organizationId,
       workspaceId: payload.workspaceId ?? null,
@@ -787,8 +1000,15 @@ export class IntegrationsService {
   }
 
   async gmailDraft(payload: GmailDraftDto, actorUserId: string) {
-    const { token } = await this.getGoogleAccess(payload, actorUserId, 'update');
-    const data = await this.postJson<{ id?: string; message?: { id?: string } }>(
+    const { token } = await this.getGoogleAccess(
+      payload,
+      actorUserId,
+      'update',
+    );
+    const data = await this.postJson<{
+      id?: string;
+      message?: { id?: string };
+    }>(
       'https://gmail.googleapis.com/gmail/v1/users/me/drafts',
       {
         message: {
@@ -822,39 +1042,234 @@ export class IntegrationsService {
     if (!payload.confirmed) {
       throw new BadRequestException('Email sending requires confirmation.');
     }
-    const { token } = await this.getGoogleAccess(payload, actorUserId, 'update');
-    const data = await this.postJson<{ id?: string }>(
-      'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
-      {
-        raw: this.toBase64Url(
-          [
-            `To: ${payload.to.join(', ')}`,
-            `Subject: ${payload.subject}`,
-            'Content-Type: text/plain; charset="UTF-8"',
-            '',
-            payload.body,
-          ].join('\r\n'),
-        ),
-      },
-      { Authorization: `Bearer ${token}` },
+    const { token } = await this.getGoogleAccess(
+      payload,
+      actorUserId,
+      'update',
     );
+    const id = await this.sendGmailRaw(token, {
+      to: payload.to,
+      subject: payload.subject,
+      body: payload.body,
+    });
     await this.logIntegrationDispatch({
       organizationId: payload.organizationId,
       workspaceId: payload.workspaceId ?? null,
       actorUserId,
       providerKey: 'google-workspace',
       action: 'integration.gmail.send',
-      targetId: data.id ?? 'gmail-message',
+      targetId: id ?? 'gmail-message',
       metadata: { toCount: payload.to.length, subject: payload.subject },
     });
-    return { provider: 'google-workspace', id: data.id ?? null, ok: true };
+    return { provider: 'google-workspace', id: id ?? null, ok: true };
+  }
+
+  /**
+   * Low-level Gmail send: builds the RFC 2822 message and posts it. Shared by
+   * the gmailSend endpoint and the Coworker email path (sendOrgEmail). Returns
+   * the Gmail message id.
+   */
+  private async sendGmailRaw(
+    token: string,
+    msg: {
+      to: string[];
+      subject: string;
+      body: string;
+      attachments?: EmailAttachment[];
+    },
+  ): Promise<string | null> {
+    const raw = msg.attachments?.length
+      ? this.buildMimeWithAttachments(
+          msg.to,
+          msg.subject,
+          msg.body,
+          msg.attachments,
+        )
+      : [
+          `To: ${msg.to.join(', ')}`,
+          `Subject: ${msg.subject}`,
+          'Content-Type: text/plain; charset="UTF-8"',
+          '',
+          msg.body,
+        ].join('\r\n');
+    const data = await this.postJson<{ id?: string }>(
+      'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
+      { raw: this.toBase64Url(raw) },
+      { Authorization: `Bearer ${token}` },
+    );
+    return data.id ?? null;
+  }
+
+  /** Build a multipart/mixed MIME message (text body + file attachments). */
+  private buildMimeWithAttachments(
+    to: string[],
+    subject: string,
+    body: string,
+    attachments: EmailAttachment[],
+  ): string {
+    const boundary = `s62_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const lines: string[] = [
+      `To: ${to.join(', ')}`,
+      `Subject: ${subject}`,
+      'MIME-Version: 1.0',
+      `Content-Type: multipart/mixed; boundary="${boundary}"`,
+      '',
+      `--${boundary}`,
+      'Content-Type: text/plain; charset="UTF-8"',
+      'Content-Transfer-Encoding: 7bit',
+      '',
+      body,
+    ];
+    for (const a of attachments) {
+      const safeName = a.filename.replace(/"/g, '');
+      lines.push(
+        `--${boundary}`,
+        `Content-Type: ${a.contentType ?? 'application/octet-stream'}; name="${safeName}"`,
+        'Content-Transfer-Encoding: base64',
+        `Content-Disposition: attachment; filename="${safeName}"`,
+        '',
+        // Wrap base64 at 76 chars per RFC 2045.
+        a.content.toString('base64').replace(/(.{76})/g, '$1\r\n'),
+      );
+    }
+    lines.push(`--${boundary}--`, '');
+    return lines.join('\r\n');
+  }
+
+  /** Resolve stored file ids into email attachments (bytes + filename + type). */
+  private async loadEmailAttachments(
+    fileIds: string[] | undefined,
+    actorUserId: string | null | undefined,
+  ): Promise<EmailAttachment[]> {
+    if (!fileIds?.length) return [];
+    if (!actorUserId) {
+      throw new BadRequestException(
+        'Cannot attach files to an email without an acting user.',
+      );
+    }
+    const out: EmailAttachment[] = [];
+    for (const id of fileIds.slice(0, 10)) {
+      const { file, buffer } = await this.files.read(id, actorUserId);
+      out.push({
+        filename: file.filename,
+        content: buffer,
+        contentType: file.mimeType,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Read recent inbox messages from a connected Gmail account (server-side,
+   * for the poller — no per-user access control; the connection is the
+   * authorization). Refreshes the OAuth token as needed. Returns normalized
+   * inbound emails newest-first.
+   */
+  async fetchGmailInbox(
+    connection: IntegrationConnectionEntity,
+    opts: { maxResults?: number; query?: string } = {},
+  ): Promise<NormalizedInboundEmail[]> {
+    const token = await this.ensureFreshGoogleToken(connection);
+    const list = new URL(
+      'https://gmail.googleapis.com/gmail/v1/users/me/messages',
+    );
+    list.searchParams.set('q', opts.query ?? 'in:inbox newer_than:2d');
+    list.searchParams.set('maxResults', String(opts.maxResults ?? 25));
+    const listed = await this.getJson<{
+      messages?: Array<{ id: string; threadId: string }>;
+    }>(list.toString(), token);
+    const ids = listed.messages ?? [];
+    const out: NormalizedInboundEmail[] = [];
+    for (const { id } of ids) {
+      try {
+        const data = await this.getJson<GmailMessage>(
+          `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`,
+          token,
+        );
+        const parsed = this.parseGmailMessage(data);
+        if (parsed) out.push(parsed);
+      } catch {
+        // Skip a message that fails to fetch/parse; keep the rest.
+      }
+    }
+    return out;
+  }
+
+  private parseGmailMessage(data: GmailMessage): NormalizedInboundEmail | null {
+    const headers = data.payload?.headers ?? [];
+    const header = (name: string) =>
+      headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())
+        ?.value ?? null;
+    const from = header('From');
+    if (!from) return null;
+    const { email, name } = this.parseFromHeader(from);
+    const bodyText = this.decodeGmailBody(data.payload) || (data.snippet ?? '');
+    const dateMs = data.internalDate ? Number(data.internalDate) : NaN;
+    return {
+      externalId: data.id,
+      threadId: data.threadId ?? null,
+      fromEmail: email,
+      fromName: name,
+      subject: header('Subject'),
+      bodyText,
+      receivedAt: Number.isFinite(dateMs) ? new Date(dateMs) : null,
+    };
+  }
+
+  /** Walk the MIME tree and decode the first text/plain (or text/html) part. */
+  private decodeGmailBody(payload: GmailPayload | undefined): string {
+    if (!payload) return '';
+    const decode = (b64?: string) =>
+      b64
+        ? Buffer.from(
+            b64.replace(/-/g, '+').replace(/_/g, '/'),
+            'base64',
+          ).toString('utf8')
+        : '';
+    const find = (part: GmailPayload, mime: string): string | null => {
+      if (part.mimeType === mime && part.body?.data) {
+        return decode(part.body.data);
+      }
+      for (const child of part.parts ?? []) {
+        const hit = find(child, mime);
+        if (hit) return hit;
+      }
+      return null;
+    };
+    const plain = find(payload, 'text/plain');
+    if (plain) return plain.trim();
+    const html = find(payload, 'text/html');
+    if (html) {
+      return html
+        .replace(/<\/p>/gi, '\n\n')
+        .replace(/<br\s*\/?>(?=)/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .trim();
+    }
+    return '';
+  }
+
+  /** Split an RFC822 From header into name + email. */
+  parseFromHeader(value: string): { email: string; name: string | null } {
+    const match = value.match(/^\s*"?([^"<]*)"?\s*<([^>]+)>\s*$/);
+    if (match) {
+      const name = match[1].trim();
+      return { email: match[2].trim(), name: name || null };
+    }
+    return { email: value.trim(), name: null };
   }
 
   async googleCalendarEvent(
     payload: GoogleCalendarEventDto,
     actorUserId: string,
   ) {
-    const { token } = await this.getGoogleAccess(payload, actorUserId, 'update');
+    const { token } = await this.getGoogleAccess(
+      payload,
+      actorUserId,
+      'update',
+    );
     const requestId = `stack62-${Date.now().toString(36)}`;
     const data = await this.postJson<{
       id?: string;
@@ -904,7 +1319,11 @@ export class IntegrationsService {
     payload: GoogleOpenWorkspaceItemDto,
     actorUserId: string,
   ) {
-    const { token } = await this.getGoogleAccess(payload, actorUserId, 'update');
+    const { token } = await this.getGoogleAccess(
+      payload,
+      actorUserId,
+      'update',
+    );
     const googleMimeType =
       payload.kind === 'spreadsheet'
         ? 'application/vnd.google-apps.spreadsheet'
@@ -987,10 +1406,141 @@ export class IntegrationsService {
         preview: this.whatsAppTextPreview(payload),
       },
     });
+
+    // For inbound customer messages, also thread them into a conversation so
+    // the coworker can identify the chat and (optionally) auto-reply.
+    if (eventType === 'message' && query.organizationId) {
+      try {
+        const inbound = this.parseWhatsAppCloudInbound(payload);
+        if (inbound) {
+          const connection = await this.resolveConnection(
+            query.organizationId,
+            'whatsapp-cloud',
+            query.workspaceId,
+          );
+          if (connection) {
+            await this.whatsAppConversations.recordInbound({
+              organizationId: query.organizationId,
+              workspaceId: query.workspaceId ?? connection.workspaceId ?? null,
+              connectionId: connection.id,
+              channel: 'cloud',
+              contactPhone: inbound.from,
+              contactName: inbound.name,
+              text: inbound.text,
+              waMessageId: inbound.messageId,
+            });
+          }
+        }
+      } catch {
+        /* threading is best-effort; the webhook event is already stored */
+      }
+    }
     return { ok: true, eventId: event.id };
   }
 
-  async draftWhatsAppReply(payload: WhatsAppDraftReplyDto, actorUserId: string) {
+  /** Extract sender, text, and name from a Meta WhatsApp Cloud webhook. */
+  private parseWhatsAppCloudInbound(payload: Record<string, unknown>): {
+    from: string;
+    text: string;
+    name: string | null;
+    messageId: string | null;
+  } | null {
+    const entry = Array.isArray(payload.entry) ? payload.entry[0] : null;
+    const change = entry?.changes?.[0];
+    const value = change?.value;
+    const message = value?.messages?.[0];
+    if (!message) return null;
+    const from = typeof message.from === 'string' ? message.from : '';
+    const text =
+      message.text?.body ??
+      message.button?.text ??
+      message.interactive?.list_reply?.title ??
+      message.interactive?.button_reply?.title ??
+      '';
+    if (!from || !text) return null;
+    const name = value?.contacts?.[0]?.profile?.name ?? null;
+    return {
+      from,
+      text: String(text),
+      name: typeof name === 'string' ? name : null,
+      messageId: typeof message.id === 'string' ? message.id : null,
+    };
+  }
+
+  /**
+   * Receive a Paystack webhook (charge.success, transfer.*, etc.). Records the
+   * event for the org. Signature is verified against the org's connection secret
+   * (or PAYSTACK_SECRET_KEY) when available; the authoritative confirmation of
+   * funds is still a transaction/verify API call on the reference.
+   */
+  async receivePaystackWebhook(
+    query: { organizationId?: string; workspaceId?: string },
+    payload: Record<string, unknown>,
+    signature?: string,
+  ) {
+    const eventType =
+      typeof payload?.event === 'string' ? payload.event : 'unknown';
+    const data = (payload?.data ?? {}) as Record<string, unknown>;
+    const reference =
+      typeof data.reference === 'string' ? data.reference : null;
+
+    let secretKey = this.configService.get<string>('PAYSTACK_SECRET_KEY');
+    if (query.organizationId) {
+      const conn = await this.resolveConnection(
+        query.organizationId,
+        'paystack',
+        query.workspaceId,
+      );
+      const orgSecret = conn
+        ? (this.decryptCredentials(conn)?.secretKey as string | undefined)
+        : undefined;
+      if (orgSecret) secretKey = orgSecret;
+    }
+
+    let signatureValid: boolean | null = null;
+    if (secretKey && signature) {
+      const { createHmac } = await import('node:crypto');
+      const expected = createHmac('sha512', secretKey)
+        .update(JSON.stringify(payload))
+        .digest('hex');
+      signatureValid = expected === signature;
+    }
+
+    const event = await this.webhookEventsRepository.save(
+      this.webhookEventsRepository.create({
+        organizationId: query.organizationId ?? null,
+        workspaceId: query.workspaceId ?? null,
+        providerKey: 'paystack',
+        eventType,
+        payload,
+        status: signatureValid === false ? 'failed' : 'received',
+        errorMessage:
+          signatureValid === false ? 'Signature verification failed' : null,
+      }),
+    );
+    await this.activityService.log({
+      organizationId: query.organizationId ?? null,
+      workspaceId: query.workspaceId ?? null,
+      actorUserId: null,
+      action: 'integration.payment.webhook_received',
+      targetType: 'webhook_event',
+      targetId: event.id,
+      origin: 'system',
+      metadata: {
+        providerKey: 'paystack',
+        eventType,
+        reference,
+        signatureValid,
+        amountKobo: typeof data.amount === 'number' ? data.amount : null,
+      },
+    });
+    return { ok: true, eventId: event.id };
+  }
+
+  async draftWhatsAppReply(
+    payload: WhatsAppDraftReplyDto,
+    actorUserId: string,
+  ) {
     await this.accessControlService.assertResolvedAccess(actorUserId, {
       resource: 'integration',
       action: 'read',
@@ -1021,7 +1571,9 @@ export class IntegrationsService {
   async listWhatsAppPhoneNumbers(connectionId: string, actorUserId: string) {
     const connection = await this.findConnection(connectionId, actorUserId);
     if (connection.providerKey !== 'whatsapp-cloud') {
-      throw new BadRequestException('This connection is not WhatsApp Business.');
+      throw new BadRequestException(
+        'This connection is not WhatsApp Business.',
+      );
     }
     const creds = this.decryptCredentials(connection);
     const accessToken = creds?.accessToken as string | undefined;
@@ -1033,18 +1585,20 @@ export class IntegrationsService {
       accessToken,
     );
     const phoneNumbers =
-      result.data?.flatMap((business) =>
-        business.owned_whatsapp_business_accounts?.data?.flatMap((account) =>
-          account.phone_numbers?.data?.map((phone) => ({
-            id: phone.id,
-            displayPhoneNumber: phone.display_phone_number ?? phone.id,
-            verifiedName: phone.verified_name ?? null,
-            businessId: business.id,
-            businessName: business.name ?? 'Business',
-            businessAccountId: account.id,
-            businessAccountName: account.name ?? 'WhatsApp account',
-          })) ?? [],
-        ) ?? [],
+      result.data?.flatMap(
+        (business) =>
+          business.owned_whatsapp_business_accounts?.data?.flatMap(
+            (account) =>
+              account.phone_numbers?.data?.map((phone) => ({
+                id: phone.id,
+                displayPhoneNumber: phone.display_phone_number ?? phone.id,
+                verifiedName: phone.verified_name ?? null,
+                businessId: business.id,
+                businessName: business.name ?? 'Business',
+                businessAccountId: account.id,
+                businessAccountName: account.name ?? 'WhatsApp account',
+              })) ?? [],
+          ) ?? [],
       ) ?? [];
     return { connectionId, phoneNumbers };
   }
@@ -1056,7 +1610,9 @@ export class IntegrationsService {
   ) {
     const connection = await this.findConnection(connectionId, actorUserId);
     if (connection.providerKey !== 'whatsapp-cloud') {
-      throw new BadRequestException('This connection is not WhatsApp Business.');
+      throw new BadRequestException(
+        'This connection is not WhatsApp Business.',
+      );
     }
     await this.accessControlService.assertResolvedAccess(actorUserId, {
       resource: 'integration',
@@ -1279,14 +1835,196 @@ export class IntegrationsService {
     if (!connection) {
       throw new NotFoundException('No Google Workspace connection found.');
     }
+    const token = await this.ensureFreshGoogleToken(connection);
+    return { connection, token };
+  }
+
+  /**
+   * List the user's Google Drive files for the attachment picker. Optional
+   * `query` filters by name. Returns id/name/mimeType/size + an icon link.
+   * Requires the Google connection to have the drive.readonly scope (added to
+   * the OAuth consent — older connections need to reconnect Google once).
+   */
+  async listGoogleDriveFiles(
+    payload: { organizationId: string; workspaceId?: string; query?: string },
+    actorUserId: string,
+  ) {
+    const { token } = await this.getGoogleAccess(payload, actorUserId, 'read');
+    const url = new URL('https://www.googleapis.com/drive/v3/files');
+    const q = ['trashed = false'];
+    if (payload.query?.trim()) {
+      q.push(`name contains '${payload.query.trim().replace(/'/g, "\\'")}'`);
+    }
+    url.searchParams.set('q', q.join(' and '));
+    url.searchParams.set('orderBy', 'modifiedTime desc');
+    url.searchParams.set('pageSize', '50');
+    url.searchParams.set(
+      'fields',
+      'files(id,name,mimeType,size,iconLink,modifiedTime)',
+    );
+    const data = await this.getJson<{
+      files?: Array<{
+        id: string;
+        name: string;
+        mimeType: string;
+        size?: string;
+        iconLink?: string;
+        modifiedTime?: string;
+      }>;
+    }>(url.toString(), token);
+    return { files: data.files ?? [] };
+  }
+
+  /**
+   * Import a Google Drive file into the Stack62 file store so it can be
+   * attached/sent. Google-native docs are exported to Office formats; other
+   * files are downloaded as-is. Returns the stored file.
+   */
+  async importGoogleDriveFile(
+    payload: { organizationId: string; workspaceId?: string; fileId: string },
+    actorUserId: string,
+  ) {
+    const { token } = await this.getGoogleAccess(payload, actorUserId, 'read');
+    const meta = await this.getJson<{
+      id: string;
+      name: string;
+      mimeType: string;
+    }>(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(
+        payload.fileId,
+      )}?fields=id,name,mimeType`,
+      token,
+    );
+
+    // Google-native types (Docs/Sheets/Slides) must be exported, not downloaded.
+    const exportMap: Record<string, { mime: string; ext: string }> = {
+      'application/vnd.google-apps.document': {
+        mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        ext: '.docx',
+      },
+      'application/vnd.google-apps.spreadsheet': {
+        mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ext: '.xlsx',
+      },
+      'application/vnd.google-apps.presentation': {
+        mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        ext: '.pptx',
+      },
+    };
+    const exp = exportMap[meta.mimeType];
+    const downloadUrl = exp
+      ? `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(
+          payload.fileId,
+        )}/export?mimeType=${encodeURIComponent(exp.mime)}`
+      : `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(
+          payload.fileId,
+        )}?alt=media`;
+
+    const res = await fetch(downloadUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      throw new BadRequestException(
+        `Couldn't download the Drive file (status ${res.status}).`,
+      );
+    }
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const mimeType = exp?.mime ?? meta.mimeType;
+    const filename = exp ? `${meta.name}${exp.ext}` : meta.name;
+
+    const stored = await this.files.registerBuffer({
+      organizationId: payload.organizationId,
+      workspaceId: payload.workspaceId ?? null,
+      scope: 'attachment',
+      filename,
+      mimeType,
+      buffer,
+      ownerKind: 'user',
+      ownerId: actorUserId,
+      metadata: { source: 'google_drive', driveFileId: payload.fileId },
+    });
+    await this.logIntegrationDispatch({
+      organizationId: payload.organizationId,
+      workspaceId: payload.workspaceId ?? null,
+      actorUserId,
+      providerKey: 'google-workspace',
+      action: 'integration.google_drive.file_import',
+      targetId: stored.id,
+      metadata: { driveFileId: payload.fileId, filename },
+    });
+    return stored;
+  }
+
+  /**
+   * Returns a valid Google access token for the connection, refreshing it via
+   * the stored refresh token when it has expired (or is within 60s of doing
+   * so). Google access tokens live ~1h, so without this any Gmail/Calendar
+   * call — and any autonomous Coworker action — breaks after an hour.
+   */
+  private async ensureFreshGoogleToken(
+    connection: IntegrationConnectionEntity,
+  ): Promise<string> {
     const creds = this.decryptCredentials(connection);
     const token = creds?.accessToken as string | undefined;
-    if (!token) {
+    const refreshToken = creds?.refreshToken as string | undefined;
+    const expiresAtRaw = creds?.expiresAt as string | null | undefined;
+    const expiresAt = expiresAtRaw ? new Date(expiresAtRaw).getTime() : 0;
+    const stillValid = token && expiresAt && expiresAt - Date.now() > 60_000;
+    if (stillValid) {
+      return token;
+    }
+    if (!refreshToken) {
+      if (token) return token; // no expiry info and no refresh token — try as-is
       throw new BadRequestException(
         'Google Workspace connection is missing an access token. Reconnect Google.',
       );
     }
-    return { connection, token };
+
+    const clientId =
+      this.configService.get<string>('GOOGLE_CLIENT_ID') ??
+      this.configService.get<string>('GOOGLE_WORKSPACE_CLIENT_ID');
+    const clientSecret =
+      this.configService.get<string>('GOOGLE_CLIENT_SECRET') ??
+      this.configService.get<string>('GOOGLE_WORKSPACE_CLIENT_SECRET');
+    if (!clientId || !clientSecret) {
+      throw new BadRequestException(
+        'Google sign-in is not configured (missing client id/secret). Reconnect Google.',
+      );
+    }
+
+    let refreshed: { access_token: string; expires_in?: number };
+    try {
+      refreshed = await this.postForm<{
+        access_token: string;
+        expires_in?: number;
+        token_type?: string;
+      }>('https://oauth2.googleapis.com/token', {
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token',
+      });
+    } catch {
+      throw new BadRequestException(
+        'Google session expired and could not be refreshed. Reconnect Google.',
+      );
+    }
+
+    const newExpiresAt = refreshed.expires_in
+      ? new Date(Date.now() + refreshed.expires_in * 1000)
+      : null;
+    const updatedCreds = {
+      ...(creds ?? {}),
+      accessToken: refreshed.access_token,
+      refreshToken,
+      expiresAt: newExpiresAt?.toISOString() ?? null,
+    };
+    connection.credentials = this.cryptoService.encryptJson(
+      updatedCreds,
+    ) as Record<string, unknown> | null;
+    connection.lastCheckedAt = new Date();
+    await this.connectionsRepository.save(connection);
+    return refreshed.access_token;
   }
 
   private decodeOAuthState(state: string) {
@@ -1429,15 +2167,18 @@ export class IntegrationsService {
       order: { updatedAt: 'DESC' },
     });
     const scoped =
-      (workspaceId
-        ? all.find((c) => c.workspaceId === workspaceId)
-        : null) ?? all.find((c) => c.workspaceId === null) ?? all[0] ?? null;
+      (workspaceId ? all.find((c) => c.workspaceId === workspaceId) : null) ??
+      all.find((c) => c.workspaceId === null) ??
+      all[0] ??
+      null;
     return scoped;
   }
 
   /** Decrypts a connection's credentials. Returns null if missing/masked. */
   decryptCredentials(connection: IntegrationConnectionEntity) {
-    const decrypted = this.cryptoService.readCredentials(connection.credentials);
+    const decrypted = this.cryptoService.readCredentials(
+      connection.credentials,
+    );
     if (!decrypted) return null;
     if (this.cryptoService.isMasked(decrypted)) return null;
     return decrypted;
@@ -1453,10 +2194,24 @@ export class IntegrationsService {
     return this.connectionsRepository.save(connection);
   }
 
+  /** Active mailbox connections to poll for incoming email (server-side). */
+  async listActiveEmailConnections(): Promise<IntegrationConnectionEntity[]> {
+    return this.connectionsRepository.find({
+      where: [
+        { providerKey: 'google-workspace', status: 'active' },
+        { providerKey: 'smtp-email', status: 'active' },
+      ],
+      order: { updatedAt: 'ASC' },
+      take: 200,
+    });
+  }
+
   /** Returns the redacted public-facing form of a connection (for list/detail). */
   redact(connection: IntegrationConnectionEntity) {
     const credKeys = connection.credentials
-      ? Object.keys(this.cryptoService.readCredentials(connection.credentials) ?? {})
+      ? Object.keys(
+          this.cryptoService.readCredentials(connection.credentials) ?? {},
+        )
       : [];
     return {
       ...connection,

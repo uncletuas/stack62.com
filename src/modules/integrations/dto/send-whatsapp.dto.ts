@@ -25,4 +25,9 @@ export class SendWhatsAppDto {
   @IsOptional()
   @IsObject()
   metadata?: Record<string, unknown>;
+
+  /** Reply to (quote) an existing stored message. */
+  @IsOptional()
+  @IsUUID()
+  replyToMessageId?: string;
 }

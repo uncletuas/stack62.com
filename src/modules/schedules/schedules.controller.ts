@@ -1,4 +1,13 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtUser } from '../auth/interfaces/jwt-user.interface';
@@ -59,7 +68,10 @@ export class SchedulesController {
     resourceId: { source: 'param', key: 'scheduleId' },
   })
   @Delete(':scheduleId')
-  delete(@Param('scheduleId') scheduleId: string, @CurrentUser() user: JwtUser) {
+  delete(
+    @Param('scheduleId') scheduleId: string,
+    @CurrentUser() user: JwtUser,
+  ) {
     return this.schedulesService.delete(scheduleId, user.userId);
   }
 }

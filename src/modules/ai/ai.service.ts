@@ -315,7 +315,7 @@ export class AiService {
 
     const structuredPlan = plan.structuredPlan as AiChangePlan;
     const isPartial =
-      Array.isArray(selection?.changeIds) && selection!.changeIds!.length > 0;
+      Array.isArray(selection?.changeIds) && selection.changeIds.length > 0;
 
     const before: SystemDefinition = request.systemId
       ? await this.systemsService.getPublishedDefinition(request.systemId)
@@ -325,7 +325,7 @@ export class AiService {
     let effectiveAfter: SystemDefinition;
     if (isPartial) {
       const fullDiff = diffSystemDefinition(before, fullAfter);
-      const selectedIds = new Set(selection!.changeIds!);
+      const selectedIds = new Set(selection.changeIds);
       effectiveAfter = applyDiffSelection(
         before,
         fullAfter,
@@ -369,13 +369,7 @@ export class AiService {
           })),
           views: effectiveAfter.views.map((view) => ({
             name: view.name,
-            type: view.type as
-              | 'table'
-              | 'form'
-              | 'kanban'
-              | 'calendar'
-              | 'chart'
-              | 'card',
+            type: view.type,
             config: view.config ?? undefined,
           })),
           dashboards: effectiveAfter.dashboards.map((dashboard) => ({
@@ -413,7 +407,7 @@ export class AiService {
         metadata: {
           ...(request.metadata ?? {}),
           ...(isPartial
-            ? { partialApproval: { changeIds: selection!.changeIds } }
+            ? { partialApproval: { changeIds: selection.changeIds } }
             : {}),
         },
       });
@@ -440,7 +434,7 @@ export class AiService {
       metadata: {
         ...(request.metadata ?? {}),
         ...(isPartial
-          ? { partialApproval: { changeIds: selection!.changeIds } }
+          ? { partialApproval: { changeIds: selection.changeIds } }
           : {}),
       },
     });

@@ -79,7 +79,11 @@ export class FileSharingService {
       );
     }
 
-    if (!payload.targetEmail && !payload.targetUserId && !payload.asPublicLink) {
+    if (
+      !payload.targetEmail &&
+      !payload.targetUserId &&
+      !payload.asPublicLink
+    ) {
       throw new BadRequestException(
         'Provide targetEmail, targetUserId, or asPublicLink=true.',
       );
@@ -87,7 +91,7 @@ export class FileSharingService {
 
     // Resolve targetEmail → targetUserId when possible.
     let targetUserId = payload.targetUserId ?? null;
-    let targetEmail = payload.targetEmail?.trim().toLowerCase() ?? null;
+    const targetEmail = payload.targetEmail?.trim().toLowerCase() ?? null;
     if (!targetUserId && targetEmail) {
       const user = await this.usersService.findByEmail(targetEmail);
       if (user) targetUserId = user.id;

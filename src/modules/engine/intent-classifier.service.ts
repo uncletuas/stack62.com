@@ -26,7 +26,9 @@ export interface ClassifierResult {
  */
 type Tier0Rule = {
   id: string;
-  match: (prompt: string) =>
+  match: (
+    prompt: string,
+  ) =>
     | { tool: { name: string; input: Record<string, unknown> }; reason: string }
     | { directReply: string; reason: string }
     | null;
@@ -37,8 +39,9 @@ const TIER0_RULES: Tier0Rule[] = [
   {
     id: 'list_pending_plans',
     match: (p) =>
-      /\b(pending|waiting|to (?:approve|review))\b.*\b(plan|change|request)s?\b/i.test(p) ||
-      /\b(show|list|what(?:'s| is)?)\b.*\bplans?\b/i.test(p)
+      /\b(pending|waiting|to (?:approve|review))\b.*\b(plan|change|request)s?\b/i.test(
+        p,
+      ) || /\b(show|list|what(?:'s| is)?)\b.*\bplans?\b/i.test(p)
         ? {
             tool: { name: 'plans.list', input: { status: 'pending' } },
             reason: 'list pending plans',
@@ -56,7 +59,10 @@ const TIER0_RULES: Tier0Rule[] = [
     id: 'list_workflows',
     match: (p) =>
       /\b(list|show)\b.*\bworkflows?\b/i.test(p)
-        ? { tool: { name: 'workflows.list', input: {} }, reason: 'list workflows' }
+        ? {
+            tool: { name: 'workflows.list', input: {} },
+            reason: 'list workflows',
+          }
         : null,
   },
   {
@@ -86,14 +92,18 @@ const TIER0_RULES: Tier0Rule[] = [
   {
     id: 'list_jobs',
     match: (p) =>
-      /\b(list|show|what(?:'s| are)?)\b.*\b(running |scheduled |my )?jobs?\b/i.test(p)
+      /\b(list|show|what(?:'s| are)?)\b.*\b(running |scheduled |my )?jobs?\b/i.test(
+        p,
+      )
         ? { tool: { name: 'jobs.list', input: {} }, reason: 'list jobs' }
         : null,
   },
   {
     id: 'list_integrations',
     match: (p) =>
-      /\b(list|show|what)\b.*\b(connected |my )?(integrations?|tools?|connections?)\b/i.test(p)
+      /\b(list|show|what)\b.*\b(connected |my )?(integrations?|tools?|connections?)\b/i.test(
+        p,
+      )
         ? {
             tool: { name: 'integrations.list', input: {} },
             reason: 'list connected integrations',
@@ -103,10 +113,29 @@ const TIER0_RULES: Tier0Rule[] = [
   {
     id: 'list_schedules',
     match: (p) =>
-      /\b(list|show|what(?:'s)?)\b.*\b(scheduled|schedules?|upcoming|on (?:the |my )?calendar|next)\b/i.test(p)
+      /\b(list|show|what(?:'s)?)\b.*\b(scheduled|schedules?|upcoming|on (?:the |my )?calendar|next)\b/i.test(
+        p,
+      )
         ? {
             tool: { name: 'schedules.list', input: {} },
             reason: 'list schedules',
+          }
+        : null,
+  },
+  {
+    id: 'list_reports',
+    match: (p) =>
+      /\b(list|show)\b.*\breports?\b/i.test(p)
+        ? { tool: { name: 'reports.list', input: {} }, reason: 'list reports' }
+        : null,
+  },
+  {
+    id: 'list_meetings',
+    match: (p) =>
+      /\b(list|show)\b.*\bmeetings?\b/i.test(p)
+        ? {
+            tool: { name: 'meetings.list', input: {} },
+            reason: 'list meetings',
           }
         : null,
   },
@@ -145,14 +174,17 @@ const TIER0_RULES: Tier0Rule[] = [
     id: 'thanks',
     match: (p) =>
       /^\s*(thanks?|thank you|ty|cheers)\s*[!.?]?\s*$/i.test(p)
-        ? { directReply: "You got it.", reason: 'thanks' }
+        ? { directReply: 'You got it.', reason: 'thanks' }
         : null,
   },
-  // "What can you do" → static answer
+  // "What can you do" → static answer. Kept narrow so real requests like
+  // "help me write an email" or "what are 3 ways to…" are NOT caught here.
   {
     id: 'capabilities',
     match: (p) =>
-      /\b(what can you do|how can you help|capabilities|help me)\b/i.test(p)
+      /^\s*(what can you do|how can you help( me)?|what are your capabilities)\s*\??\s*$/i.test(
+        p,
+      )
         ? {
             directReply:
               "I can search the workspace, list and act on records, tasks, schedules, plans, files and documents, run connected tools (Gmail, WhatsApp, QuickBooks, Drive, Calendar), and propose changes through the Plan → Diff → Approve flow. Tell me a goal and I'll pick the right path.",
@@ -197,8 +229,36 @@ export class IntentClassifierService {
     const tier0 = this.tryTier0(input.prompt, input.tools);
     if (tier0) return tier0;
 
-    // Tier 1 — local small model. Skip when the prompt is long-form or the
-    // history is deep enough to suggest agentic planning.
+    // Tier 1 (generative) — low-level text work the local model can do well
+    // on its own: summarize / rewrite / translate / draft from inline content.
+    // These are often long-form (they carry the content), so this runs BEFORE
+    // the long-form escalation gate below.
+    const genIntent = detectGenerativeIntent(input.prompt);
+    if (genIntent) {
+      const ollamaReady = await this.ollama.isAvailable();
+      if (ollamaReady) {
+        try {
+          const reply = await this.tryTier1Generative(input.prompt, genIntent);
+          if (reply) {
+            return {
+              tier: 1,
+              directReply: reply,
+              reason: `local ${genIntent} (no API)`,
+            };
+          }
+        } catch (err) {
+          this.logger.warn(
+            `Tier-1 generative failed, escalating: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
+    }
+
+    // Tier 1 (tool triage) — local small model picks one read/search tool.
+    // Skip when the prompt is long-form or the history is deep enough to
+    // suggest agentic planning.
     const longForm = input.prompt.split(/\s+/).length > 60;
     const deepThread = input.history.length > 8;
     if (longForm || deepThread) {
@@ -224,6 +284,37 @@ export class IntentClassifierService {
       );
     }
     return { tier: 3, reason: 'no confident local match' };
+  }
+
+  /**
+   * Run a self-contained generative task on the local model. Only used for
+   * low-level text transforms where the content is supplied inline, so no
+   * workspace context or tools are needed — and no frontier call.
+   */
+  private async tryTier1Generative(
+    prompt: string,
+    intent: string,
+  ): Promise<string | null> {
+    const reply = await this.ollama.complete([
+      {
+        role: 'system',
+        content:
+          `You are Stack62's local assistant handling a ${intent} task. ` +
+          'Do exactly what the user asks with the text they provide. Return only ' +
+          'the result — no preamble, no meta-commentary. If the request actually ' +
+          'needs data you were not given, reply with the single token NEED_CONTEXT.',
+      },
+      { role: 'user', content: prompt },
+    ]);
+    const trimmed = reply.trim();
+    if (
+      !trimmed ||
+      trimmed === 'NEED_CONTEXT' ||
+      trimmed.includes('NEED_CONTEXT')
+    ) {
+      return null;
+    }
+    return trimmed;
   }
 
   private tryTier0(
@@ -281,6 +372,41 @@ export class IntentClassifierService {
       reason: 'local-model intent match',
     };
   }
+}
+
+/**
+ * Detect a self-contained, low-level generative task the local model can do
+ * without any workspace data. Requires both a generative verb AND enough
+ * inline content (so "draft an email to the team" — which needs org context —
+ * doesn't match, but "summarize: <long text>" does). Returns the intent label
+ * or null.
+ */
+function detectGenerativeIntent(prompt: string): string | null {
+  const p = prompt.trim();
+  const wordCount = p.split(/\s+/).length;
+  const hasInlineContent = wordCount >= 12 || /[:\n"“]/.test(p);
+  if (!hasInlineContent) return null;
+  const verbs: Array<[RegExp, string]> = [
+    [/\b(summari[sz]e|tl;?dr|give me the gist|key points)\b/i, 'summarize'],
+    [
+      /\b(rewrite|rephrase|paraphrase|reword|make this (?:more )?(?:formal|casual|concise|polite)|improve the wording)\b/i,
+      'rewrite',
+    ],
+    [/\b(translate|translation)\b/i, 'translate'],
+    [
+      /\b(proofread|fix (?:the )?grammar|correct the grammar|fix typos)\b/i,
+      'proofread',
+    ],
+    [/\b(shorten|condense|trim this down)\b/i, 'shorten'],
+    [/\b(expand|elaborate on|flesh out)\b/i, 'expand'],
+    [/\b(classify|categori[sz]e|what category|sentiment of)\b/i, 'classify'],
+    [/\b(extract|pull out|list the)\b.*\b(from|in)\b/i, 'extract'],
+    [/\b(bullet points?|turn .* into bullets)\b/i, 'reformat'],
+  ];
+  for (const [re, label] of verbs) {
+    if (re.test(p)) return label;
+  }
+  return null;
 }
 
 function isReadLikeTool(t: ToolDefinition): boolean {

@@ -108,10 +108,10 @@ export class S3Backend implements StorageBackend {
     contentType: string,
     expiresInSeconds: number,
   ): Promise<string | null> {
-    const command = new PutObjectCommand({ 
-      Bucket: this.bucket, 
+    const command = new PutObjectCommand({
+      Bucket: this.bucket,
       Key: key,
-      ContentType: contentType 
+      ContentType: contentType,
     });
     return getSignedUrl(this.client, command, { expiresIn: expiresInSeconds });
   }

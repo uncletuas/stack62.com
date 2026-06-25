@@ -28,8 +28,12 @@ import {
 } from './dto/create-job.dto';
 import { ListJobsDto } from './dto/list-jobs.dto';
 import { UpdateCoworkerDto } from './dto/update-coworker.dto';
+import { UpdateWhatsAppAgentDto } from './dto/update-whatsapp-agent.dto';
+import { UpdateEmailAgentDto } from './dto/update-email-agent.dto';
 import { JobDispatcherService } from './job-dispatcher.service';
 import { JobsService } from './jobs.service';
+import { WhatsAppAgentService } from './whatsapp-agent.service';
+import { EmailAgentService } from './email-agent.service';
 
 @ApiTags('coworker')
 @ApiBearerAuth()
@@ -41,6 +45,8 @@ export class CoworkerController {
     private readonly coworkerMemoryService: CoworkerMemoryService,
     private readonly jobsService: JobsService,
     private readonly jobDispatcher: JobDispatcherService,
+    private readonly whatsAppAgentService: WhatsAppAgentService,
+    private readonly emailAgentService: EmailAgentService,
   ) {}
 
   @Get()
@@ -113,6 +119,48 @@ export class CoworkerController {
     );
   }
 
+  @Get('whatsapp-agent')
+  getWhatsAppAgent(
+    @Query('organizationId') organizationId: string,
+    @Query('workspaceId') workspaceId: string,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.whatsAppAgentService.getOrCreate(
+      organizationId,
+      workspaceId,
+      user.userId,
+    );
+  }
+
+  @Patch('whatsapp-agent')
+  updateWhatsAppAgent(
+    @Body() dto: UpdateWhatsAppAgentDto,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.whatsAppAgentService.update(user.userId, dto);
+  }
+
+  @Get('email-agent')
+  getEmailAgent(
+    @Query('organizationId') organizationId: string,
+    @Query('workspaceId') workspaceId: string,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.emailAgentService.getOrCreate(
+      organizationId,
+      workspaceId,
+      user.userId,
+    );
+  }
+
+  @Patch('email-agent')
+  updateEmailAgent(
+    @Body() dto: UpdateEmailAgentDto,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.emailAgentService.update(user.userId, dto);
+  }
+
   @Get('jobs')
   listJobs(@Query() query: ListJobsDto, @CurrentUser() user: JwtUser) {
     return this.jobsService.list(query, user.userId);
@@ -159,10 +207,7 @@ export class CoworkerController {
   }
 
   @Post('jobs/:jobId/run')
-  async runJob(
-    @Param('jobId') jobId: string,
-    @CurrentUser() user: JwtUser,
-  ) {
+  async runJob(@Param('jobId') jobId: string, @CurrentUser() user: JwtUser) {
     const started = await this.jobDispatcher.dispatchNow(jobId, user.userId);
     return { ok: true, started };
   }

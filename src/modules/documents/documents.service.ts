@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as crypto from 'node:crypto';
@@ -164,6 +169,9 @@ export class DocumentsService {
     }
     if (filters.status) {
       qb.andWhere('document.status = :status', { status: filters.status });
+    } else {
+      // Hide soft-deleted documents from the default listing.
+      qb.andWhere('document.status != :deleted', { deleted: 'deleted' });
     }
 
     return qb.orderBy('document.updatedAt', 'DESC').take(200).getMany();
@@ -237,7 +245,10 @@ export class DocumentsService {
       targetType: 'document',
       targetId: updated.id,
       origin: 'user',
-      metadata: { title: updated.title, currentVersion: updated.currentVersion },
+      metadata: {
+        title: updated.title,
+        currentVersion: updated.currentVersion,
+      },
     });
 
     await this.auditService.log({
@@ -257,6 +268,40 @@ export class DocumentsService {
     }
 
     return updated;
+  }
+
+  /** Soft-delete a document (status='deleted'); hidden from the listing. */
+  async remove(documentId: string, actorUserId: string) {
+    const document = await this.findOne(documentId, actorUserId);
+    await this.accessControlService.assertResolvedAccess(actorUserId, {
+      resource: 'document',
+      action: 'update',
+      organizationId: document.organizationId,
+      workspaceId: document.workspaceId,
+      systemId: document.systemId,
+    });
+    document.status = 'deleted';
+    document.updatedByUserId = actorUserId;
+    await this.documentsRepository.save(document);
+    await this.logDocumentAction('document.delete', document, actorUserId);
+    return { id: document.id, status: 'deleted' as const };
+  }
+
+  /** Duplicate a document into a new one with " (copy)" appended to the title. */
+  async duplicate(documentId: string, actorUserId: string) {
+    const source = await this.findOne(documentId, actorUserId);
+    return this.create(
+      {
+        organizationId: source.organizationId,
+        workspaceId: source.workspaceId ?? undefined,
+        systemId: source.systemId ?? undefined,
+        title: `${source.title} (copy)`,
+        content: source.content,
+        format: source.format,
+        metadata: source.metadata ?? undefined,
+      } as CreateDocumentDto,
+      actorUserId,
+    );
   }
 
   async listVersions(documentId: string, actorUserId: string) {
@@ -307,7 +352,9 @@ export class DocumentsService {
 
   async summarize(documentId: string, actorUserId: string) {
     const document = await this.findOne(documentId, actorUserId);
-    const org = await this.organizationsService.findById(document.organizationId);
+    const org = await this.organizationsService.findById(
+      document.organizationId,
+    );
     const summary = await this.openRouterService.complete(
       [
         {
@@ -332,7 +379,9 @@ export class DocumentsService {
     actorUserId: string,
   ) {
     const document = await this.findOne(documentId, actorUserId);
-    const org = await this.organizationsService.findById(document.organizationId);
+    const org = await this.organizationsService.findById(
+      document.organizationId,
+    );
     const rewritten = await this.openRouterService.complete(
       [
         {
@@ -367,7 +416,9 @@ export class DocumentsService {
     if (!document.workspaceId) {
       throw new BadRequestException('Document must belong to a workspace.');
     }
-    const org = await this.organizationsService.findById(document.organizationId);
+    const org = await this.organizationsService.findById(
+      document.organizationId,
+    );
     const raw = await this.openRouterService.complete(
       [
         {
@@ -381,7 +432,11 @@ export class DocumentsService {
       org?.preferredModel ?? null,
     );
     const parsed = this.extractJson(raw) as {
-      tasks?: Array<{ title?: string; description?: string; priority?: string }>;
+      tasks?: Array<{
+        title?: string;
+        description?: string;
+        priority?: string;
+      }>;
     } | null;
     const specs = (parsed?.tasks ?? []).filter((task) => task.title);
     const created = [];

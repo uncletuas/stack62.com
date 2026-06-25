@@ -95,7 +95,7 @@ export class CoworkerService {
         ...(dto.permissions as Partial<CoworkerPermissions>),
       };
     }
-    if (dto.role !== undefined) coworker.role = dto.role as CoworkerRole;
+    if (dto.role !== undefined) coworker.role = dto.role;
     const saved = await this.coworkerRepo.save(coworker);
     await this.activity.log({
       organizationId,
@@ -135,7 +135,8 @@ export class CoworkerService {
       if (preferences.length)
         lines.push(`Preferences:\n${formatList(preferences)}`);
       if (facts.length) lines.push(`Facts:\n${formatList(facts)}`);
-      if (episodes.length) lines.push(`Recent episodes:\n${formatList(episodes)}`);
+      if (episodes.length)
+        lines.push(`Recent episodes:\n${formatList(episodes)}`);
       lines.push(
         'Use these as background context. Do not repeat them back unless asked.',
       );
@@ -153,7 +154,9 @@ export class CoworkerService {
     if (!perms.canSendPayments) denied.push('initiating payments');
     if (!perms.canCreateRecords) denied.push('creating records');
     if (denied.length) {
-      lines.push(`You may NOT do the following without the user's explicit go-ahead in this turn: ${denied.join(', ')}.`);
+      lines.push(
+        `You may NOT do the following without the user's explicit go-ahead in this turn: ${denied.join(', ')}.`,
+      );
     }
     return lines.join('\n');
   }

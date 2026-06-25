@@ -40,6 +40,7 @@ import {
   X,
 } from "lucide-react";
 import { appDialog } from "../../components/app-dialog";
+import { ShareToPicker } from "../../components/ShareToPicker";
 import { localFolder } from "../../lib/local-folder";
 import {
   extractionApi,
@@ -58,12 +59,18 @@ import {
   bulkDeleteFiles,
   bulkMoveFiles,
   copyFile,
+  createDocument,
   createWorkspaceDoc,
+  deleteDocument,
   deleteFile,
+  duplicateDocument,
+  fetchDocuments,
   fetchFileBlobUrl,
   fileDownloadUrl,
+  updateDocument,
   updateFile,
   type WorkspaceDocKind,
+  type WorkspaceDocument,
 } from "../../lib/resources";
 import { useAppContext } from "../../context/app-context";
 import { useWorkspace } from "../workspace-context";
@@ -117,6 +124,7 @@ export function FilesExplorerEditor() {
   const [parentId, setParentId] = useState<string | null>(null);
   const [folders, setFolders] = useState<FolderDto[]>([]);
   const [files, setFiles] = useState<FileRow[]>([]);
+  const [documents, setDocuments] = useState<WorkspaceDocument[]>([]);
   const [detailsFileId, setDetailsFileId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SemanticHitDto[] | null>(null);
@@ -130,7 +138,15 @@ export function FilesExplorerEditor() {
     y: number;
     fileId: string;
   } | null>(null);
+  const [docContextMenu, setDocContextMenu] = useState<{
+    x: number;
+    y: number;
+    docId: string;
+  } | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const [shareFiles, setShareFiles] = useState<
+    Array<{ id: string; filename: string }> | null
+  >(null);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [showNewSubmenu, setShowNewSubmenu] = useState(false);
   const [creating, setCreating] = useState<WorkspaceDocKind | null>(null);
@@ -153,30 +169,49 @@ export function FilesExplorerEditor() {
       return;
     }
     setShowOptionsMenu(false);
-    const title = await appDialog.prompt({
-      title: `New ${kind === "document" ? "document" : kind === "sheet" ? "spreadsheet" : "presentation"}`,
-      description: "Give it a name. You can rename later.",
-      placeholder: defaultTitle,
-      initialValue: defaultTitle,
-      confirmLabel: "Create",
-    });
-    if (!title?.trim()) return;
+    // Open a fresh, blank file immediately — like clicking "New" in a
+    // word processor: pick the type and a clean page opens for typing.
+    // The default title is applied straight away; the user can rename
+    // it later from the tab or the file list.
+    const title = defaultTitle;
     setCreating(kind);
     try {
+      // Documents open in the rich single-surface editor (DocsEditor) —
+      // the same sophisticated editor used when reopening an existing
+      // document — so creating and editing a doc use one consistent UI.
+      // Sheets and slides keep the collaborative Fortune Sheet / slides
+      // surfaces, which are the more capable editors for those types.
+      if (kind === "document") {
+        const doc = await createDocument({
+          organizationId: orgId,
+          workspaceId,
+          title,
+          content: "<p></p>",
+        });
+        openTab({ kind: "document", title: doc.title, refId: doc.id });
+        // Surface it in the sidebar/explorer document list immediately.
+        window.dispatchEvent(new CustomEvent("stack62:files-changed"));
+        appendRunLog({
+          level: "ok",
+          text: `Created document: ${title}`,
+          source: "files",
+        });
+        return;
+      }
       const result = await createWorkspaceDoc({
         organizationId: orgId,
         workspaceId,
         kind,
-        title: title.trim(),
+        title,
       });
       openTab({
         kind: "workspace-doc",
-        title: title.trim(),
+        title,
         refId: result.action.docId,
       });
       appendRunLog({
         level: "ok",
-        text: `Created ${kind}: ${title.trim()}`,
+        text: `Created ${kind}: ${title}`,
         source: "files",
       });
     } catch (err) {
@@ -194,7 +229,7 @@ export function FilesExplorerEditor() {
     if (!orgId) return;
     setLoading(true);
     try {
-      const [foldersRes, filesRes] = await Promise.all([
+      const [foldersRes, filesRes, docsRes] = await Promise.all([
         foldersApi.list(orgId, parentId ?? undefined),
         apiRequest<FileRow[]>("/files", {
           query: { organizationId: orgId },
@@ -203,9 +238,19 @@ export function FilesExplorerEditor() {
             parentId ? f.folderId === parentId : f.folderId == null,
           ),
         ),
+        // Documents created/edited in the rich editor live as document
+        // resources (not files), so fetch them too — otherwise an
+        // autosaved doc would never appear here. They're not foldered, so
+        // only show them at the top level.
+        parentId
+          ? Promise.resolve([] as WorkspaceDocument[])
+          : fetchDocuments({ organizationId: orgId }).catch(
+              () => [] as WorkspaceDocument[],
+            ),
       ]);
       setFolders(foldersRes);
       setFiles(filesRes);
+      setDocuments(docsRes);
     } finally {
       setLoading(false);
     }
@@ -462,6 +507,131 @@ export function FilesExplorerEditor() {
     a.remove();
   }, []);
 
+  // ── Document operations (parity with files) ──────────────────────
+  const doRenameDocument = useCallback(
+    async (docId: string) => {
+      const doc = documents.find((d) => d.id === docId);
+      if (!doc) return;
+      const next = await appDialog.prompt({
+        title: "Rename document",
+        initialValue: doc.title,
+        placeholder: doc.title,
+        confirmLabel: "Rename",
+        validate: (v) => (!v.trim() ? "Name is required." : null),
+      });
+      if (!next || next.trim() === doc.title) return;
+      try {
+        const updated = await updateDocument(docId, { title: next.trim() });
+        setDocuments((prev) =>
+          prev.map((d) => (d.id === docId ? updated : d)),
+        );
+      } catch (err) {
+        await appDialog.alert({
+          title: "Rename failed",
+          description: err instanceof Error ? err.message : "Unknown error.",
+          tone: "destructive",
+        });
+      }
+    },
+    [documents],
+  );
+
+  const doDuplicateDocument = useCallback(async (docId: string) => {
+    try {
+      const copy = await duplicateDocument(docId);
+      setDocuments((prev) => [copy, ...prev]);
+    } catch (err) {
+      await appDialog.alert({
+        title: "Duplicate failed",
+        description: err instanceof Error ? err.message : "Unknown error.",
+        tone: "destructive",
+      });
+    }
+  }, []);
+
+  const doDeleteDocuments = useCallback(
+    async (docIds: string[]) => {
+      if (docIds.length === 0) return;
+      const first = documents.find((d) => d.id === docIds[0]);
+      const ok = await appDialog.confirm({
+        title:
+          docIds.length === 1
+            ? "Delete document?"
+            : `Delete ${docIds.length} documents?`,
+        description:
+          docIds.length === 1
+            ? `"${first?.title ?? "This document"}" will be removed. This cannot be undone.`
+            : "These documents will be removed. This cannot be undone.",
+        destructive: true,
+        confirmLabel: "Delete",
+      });
+      if (!ok) return;
+      try {
+        await Promise.all(docIds.map((id) => deleteDocument(id)));
+        setDocuments((prev) => prev.filter((d) => !docIds.includes(d.id)));
+        setSelection((prev) => {
+          const next = new Set(prev);
+          docIds.forEach((id) => next.delete(id));
+          return next;
+        });
+      } catch (err) {
+        await appDialog.alert({
+          title: "Delete failed",
+          description: err instanceof Error ? err.message : "Unknown error.",
+          tone: "destructive",
+        });
+      }
+    },
+    [documents],
+  );
+
+  const doShareDocument = useCallback((doc: WorkspaceDocument) => {
+    const subject = `Stack62: ${doc.title}`;
+    const body = `I'm sharing "${doc.title}" with you via Stack62.\n\nOpen the document: ${window.location.origin}/app?document=${doc.id}\n`;
+    window.dispatchEvent(
+      new CustomEvent("stack62:open-email", { detail: { subject, body } }),
+    );
+  }, []);
+
+  // Delete whatever is selected, routing files and documents to their own
+  // delete paths behind a single confirmation.
+  const doDeleteSelection = useCallback(
+    async (ids: string[]) => {
+      const fileIds = ids.filter((id) => files.some((f) => f.id === id));
+      const docIds = ids.filter((id) => documents.some((d) => d.id === id));
+      const total = fileIds.length + docIds.length;
+      if (total === 0) return;
+      const ok = await appDialog.confirm({
+        title: total === 1 ? "Delete item?" : `Delete ${total} items?`,
+        description:
+          "Selected files and documents will be removed. This cannot be undone.",
+        destructive: true,
+        confirmLabel: "Delete",
+      });
+      if (!ok) return;
+      try {
+        if (fileIds.length === 1) await deleteFile(fileIds[0]);
+        else if (fileIds.length > 1) await bulkDeleteFiles(fileIds);
+        if (docIds.length) {
+          await Promise.all(docIds.map((id) => deleteDocument(id)));
+        }
+        setFiles((prev) => prev.filter((f) => !fileIds.includes(f.id)));
+        setDocuments((prev) => prev.filter((d) => !docIds.includes(d.id)));
+        setSelection(new Set());
+        if (detailsFileId && fileIds.includes(detailsFileId)) {
+          setDetailsFileId(null);
+        }
+      } catch (err) {
+        await appDialog.alert({
+          title: "Delete failed",
+          description: err instanceof Error ? err.message : "Unknown error.",
+          tone: "destructive",
+        });
+      }
+    },
+    [files, documents, detailsFileId],
+  );
+
   const doBulkDownload = useCallback(async () => {
     // Simple per-file trigger; browsers will queue them. For >5 files
     // we warn first because some browsers throttle.
@@ -590,7 +760,7 @@ export function FilesExplorerEditor() {
       }
       if ((event.key === "Delete" || event.key === "Backspace") && selectedIds.length > 0) {
         event.preventDefault();
-        void doDelete(selectedIds);
+        void doDeleteSelection(selectedIds);
         return;
       }
       if (event.key === "F2" && lastSelectedId) {
@@ -609,10 +779,19 @@ export function FilesExplorerEditor() {
     doCopyToClipboard,
     doPaste,
     doDelete,
+    doDeleteSelection,
     doRename,
     selectedIds,
     lastSelectedId,
   ]);
+
+  // Close the document context menu when clicking anywhere else.
+  useEffect(() => {
+    if (!docContextMenu) return;
+    const onDoc = () => setDocContextMenu(null);
+    window.addEventListener("click", onDoc);
+    return () => window.removeEventListener("click", onDoc);
+  }, [docContextMenu]);
 
   // Close the context menu when clicking anywhere else.
   useEffect(() => {
@@ -710,65 +889,64 @@ export function FilesExplorerEditor() {
                 className="absolute right-0 top-full z-40 mt-1 w-56 overflow-hidden rounded-md border border-app bg-app-elevated shadow-lg"
                 onClick={(e) => e.stopPropagation()}
               >
-                {/* New submenu trigger */}
-                <div className="relative group">
-                  <button
-                    role="menuitem"
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowNewSubmenu((v) => !v);
-                    }}
-                    onMouseEnter={() => setShowNewSubmenu(true)}
-                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition hover:bg-app-hover"
-                  >
-                    <div className="flex items-center gap-3">
-                      <Plus className="size-4 shrink-0 text-app-muted" />
-                      <span className="text-sm font-medium text-app">New</span>
-                    </div>
-                    <ChevronRight className="size-3 text-app-muted" />
-                  </button>
+                {/* New — expands inline to the document types this
+                    system can create. (Rendered inline rather than as a
+                    flyout because the menu uses overflow-hidden, which
+                    would clip an absolutely-positioned submenu.) */}
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowNewSubmenu((v) => !v);
+                  }}
+                  className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition hover:bg-app-hover"
+                >
+                  <div className="flex items-center gap-3">
+                    <Plus className="size-4 shrink-0 text-app-muted" />
+                    <span className="text-sm font-medium text-app">New</span>
+                  </div>
+                  <ChevronRight
+                    className={`size-3 text-app-muted transition-transform ${
+                      showNewSubmenu ? "rotate-90" : ""
+                    }`}
+                  />
+                </button>
 
-                  {/* New submenu with document types */}
-                  {showNewSubmenu && (
-                    <div
-                      role="menu"
-                      className="absolute right-full top-0 mr-1 w-56 overflow-hidden rounded-md border border-app bg-app-elevated shadow-lg"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <NewMenuItem
-                        icon={FileText}
-                        label="Document"
-                        description="Collaborative rich text"
-                        onClick={() => {
-                          setShowOptionsMenu(false);
-                          setShowNewSubmenu(false);
-                          void onCreateWorkspaceDoc("document", "Untitled document");
-                        }}
-                      />
-                      <NewMenuItem
-                        icon={SheetIcon}
-                        label="Spreadsheet"
-                        description="Cells, formulas, multi-sheet"
-                        onClick={() => {
-                          setShowOptionsMenu(false);
-                          setShowNewSubmenu(false);
-                          void onCreateWorkspaceDoc("sheet", "Untitled spreadsheet");
-                        }}
-                      />
-                      <NewMenuItem
-                        icon={Presentation}
-                        label="Presentation"
-                        description="Slides, shapes, present mode"
-                        onClick={() => {
-                          setShowOptionsMenu(false);
-                          setShowNewSubmenu(false);
-                          void onCreateWorkspaceDoc("slides", "Untitled presentation");
-                        }}
-                      />
-                    </div>
-                  )}
-                </div>
+                {showNewSubmenu && (
+                  <div className="border-l-2 border-accent/40 bg-app-surface/50">
+                    <NewMenuItem
+                      icon={FileText}
+                      label="Document"
+                      description="Rich text, pages & margins"
+                      onClick={() => {
+                        setShowOptionsMenu(false);
+                        setShowNewSubmenu(false);
+                        void onCreateWorkspaceDoc("document", "Untitled document");
+                      }}
+                    />
+                    <NewMenuItem
+                      icon={SheetIcon}
+                      label="Spreadsheet"
+                      description="Cells, formulas, multi-sheet"
+                      onClick={() => {
+                        setShowOptionsMenu(false);
+                        setShowNewSubmenu(false);
+                        void onCreateWorkspaceDoc("sheet", "Untitled spreadsheet");
+                      }}
+                    />
+                    <NewMenuItem
+                      icon={Presentation}
+                      label="Presentation"
+                      description="Slides, shapes, present mode"
+                      onClick={() => {
+                        setShowOptionsMenu(false);
+                        setShowNewSubmenu(false);
+                        void onCreateWorkspaceDoc("slides", "Untitled presentation");
+                      }}
+                    />
+                  </div>
+                )}
 
                 <MenuDivider />
 
@@ -809,10 +987,14 @@ export function FilesExplorerEditor() {
           <SelectionToolbar
             count={selectedIds.length}
             onClear={clearSelection}
-            onDelete={() => void doDelete(selectedIds)}
+            onDelete={() => void doDeleteSelection(selectedIds)}
             onDownload={() => void doBulkDownload()}
             onShare={() => {
-              if (selectedFiles[0]) doShare(selectedFiles[0]);
+              if (selectedFiles.length > 0) {
+                setShareFiles(
+                  selectedFiles.map((f) => ({ id: f.id, filename: f.filename })),
+                );
+              }
             }}
             onMove={() => void doMoveTo(selectedIds)}
             onCut={doCut}
@@ -839,6 +1021,11 @@ export function FilesExplorerEditor() {
             <BrowseView
               folders={folders}
               files={files}
+              documents={documents}
+              parentId={parentId}
+              onOpenDocument={(doc) =>
+                openTab({ kind: "document", title: doc.title, refId: doc.id })
+              }
               loading={loading}
               selection={selection}
               clipboardCutIds={
@@ -852,6 +1039,11 @@ export function FilesExplorerEditor() {
               onContextMenuFile={(fileId, x, y) => {
                 if (!selection.has(fileId)) selectOne(fileId, {});
                 setContextMenu({ fileId, x, y });
+              }}
+              onSelectDocument={selectOne}
+              onContextMenuDocument={(docId, x, y) => {
+                if (!selection.has(docId)) selectOne(docId, {});
+                setDocContextMenu({ docId, x, y });
               }}
               onDragStartFile={() => undefined}
               onDragOverFolder={(folderId) => setDragOverFolderId(folderId)}
@@ -894,7 +1086,7 @@ export function FilesExplorerEditor() {
           }}
           onShare={() => {
             const file = files.find((f) => f.id === contextMenu.fileId);
-            if (file) doShare(file);
+            if (file) setShareFiles([{ id: file.id, filename: file.filename }]);
           }}
           onCopyLink={() => {
             const file = files.find((f) => f.id === contextMenu.fileId);
@@ -904,7 +1096,42 @@ export function FilesExplorerEditor() {
           onCopy={doCopyToClipboard}
           onPaste={() => void doPaste()}
           onMove={() => void doMoveTo(Array.from(selection))}
-          onDelete={() => void doDelete(Array.from(selection))}
+          onDelete={() => void doDeleteSelection(Array.from(selection))}
+        />
+      )}
+
+      {/* Document context menu — parity with files */}
+      {docContextMenu && (
+        <DocumentContextMenu
+          x={docContextMenu.x}
+          y={docContextMenu.y}
+          selectionSize={selection.size}
+          onClose={() => setDocContextMenu(null)}
+          onOpen={() => {
+            const doc = documents.find((d) => d.id === docContextMenu.docId);
+            if (doc)
+              openTab({ kind: "document", title: doc.title, refId: doc.id });
+          }}
+          onRename={() => void doRenameDocument(docContextMenu.docId)}
+          onDuplicate={() => void doDuplicateDocument(docContextMenu.docId)}
+          onShare={() => {
+            const doc = documents.find((d) => d.id === docContextMenu.docId);
+            if (doc) doShareDocument(doc);
+          }}
+          onDelete={() => void doDeleteSelection(Array.from(selection))}
+        />
+      )}
+
+      {/* Share to messaging / email */}
+      {shareFiles && orgId && (
+        <ShareToPicker
+          organizationId={orgId}
+          workspaceId={workspaceId || undefined}
+          files={shareFiles}
+          onClose={() => setShareFiles(null)}
+          onDone={(message) =>
+            appendRunLog({ level: "ok", text: message, source: "files" })
+          }
         />
       )}
     </div>
@@ -1091,6 +1318,61 @@ function ContextMenu({
   );
 }
 
+function DocumentContextMenu({
+  x,
+  y,
+  selectionSize,
+  onClose,
+  onOpen,
+  onRename,
+  onDuplicate,
+  onShare,
+  onDelete,
+}: {
+  x: number;
+  y: number;
+  selectionSize: number;
+  onClose: () => void;
+  onOpen: () => void;
+  onRename: () => void;
+  onDuplicate: () => void;
+  onShare: () => void;
+  onDelete: () => void;
+}) {
+  const left = Math.min(x, window.innerWidth - 240);
+  const top = Math.min(y, window.innerHeight - 260);
+  const isMulti = selectionSize > 1;
+  const wrap = (fn: () => void) => () => {
+    onClose();
+    fn();
+  };
+  return (
+    <ul
+      className="fixed z-50 w-56 overflow-hidden rounded-md border border-app bg-app-elevated py-1 text-sm shadow-lg"
+      style={{ left, top }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {!isMulti && (
+        <MenuItem icon={Info} label="Open" onClick={wrap(onOpen)} />
+      )}
+      <MenuItem icon={Share2} label="Share…" onClick={wrap(onShare)} />
+      {!isMulti && (
+        <>
+          <MenuItem icon={Copy} label="Duplicate" onClick={wrap(onDuplicate)} />
+          <MenuItem icon={Edit3} label="Rename" onClick={wrap(onRename)} />
+        </>
+      )}
+      <MenuDivider />
+      <MenuItem
+        icon={Trash2}
+        label={`Delete${isMulti ? ` ${selectionSize}` : ""}`}
+        onClick={wrap(onDelete)}
+        danger
+      />
+    </ul>
+  );
+}
+
 function MenuItem({
   icon: Icon,
   label,
@@ -1251,6 +1533,9 @@ function Breadcrumb({
 function BrowseView({
   folders,
   files,
+  documents,
+  parentId,
+  onOpenDocument,
   loading,
   selection,
   clipboardCutIds,
@@ -1260,6 +1545,8 @@ function BrowseView({
   onShowDetails,
   onSelect,
   onContextMenuFile,
+  onSelectDocument,
+  onContextMenuDocument,
   onDragStartFile,
   onDragOverFolder,
   onDragLeaveFolder,
@@ -1267,6 +1554,9 @@ function BrowseView({
 }: {
   folders: FolderDto[];
   files: FileRow[];
+  documents: WorkspaceDocument[];
+  parentId: string | null;
+  onOpenDocument: (doc: WorkspaceDocument) => void;
   loading: boolean;
   selection: Set<string>;
   clipboardCutIds: Set<string> | null;
@@ -1279,16 +1569,27 @@ function BrowseView({
     ev: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean },
   ) => void;
   onContextMenuFile: (fileId: string, x: number, y: number) => void;
+  onSelectDocument: (
+    id: string,
+    ev: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean },
+  ) => void;
+  onContextMenuDocument: (docId: string, x: number, y: number) => void;
   onDragStartFile: (fileId: string) => void;
   onDragOverFolder: (folderId: string | null) => void;
   onDragLeaveFolder: () => void;
   onDropOnFolder: (folderId: string | null, draggedId: string) => void;
 }) {
   const [filter, setFilter] = useState<
-    "all" | "documents" | "spreadsheets" | "images" | "pdfs"
+    | "all"
+    | "documents"
+    | "spreadsheets"
+    | "images"
+    | "videos"
+    | "audio"
+    | "pdfs"
   >("all");
 
-  if (loading && folders.length === 0 && files.length === 0) {
+  if (loading && folders.length === 0 && files.length === 0 && documents.length === 0) {
     return (
       <div className="grid h-full place-items-center">
         <div className="flex items-center gap-2 text-sm text-app-muted">
@@ -1298,7 +1599,7 @@ function BrowseView({
       </div>
     );
   }
-  if (folders.length === 0 && files.length === 0) {
+  if (folders.length === 0 && files.length === 0 && documents.length === 0) {
     return (
       <div className="grid h-full place-items-center">
         <EmptyState
@@ -1323,11 +1624,20 @@ function BrowseView({
     if (filter === "images") {
       return mt.startsWith("image/") || /png|jpe?g|gif|webp|svg|heic/.test(ext);
     }
+    if (filter === "videos") {
+      return mt.startsWith("video/") || /mp4|mov|webm|mkv|avi|m4v/.test(ext);
+    }
+    if (filter === "audio") {
+      return mt.startsWith("audio/") || /mp3|ogg|opus|wav|m4a|aac|flac/.test(ext);
+    }
     if (filter === "pdfs") {
       return mt === "application/pdf" || ext === "pdf";
     }
     return true;
   });
+
+  const filteredDocuments =
+    filter === "all" || filter === "documents" ? documents : [];
 
   return (
     <div className="space-y-6">
@@ -1373,7 +1683,7 @@ function BrowseView({
           </div>
         </section>
       )}
-      {files.length > 0 && (
+      {(files.length > 0 || filteredDocuments.length > 0) && (
         <section>
           {/* Filter chips */}
           <div className="mb-3 flex flex-wrap items-center gap-1.5">
@@ -1386,6 +1696,8 @@ function BrowseView({
                 { id: "documents", label: "Documents" },
                 { id: "spreadsheets", label: "Spreadsheets" },
                 { id: "images", label: "Images" },
+                { id: "videos", label: "Videos" },
+                { id: "audio", label: "Audio" },
                 { id: "pdfs", label: "PDFs" },
               ] as const
             ).map((chip) => (
@@ -1404,12 +1716,25 @@ function BrowseView({
             ))}
           </div>
 
-          {filteredFiles.length === 0 ? (
+          {filteredFiles.length === 0 && filteredDocuments.length === 0 ? (
             <p className="rounded-md border border-app bg-app-surface p-6 text-center text-sm text-app-faint">
               No {filter === "all" ? "files" : filter} match. Try a different filter.
             </p>
           ) : (
+            // Documents and uploaded files share one grid so a freshly
+            // autosaved doc lands inside its file-type category (under the
+            // "Documents" filter) instead of in a separate strip up top.
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+              {filteredDocuments.map((doc) => (
+                <DocumentTile
+                  key={doc.id}
+                  doc={doc}
+                  selected={selection.has(doc.id)}
+                  onOpen={() => onOpenDocument(doc)}
+                  onSelect={(ev) => onSelectDocument(doc.id, ev)}
+                  onContextMenu={(x, y) => onContextMenuDocument(doc.id, x, y)}
+                />
+              ))}
               {filteredFiles.map((file) => (
                 <FileTile
                   key={file.id}
@@ -1427,6 +1752,113 @@ function BrowseView({
           )}
         </section>
       )}
+    </div>
+  );
+}
+
+// ── Document tile ────────────────────────────────────────────────
+// A workspace document (rich-text resource) rendered with the exact
+// same tile shell as FileTile so it sits seamlessly in the unified
+// grid. Documents aren't selectable/draggable like stored files yet,
+// so this is a lighter, click-to-open variant.
+
+function DocumentTile({
+  doc,
+  selected,
+  onOpen,
+  onSelect,
+  onContextMenu,
+}: {
+  doc: WorkspaceDocument;
+  selected: boolean;
+  onOpen: () => void;
+  onSelect: (ev: {
+    ctrlKey?: boolean;
+    metaKey?: boolean;
+    shiftKey?: boolean;
+  }) => void;
+  onContextMenu: (x: number, y: number) => void;
+}) {
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      onOpen();
+    }
+  };
+  return (
+    <div
+      tabIndex={0}
+      onKeyDown={onKeyDown}
+      title={doc.title}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onContextMenu(e.clientX, e.clientY);
+      }}
+      onClick={(e) => {
+        // Single click selects (with modifiers); double-click opens.
+        if (e.detail >= 2) {
+          onOpen();
+          return;
+        }
+        onSelect({
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey,
+          shiftKey: e.shiftKey,
+        });
+      }}
+      className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border bg-app-elevated transition ${
+        selected
+          ? "border-accent shadow-md ring-2 ring-accent/40"
+          : "border-app hover:border-accent hover:shadow-sm"
+      }`}
+    >
+      {/* Selection checkbox — same affordance as files */}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelect({ ctrlKey: true });
+        }}
+        title={selected ? "Unselect" : "Select"}
+        className={`absolute left-2 top-2 z-10 grid h-6 w-6 place-items-center rounded-md transition ${
+          selected
+            ? "bg-accent text-accent-fg opacity-100"
+            : "bg-app-elevated/95 text-app-muted opacity-0 shadow-sm backdrop-blur group-hover:opacity-100"
+        }`}
+      >
+        {selected ? (
+          <SquareCheck className="size-3.5" />
+        ) : (
+          <Square className="size-3.5" />
+        )}
+      </button>
+
+      <div className="relative flex aspect-[5/3] items-center justify-center overflow-hidden bg-sky-100">
+        <span className="text-2xl font-bold tracking-tight text-sky-700">
+          DOC
+        </span>
+      </div>
+      <div className="border-t border-app px-3 py-2">
+        <p className="line-clamp-1 text-sm font-medium text-app">{doc.title}</p>
+        <p className="mt-0.5 text-[11px] text-app-faint">
+          Document · v{doc.currentVersion}
+        </p>
+      </div>
+
+      {/* Hover 3-dot — opens the document context menu */}
+      <div className="absolute right-2 top-2 z-10 opacity-0 transition group-hover:opacity-100">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onContextMenu(e.clientX, e.clientY);
+          }}
+          title="More"
+          className="grid h-7 w-7 place-items-center rounded-md bg-app-elevated/95 text-app-muted shadow-sm backdrop-blur hover:text-app"
+        >
+          <MoreVertical className="size-3.5" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -1460,11 +1892,17 @@ function FileTile({
   const mt = file.mimeType.toLowerCase();
   const isImage =
     mt.startsWith("image/") || /png|jpe?g|gif|webp|svg/.test(ext);
+  const isVideo =
+    mt.startsWith("video/") || /mp4|mov|webm|mkv|avi|m4v/.test(ext);
+  const isAudio =
+    mt.startsWith("audio/") || /mp3|ogg|opus|wav|m4a|aac|flac/.test(ext);
+  // Images and videos get a real preview thumbnail fetched lazily on scroll.
+  const wantsPreview = isImage || isVideo;
 
   const tileRef = useRef<HTMLDivElement | null>(null);
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (!isImage) return;
+    if (!wantsPreview) return;
     const el = tileRef.current;
     if (!el) return;
     let cancelled = false;
@@ -1494,11 +1932,15 @@ function FileTile({
       observer.disconnect();
       if (revoked) URL.revokeObjectURL(revoked);
     };
-  }, [file.id, isImage]);
+  }, [file.id, wantsPreview]);
 
   const visual = (() => {
     if (isImage)
       return { bg: "bg-rose-100", text: "text-rose-600", label: "IMG" };
+    if (isVideo)
+      return { bg: "bg-purple-100", text: "text-purple-700", label: "VIDEO" };
+    if (isAudio)
+      return { bg: "bg-indigo-100", text: "text-indigo-700", label: "AUDIO" };
     if (mt === "application/pdf" || ext === "pdf")
       return { bg: "bg-amber-100", text: "text-amber-700", label: "PDF" };
     if (/docx?|rtf|txt|md|odt/.test(ext) || mt.includes("word"))
@@ -1592,7 +2034,7 @@ function FileTile({
       <div className="flex flex-1 flex-col items-stretch p-0 text-left">
         <div
           className={`relative flex aspect-[5/3] items-center justify-center overflow-hidden ${
-            isImage && thumbUrl ? "bg-app-hover" : visual.bg
+            wantsPreview && thumbUrl ? "bg-black" : visual.bg
           }`}
         >
           {isImage && thumbUrl ? (
@@ -1603,6 +2045,28 @@ function FileTile({
               draggable={false}
               className="h-full w-full object-cover"
             />
+          ) : isVideo && thumbUrl ? (
+            <>
+              <video
+                src={thumbUrl}
+                muted
+                playsInline
+                preload="metadata"
+                className="h-full w-full object-cover"
+              />
+              <span className="pointer-events-none absolute inset-0 grid place-items-center">
+                <span className="grid size-8 place-items-center rounded-full bg-black/55 text-white">
+                  <Video className="size-4" />
+                </span>
+              </span>
+            </>
+          ) : isAudio ? (
+            <span className="flex flex-col items-center gap-1">
+              <Music className={`size-7 ${visual.text}`} />
+              <span className={`text-[11px] font-bold ${visual.text}`}>
+                AUDIO
+              </span>
+            </span>
           ) : (
             <span
               className={`text-2xl font-bold tracking-tight ${visual.text}`}

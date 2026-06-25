@@ -16,6 +16,7 @@ import { CommandTools } from './command.tools';
 import { RunnerTools } from './runner.tools';
 import { SchedulesTools } from './schedules.tools';
 import { SystemTools } from './system.tools';
+import { WebBrowsingTools } from './web-browsing.tools';
 import { WorkspaceTools } from './workspace.tools';
 import {
   type ToolContext,
@@ -55,6 +56,7 @@ export class ToolRegistry {
     private readonly systems: SystemTools,
     private readonly runner: RunnerTools,
     private readonly commands: CommandTools,
+    private readonly webBrowsing: WebBrowsingTools,
     private readonly runtime: EngineRuntimeService,
   ) {
     this.register(this.workspace.build());
@@ -74,6 +76,7 @@ export class ToolRegistry {
     this.register(this.jobs.build());
     this.register(this.runner.build());
     this.register(this.commands.build());
+    this.register(this.webBrowsing.build());
   }
 
   private register(tools: ToolDefinition[]) {
@@ -95,10 +98,66 @@ export class ToolRegistry {
     }));
   }
 
+  /**
+   * Like `specs()`, but drops capability-gated tools the org can't use yet.
+   * e.g. the email tool is hidden until a mailbox is connected, so the
+   * Coworker doesn't offer to send mail it has no way to send. The caller
+   * passes the precomputed capability flags (see EngineService).
+   */
+  specsGated(opts: {
+    emailConnected: boolean;
+    readOnly?: boolean;
+    allowlist?: string[];
+  }) {
+    return this.list()
+      .filter((t) =>
+        t.requiresCapability === 'send_email' ? opts.emailConnected : true,
+      )
+      .filter((t) => (opts.readOnly ? this.isReadLike(t.name) : true))
+      .filter((t) =>
+        opts.allowlist && opts.allowlist.length
+          ? opts.allowlist.some((prefix) => t.name.startsWith(prefix))
+          : true,
+      )
+      .map((t) => ({ ...t.spec, name: toExternal(t.spec.name) }));
+  }
+
+  /** True when a tool is permitted under a read-only + allowlist scope. */
+  isAllowed(
+    name: string,
+    opts: { readOnly?: boolean; allowlist?: string[] },
+  ): boolean {
+    const internal = this.externalToInternal.get(name) ?? name;
+    if (opts.readOnly && !this.isReadLike(internal)) return false;
+    if (opts.allowlist && opts.allowlist.length) {
+      return opts.allowlist.some((prefix) => internal.startsWith(prefix));
+    }
+    return true;
+  }
+
   has(name: string) {
-    return (
-      this.tools.has(name) || this.externalToInternal.has(name)
-    );
+    return this.tools.has(name) || this.externalToInternal.has(name);
+  }
+
+  /** Resolve a tool definition by internal dotted or external underscored name. */
+  getDefinition(name: string): ToolDefinition | undefined {
+    const internal = this.externalToInternal.get(name) ?? name;
+    return this.tools.get(internal);
+  }
+
+  /**
+   * A tool is "read-like" — safe to cache and replay — when it only reads
+   * (actionLevel ≤ 1), isn't sensitive, and never needs confirmation. Replaying
+   * such a tool re-executes it live, so the data stays fresh while skipping a
+   * paid frontier call. Mutating/sending tools are never cached.
+   */
+  isReadLike(name: string): boolean {
+    const tool = this.getDefinition(name);
+    if (!tool) return false;
+    if (tool.actionLevel && tool.actionLevel > 1) return false;
+    if (tool.sensitive) return false;
+    if (tool.requiresConfirmation) return false;
+    return true;
   }
 
   /**

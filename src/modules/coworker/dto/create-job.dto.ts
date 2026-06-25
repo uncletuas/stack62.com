@@ -73,7 +73,15 @@ export class UpdateJobDto {
   autopilot?: boolean;
 
   @IsOptional()
-  @IsIn(['pending', 'scheduled', 'running', 'completed', 'failed', 'paused', 'cancelled'])
+  @IsIn([
+    'pending',
+    'scheduled',
+    'running',
+    'completed',
+    'failed',
+    'paused',
+    'cancelled',
+  ])
   status?:
     | 'pending'
     | 'scheduled'

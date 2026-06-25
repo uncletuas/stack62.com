@@ -64,9 +64,7 @@ export class DocumentsTools {
               folderId: row.folderId,
               score: Math.round(row.score * 1000) / 1000,
               snippet:
-                row.text.length > 360
-                  ? row.text.slice(0, 360) + '…'
-                  : row.text,
+                row.text.length > 360 ? row.text.slice(0, 360) + '…' : row.text,
             })),
             summary:
               results.length === 0

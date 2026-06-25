@@ -106,6 +106,8 @@ export class CryptoService {
     if (isEncryptedBlob(stored)) return false;
     const values = Object.values(stored);
     if (values.length === 0) return true;
-    return values.every((v) => v === '********' || v === null || v === undefined);
+    return values.every(
+      (v) => v === '********' || v === null || v === undefined,
+    );
   }
 }

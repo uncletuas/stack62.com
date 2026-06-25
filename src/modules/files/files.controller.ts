@@ -20,6 +20,14 @@ import { UploadFileDto } from './dto/upload-file.dto';
 import { FilesService } from './files.service';
 import type { FileScope } from './entities/file.entity';
 
+/**
+ * Max size for a single multipart upload, in bytes. Defaults to 1 GiB so
+ * videos and other large media attach without tripping Multer's
+ * `LIMIT_FILE_SIZE` ("File too large"). Override with FILE_UPLOAD_MAX_BYTES.
+ */
+const MAX_UPLOAD_BYTES =
+  Number(process.env.FILE_UPLOAD_MAX_BYTES) || 1024 * 1024 * 1024;
+
 @ApiTags('files')
 @ApiBearerAuth()
 @Controller('files')
@@ -29,7 +37,7 @@ export class FilesController {
   @Post('upload')
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(
-    FileInterceptor('file', { limits: { fileSize: 50 * 1024 * 1024 } }),
+    FileInterceptor('file', { limits: { fileSize: MAX_UPLOAD_BYTES } }),
   )
   async upload(
     @UploadedFile() file: Express.Multer.File,
@@ -146,10 +154,7 @@ export class FilesController {
 
   /** Bulk delete. Body: `{ ids: string[] }`. */
   @Post('bulk-delete')
-  bulkDelete(
-    @Body() body: { ids: string[] },
-    @CurrentUser() user: JwtUser,
-  ) {
+  bulkDelete(@Body() body: { ids: string[] }, @CurrentUser() user: JwtUser) {
     return this.filesService.deleteMany(body.ids ?? [], user.userId);
   }
 
@@ -181,7 +186,14 @@ export class FilesController {
 
   @Post('register-direct-upload')
   registerDirectUpload(
-    @Body() body: UploadFileDto & { key: string; filename: string; mimeType: string; size: number; checksum: string },
+    @Body()
+    body: UploadFileDto & {
+      key: string;
+      filename: string;
+      mimeType: string;
+      size: number;
+      checksum: string;
+    },
     @CurrentUser() user: JwtUser,
   ) {
     return this.filesService.registerDirectUpload(

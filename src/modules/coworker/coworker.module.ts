@@ -11,10 +11,14 @@ import { CoworkerMessageEntity } from './entities/coworker-message.entity';
 import { CoworkerEntity } from './entities/coworker.entity';
 import { JobRunEntity } from './entities/job-run.entity';
 import { JobEntity } from './entities/job.entity';
+import { WhatsAppAgentConfigEntity } from './entities/whatsapp-agent-config.entity';
+import { EmailAgentConfigEntity } from './entities/email-agent-config.entity';
 import { JobDispatcherService } from './job-dispatcher.service';
 import { JobRunnerService } from './job-runner.service';
 import { JobSchedulerService } from './job-scheduler.service';
 import { JobsService } from './jobs.service';
+import { WhatsAppAgentService } from './whatsapp-agent.service';
+import { EmailAgentService } from './email-agent.service';
 
 @Module({
   imports: [
@@ -24,6 +28,8 @@ import { JobsService } from './jobs.service';
       CoworkerMemoryEntity,
       JobEntity,
       JobRunEntity,
+      WhatsAppAgentConfigEntity,
+      EmailAgentConfigEntity,
     ]),
     ActivityModule,
     forwardRef(() => EngineModule),
@@ -37,6 +43,8 @@ import { JobsService } from './jobs.service';
     JobRunnerService,
     JobDispatcherService,
     JobSchedulerService,
+    WhatsAppAgentService,
+    EmailAgentService,
   ],
   exports: [
     CoworkerService,
@@ -44,6 +52,8 @@ import { JobsService } from './jobs.service';
     CoworkerMemoryService,
     JobsService,
     JobDispatcherService,
+    WhatsAppAgentService,
+    EmailAgentService,
   ],
 })
 export class CoworkerModule {}

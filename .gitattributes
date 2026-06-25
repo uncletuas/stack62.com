@@ -1,0 +1,18 @@
+# Normalize line endings to LF in the repo so Windows checkouts (core.autocrlf)
+# don't churn files or trip Prettier (which expects LF). Binary assets opt out.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.mp4 binary
+*.zip binary
+*.gz binary

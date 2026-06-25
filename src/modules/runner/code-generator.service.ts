@@ -23,12 +23,23 @@ const SYSTEM_PROMPT = `You are a senior product engineer generating production-q
 
 Constraints:
 - Single JSON response, no markdown.
-- Use only Node 20 built-ins plus "express" and "better-sqlite3" (both will be installed automatically). No other deps unless truly necessary.
+- Use only Node 20 built-ins plus "express" and "pg" (both will be installed automatically). No other deps unless truly necessary.
 - The entrypoint is "server.js" and must listen on process.env.PORT.
 - Serve at least one JSON API under /api and a single-page HTML UI at GET /.
-- Store data in SQLite at ./db/app.db (create directory if missing). Create tables on boot with IF NOT EXISTS.
+- Store data in PostgreSQL. Connect using: new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false })
+- On startup, set the schema: pool.on('connect', client => client.query('SET search_path TO "' + process.env.SYSTEM_SCHEMA + '"'))
+- Then CREATE TABLE IF NOT EXISTS using fully-qualified names: "schema_name".table_name — read schema from process.env.SYSTEM_SCHEMA
 - Expose GET /health -> { ok: true } for readiness checks.
 - Keep everything in <= 4 files. Inline the HTML/CSS/JS into server.js or a public/index.html.
+
+PostgreSQL syntax rules (NOT SQLite):
+- Use SERIAL PRIMARY KEY (not INTEGER PRIMARY KEY AUTOINCREMENT)
+- Use TIMESTAMPTZ DEFAULT NOW() (not DATETIME DEFAULT CURRENT_TIMESTAMP)
+- Use $1, $2 placeholders (not ?)
+- Use pool.query(sql, params) which returns { rows } (not db.prepare().all()/get()/run())
+- For INSERT returning the new row: INSERT INTO ... VALUES ($1) RETURNING *
+- For transactions: const client = await pool.connect(); try { await client.query('BEGIN'); ... await client.query('COMMIT'); } finally { client.release(); }
+- Always qualify table names with the schema: const s = process.env.SYSTEM_SCHEMA
 
 Quality bar:
 - Interpret the prompt into a real workflow, not a generic CRUD demo.
@@ -44,7 +55,7 @@ Respond with ONLY valid JSON in this shape:
   "summary": "One-sentence description of what was built.",
   "entrypoint": "server.js",
   "runtime": "node",
-  "dependencies": { "express": "^4.19.2", "better-sqlite3": "^11.3.0" },
+  "dependencies": { "express": "^4.19.2", "pg": "^8.13.0" },
   "files": [
     { "path": "server.js", "content": "<full JS source>" },
     { "path": "public/index.html", "content": "<optional html>" }
@@ -73,7 +84,7 @@ export class CodeGeneratorService {
     }
     this.allowedDependencies = new Set(
       this.configService
-        .get<string>('RUNNER_ALLOWED_DEPENDENCIES', 'express,better-sqlite3')
+        .get<string>('RUNNER_ALLOWED_DEPENDENCIES', 'express,pg')
         .split(',')
         .map((item) => item.trim())
         .filter(Boolean),
@@ -270,9 +281,9 @@ export class CodeGeneratorService {
       );
     }
 
-    for (const required of ['express', 'better-sqlite3']) {
+    for (const required of ['express', 'pg']) {
       safe[required] =
-        safe[required] ?? (required === 'express' ? '^4.19.2' : '^11.3.0');
+        safe[required] ?? (required === 'express' ? '^4.19.2' : '^8.13.0');
     }
 
     return safe;
@@ -303,7 +314,7 @@ export class CodeGeneratorService {
         runtime: 'node',
         dependencies: parsed.dependencies ?? {
           express: '^4.19.2',
-          'better-sqlite3': '^11.3.0',
+          pg: '^8.13.0',
         },
         files: parsed.files.filter(
           (f) => f && f.path && typeof f.content === 'string',
@@ -325,34 +336,43 @@ export class CodeGeneratorService {
     }
 
     const server = `const express = require('express');
-const path = require('path');
-const fs = require('fs');
-const Database = require('better-sqlite3');
+const { Pool } = require('pg');
 
 const app = express();
 app.use(express.json());
 
-const dbDir = path.join(__dirname, 'db');
-if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
-const db = new Database(path.join(dbDir, 'app.db'));
-db.exec(\`CREATE TABLE IF NOT EXISTS items (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  title TEXT NOT NULL,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)\`);
+const schema = process.env.SYSTEM_SCHEMA || 'public';
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false,
+});
+pool.on('connect', client => { client.query('SET search_path TO "' + schema + '"'); });
+
+(async () => {
+  await pool.query('CREATE SCHEMA IF NOT EXISTS "' + schema + '"');
+  await pool.query(\`CREATE TABLE IF NOT EXISTS "\${schema}".items (
+    id SERIAL PRIMARY KEY,
+    title TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )\`);
+})().catch(console.error);
 
 app.get('/health', (_, res) => res.json({ ok: true }));
 
-app.get('/api/items', (_, res) => {
-  const rows = db.prepare('SELECT * FROM items ORDER BY id DESC').all();
-  res.json(rows);
+app.get('/api/items', async (_, res) => {
+  try {
+    const { rows } = await pool.query(\`SELECT * FROM "\${schema}".items ORDER BY id DESC\`);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/items', (req, res) => {
-  const title = String(req.body && req.body.title || '').trim();
-  if (!title) return res.status(400).json({ error: 'title required' });
-  const result = db.prepare('INSERT INTO items (title) VALUES (?)').run(title);
-  res.json({ id: result.lastInsertRowid, title });
+app.post('/api/items', async (req, res) => {
+  try {
+    const title = String((req.body && req.body.title) || '').trim();
+    if (!title) return res.status(400).json({ error: 'title required' });
+    const { rows } = await pool.query(\`INSERT INTO "\${schema}".items (title) VALUES ($1) RETURNING *\`, [title]);
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/', (_, res) => {
@@ -381,106 +401,124 @@ const port = Number(process.env.PORT || 4000);
 app.listen(port, () => console.log('[stack62-system] listening on', port));
 `;
     return {
-      summary: 'Starter Express + SQLite system (fallback).',
+      summary: 'Starter Express + PostgreSQL system (fallback).',
       entrypoint: 'server.js',
       runtime: 'node',
-      dependencies: { express: '^4.19.2', 'better-sqlite3': '^11.3.0' },
+      dependencies: { express: '^4.19.2', pg: '^8.13.0' },
       files: [{ path: 'server.js', content: server }],
     };
   }
 
   private retailSalesCodebase(prompt: string): GeneratedCodebase {
     const server = `const express = require('express');
-const path = require('path');
-const fs = require('fs');
-const Database = require('better-sqlite3');
+const { Pool } = require('pg');
 
 const app = express();
 app.use(express.json());
-const dbDir = path.join(__dirname, 'db');
-if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
-const db = new Database(path.join(dbDir, 'app.db'));
 
-db.exec(\`
-CREATE TABLE IF NOT EXISTS products (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  category TEXT NOT NULL,
-  price REAL NOT NULL,
-  cost REAL NOT NULL,
-  stock INTEGER NOT NULL,
-  reorder_level INTEGER NOT NULL,
-  active INTEGER DEFAULT 1
-);
-CREATE TABLE IF NOT EXISTS staff (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  role TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS orders (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  order_no TEXT NOT NULL,
-  cashier_id INTEGER,
-  customer_name TEXT,
-  payment_method TEXT NOT NULL,
-  subtotal REAL NOT NULL,
-  discount REAL DEFAULT 0,
-  tax REAL DEFAULT 0,
-  total REAL NOT NULL,
-  status TEXT DEFAULT 'paid',
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE IF NOT EXISTS order_items (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  order_id INTEGER NOT NULL,
-  product_id INTEGER NOT NULL,
-  quantity INTEGER NOT NULL,
-  unit_price REAL NOT NULL,
-  line_total REAL NOT NULL
-);
-\`);
+const schema = process.env.SYSTEM_SCHEMA || 'public';
+const q = (text, params) => pool.query(text.replace(/{s}/g, '"' + schema + '"'), params);
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false,
+});
+pool.on('connect', client => { client.query('SET search_path TO "' + schema + '"'); });
 
-const hasProducts = db.prepare('SELECT COUNT(*) AS c FROM products').get().c;
-if (!hasProducts) {
-  const addProduct = db.prepare('INSERT INTO products (name, category, price, cost, stock, reorder_level) VALUES (?, ?, ?, ?, ?, ?)');
-  [
-    ['Espresso', 'Coffee', 3.5, 0.9, 80, 20],
-    ['Cappuccino', 'Coffee', 4.75, 1.4, 62, 20],
-    ['Latte', 'Coffee', 5.25, 1.5, 58, 20],
-    ['Cold Brew', 'Coffee', 5.5, 1.2, 34, 18],
-    ['Croissant', 'Bakery', 3.25, 1.35, 18, 12],
-    ['Blueberry Muffin', 'Bakery', 3.75, 1.2, 9, 10],
-    ['Iced Tea', 'Tea', 3.95, 0.8, 25, 15]
-  ].forEach(p => addProduct.run(...p));
-  const addStaff = db.prepare('INSERT INTO staff (name, role) VALUES (?, ?)');
-  [['Amara Okafor', 'Cashier'], ['Jon Bell', 'Barista'], ['Lina Chen', 'Manager']].forEach(s => addStaff.run(...s));
+async function init() {
+  await q('CREATE SCHEMA IF NOT EXISTS {s}');
+  await q(\`CREATE TABLE IF NOT EXISTS {s}.products (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    category TEXT NOT NULL,
+    price NUMERIC NOT NULL,
+    cost NUMERIC NOT NULL,
+    stock INTEGER NOT NULL,
+    reorder_level INTEGER NOT NULL,
+    active INTEGER DEFAULT 1
+  )\`);
+  await q(\`CREATE TABLE IF NOT EXISTS {s}.staff (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL
+  )\`);
+  await q(\`CREATE TABLE IF NOT EXISTS {s}.orders (
+    id SERIAL PRIMARY KEY,
+    order_no TEXT NOT NULL,
+    cashier_id INTEGER,
+    customer_name TEXT,
+    payment_method TEXT NOT NULL,
+    subtotal NUMERIC NOT NULL,
+    discount NUMERIC DEFAULT 0,
+    tax NUMERIC DEFAULT 0,
+    total NUMERIC NOT NULL,
+    status TEXT DEFAULT 'paid',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )\`);
+  await q(\`CREATE TABLE IF NOT EXISTS {s}.order_items (
+    id SERIAL PRIMARY KEY,
+    order_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL,
+    quantity INTEGER NOT NULL,
+    unit_price NUMERIC NOT NULL,
+    line_total NUMERIC NOT NULL
+  )\`);
+
+  const { rows: [{ c }] } = await q('SELECT COUNT(*)::int AS c FROM {s}.products');
+  if (!c) {
+    const seed = [
+      ['Espresso', 'Coffee', 3.5, 0.9, 80, 20],
+      ['Cappuccino', 'Coffee', 4.75, 1.4, 62, 20],
+      ['Latte', 'Coffee', 5.25, 1.5, 58, 20],
+      ['Cold Brew', 'Coffee', 5.5, 1.2, 34, 18],
+      ['Croissant', 'Bakery', 3.25, 1.35, 18, 12],
+      ['Blueberry Muffin', 'Bakery', 3.75, 1.2, 9, 10],
+      ['Iced Tea', 'Tea', 3.95, 0.8, 25, 15]
+    ];
+    for (const p of seed) {
+      await q('INSERT INTO {s}.products (name, category, price, cost, stock, reorder_level) VALUES ($1,$2,$3,$4,$5,$6)', p);
+    }
+    for (const s of [['Amara Okafor', 'Cashier'], ['Jon Bell', 'Barista'], ['Lina Chen', 'Manager']]) {
+      await q('INSERT INTO {s}.staff (name, role) VALUES ($1,$2)', s);
+    }
+  }
 }
+init().catch(console.error);
 
 function money(n){ return Math.round(Number(n || 0) * 100) / 100; }
 
 app.get('/health', (_, res) => res.json({ ok: true }));
 
-app.get('/api/dashboard', (_, res) => {
-  const today = db.prepare("SELECT COALESCE(SUM(total),0) revenue, COUNT(*) orders, COALESCE(AVG(total),0) avgOrder FROM orders WHERE date(created_at)=date('now')").get();
-  const all = db.prepare("SELECT COALESCE(SUM(total),0) revenue, COUNT(*) orders, COALESCE(AVG(total),0) avgOrder FROM orders").get();
-  const payments = db.prepare("SELECT payment_method method, SUM(total) total FROM orders GROUP BY payment_method ORDER BY total DESC").all();
-  const top = db.prepare(\`SELECT p.name, SUM(oi.quantity) qty, SUM(oi.line_total) sales
-    FROM order_items oi JOIN products p ON p.id=oi.product_id GROUP BY p.id ORDER BY sales DESC LIMIT 5\`).all();
-  const lowStock = db.prepare('SELECT * FROM products WHERE stock <= reorder_level ORDER BY stock ASC').all();
-  res.json({ today, all, payments, top, lowStock });
+app.get('/api/dashboard', async (_, res) => {
+  try {
+    const { rows: [today] } = await q("SELECT COALESCE(SUM(total),0) revenue, COUNT(*) orders, COALESCE(AVG(total),0) \\"avgOrder\\" FROM {s}.orders WHERE created_at::date = CURRENT_DATE");
+    const { rows: [all] } = await q("SELECT COALESCE(SUM(total),0) revenue, COUNT(*) orders, COALESCE(AVG(total),0) \\"avgOrder\\" FROM {s}.orders");
+    const { rows: payments } = await q("SELECT payment_method method, SUM(total) total FROM {s}.orders GROUP BY payment_method ORDER BY total DESC");
+    const { rows: top } = await q(\`SELECT p.name, SUM(oi.quantity) qty, SUM(oi.line_total) sales
+      FROM {s}.order_items oi JOIN {s}.products p ON p.id=oi.product_id GROUP BY p.id ORDER BY sales DESC LIMIT 5\`);
+    const { rows: lowStock } = await q('SELECT * FROM {s}.products WHERE stock <= reorder_level ORDER BY stock ASC');
+    res.json({ today, all, payments, top, lowStock });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/products', (_, res) => res.json(db.prepare('SELECT * FROM products ORDER BY category, name').all()));
-app.get('/api/staff', (_, res) => res.json(db.prepare('SELECT * FROM staff ORDER BY name').all()));
-app.get('/api/orders', (req, res) => {
-  const q = String(req.query.q || '').trim();
-  const rows = q
-    ? db.prepare("SELECT o.*, s.name cashier FROM orders o LEFT JOIN staff s ON s.id=o.cashier_id WHERE o.order_no LIKE ? OR o.customer_name LIKE ? ORDER BY o.id DESC LIMIT 100").all('%'+q+'%', '%'+q+'%')
-    : db.prepare('SELECT o.*, s.name cashier FROM orders o LEFT JOIN staff s ON s.id=o.cashier_id ORDER BY o.id DESC LIMIT 100').all();
-  res.json(rows);
+app.get('/api/products', async (_, res) => {
+  try { const { rows } = await q('SELECT * FROM {s}.products ORDER BY category, name'); res.json(rows); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.get('/api/staff', async (_, res) => {
+  try { const { rows } = await q('SELECT * FROM {s}.staff ORDER BY name'); res.json(rows); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.get('/api/orders', async (req, res) => {
+  try {
+    const search = String(req.query.q || '').trim();
+    const { rows } = search
+      ? await q("SELECT o.*, s.name cashier FROM {s}.orders o LEFT JOIN {s}.staff s ON s.id=o.cashier_id WHERE o.order_no ILIKE $1 OR o.customer_name ILIKE $1 ORDER BY o.id DESC LIMIT 100", ['%'+search+'%'])
+      : await q('SELECT o.*, s.name cashier FROM {s}.orders o LEFT JOIN {s}.staff s ON s.id=o.cashier_id ORDER BY o.id DESC LIMIT 100');
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/orders', (req, res) => {
+app.post('/api/orders', async (req, res) => {
   const body = req.body || {};
   const items = Array.isArray(body.items) ? body.items : [];
   if (!items.length) return res.status(400).json({ error: 'Add at least one item' });
@@ -488,35 +526,45 @@ app.post('/api/orders', (req, res) => {
   const paymentMethod = String(body.paymentMethod || 'card');
   const discount = money(body.discount || 0);
   const taxRate = 0.075;
-  const products = db.prepare('SELECT * FROM products WHERE id = ?');
-  let subtotal = 0;
-  const lines = items.map(item => {
-    const product = products.get(Number(item.productId));
-    if (!product) throw new Error('Invalid product');
-    const quantity = Math.max(1, Number(item.quantity || 1));
-    const lineTotal = money(product.price * quantity);
-    subtotal += lineTotal;
-    return { product, quantity, unitPrice: product.price, lineTotal };
-  });
-  subtotal = money(subtotal);
-  const tax = money(Math.max(0, subtotal - discount) * taxRate);
-  const total = money(subtotal - discount + tax);
-  const orderNo = 'CS-' + new Date().toISOString().slice(2,10).replace(/-/g,'') + '-' + Math.floor(Math.random()*9000+1000);
-  const tx = db.transaction(() => {
-    const order = db.prepare('INSERT INTO orders (order_no, cashier_id, customer_name, payment_method, subtotal, discount, tax, total) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(orderNo, cashierId, body.customerName || 'Walk-in', paymentMethod, subtotal, discount, tax, total);
-    const addLine = db.prepare('INSERT INTO order_items (order_id, product_id, quantity, unit_price, line_total) VALUES (?, ?, ?, ?, ?)');
-    const stock = db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?');
-    lines.forEach(line => { addLine.run(order.lastInsertRowid, line.product.id, line.quantity, line.unitPrice, line.lineTotal); stock.run(line.quantity, line.product.id); });
-    return order.lastInsertRowid;
-  });
-  const id = tx();
-  res.json({ id, orderNo, subtotal, discount, tax, total });
+  const client = await pool.connect();
+  try {
+    await client.query('SET search_path TO "' + schema + '"');
+    await client.query('BEGIN');
+    let subtotal = 0;
+    const lines = [];
+    for (const item of items) {
+      const { rows: [product] } = await client.query('SELECT * FROM {s}.products WHERE id = $1'.replace(/{s}/g, '"' + schema + '"'), [Number(item.productId)]);
+      if (!product) throw new Error('Invalid product');
+      const quantity = Math.max(1, Number(item.quantity || 1));
+      const lineTotal = money(Number(product.price) * quantity);
+      subtotal += lineTotal;
+      lines.push({ product, quantity, unitPrice: Number(product.price), lineTotal });
+    }
+    subtotal = money(subtotal);
+    const tax = money(Math.max(0, subtotal - discount) * taxRate);
+    const total = money(subtotal - discount + tax);
+    const orderNo = 'CS-' + new Date().toISOString().slice(2,10).replace(/-/g,'') + '-' + Math.floor(Math.random()*9000+1000);
+    const { rows: [order] } = await client.query('INSERT INTO {s}.orders (order_no, cashier_id, customer_name, payment_method, subtotal, discount, tax, total) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id'.replace(/{s}/g, '"' + schema + '"'), [orderNo, cashierId, body.customerName || 'Walk-in', paymentMethod, subtotal, discount, tax, total]);
+    for (const line of lines) {
+      await client.query('INSERT INTO {s}.order_items (order_id, product_id, quantity, unit_price, line_total) VALUES ($1,$2,$3,$4,$5)'.replace(/{s}/g, '"' + schema + '"'), [order.id, line.product.id, line.quantity, line.unitPrice, line.lineTotal]);
+      await client.query('UPDATE {s}.products SET stock = stock - $1 WHERE id = $2'.replace(/{s}/g, '"' + schema + '"'), [line.quantity, line.product.id]);
+    }
+    await client.query('COMMIT');
+    res.json({ id: order.id, orderNo, subtotal, discount, tax, total });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
 });
 
-app.post('/api/products/:id/restock', (req, res) => {
-  const qty = Math.max(1, Number((req.body || {}).quantity || 1));
-  db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(qty, Number(req.params.id));
-  res.json({ ok: true });
+app.post('/api/products/:id/restock', async (req, res) => {
+  try {
+    const qty = Math.max(1, Number((req.body || {}).quantity || 1));
+    await q('UPDATE {s}.products SET stock = stock + $1 WHERE id = $2', [qty, Number(req.params.id)]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/', (_, res) => res.type('html').send(\`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Coffee Sales Tracker</title>
@@ -548,10 +596,11 @@ const port = Number(process.env.PORT || 4000);
 app.listen(port, () => console.log('[coffee-sales-tracker] listening on', port));
 `;
     return {
-      summary: 'Coffee shop sales tracker with POS orders, inventory, cashier tracking, dashboards, and daily close workflow.',
+      summary:
+        'Coffee shop sales tracker with POS orders, inventory, cashier tracking, dashboards, and daily close workflow.',
       entrypoint: 'server.js',
       runtime: 'node',
-      dependencies: { express: '^4.19.2', 'better-sqlite3': '^11.3.0' },
+      dependencies: { express: '^4.19.2', pg: '^8.13.0' },
       files: [{ path: 'server.js', content: server }],
     };
   }

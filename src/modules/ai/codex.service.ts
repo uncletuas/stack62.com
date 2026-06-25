@@ -73,7 +73,10 @@ export class CodexService {
     if (!root || !existsSync(root)) return [];
     try {
       return readdirSync(root, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory() && entry.name.startsWith('openai.chatgpt-'))
+        .filter(
+          (entry) =>
+            entry.isDirectory() && entry.name.startsWith('openai.chatgpt-'),
+        )
         .map((entry) =>
           resolve(root, entry.name, 'bin', 'windows-x86_64', 'codex.exe'),
         )
@@ -136,9 +139,7 @@ export class CodexService {
     const prompt = this.packPrompt(messages);
     const outFile = join(
       tmpdir(),
-      `stack62-codex-${Date.now()}-${Math.random()
-        .toString(16)
-        .slice(2)}.txt`,
+      `stack62-codex-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`,
     );
 
     const args = [

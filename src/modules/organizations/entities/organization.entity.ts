@@ -29,4 +29,8 @@ export class OrganizationEntity extends AppBaseEntity {
     nullable: true,
   })
   preferredModel!: string | null;
+
+  /** ISO 3166-1 alpha-2 country code for the org (editable; used in analytics). */
+  @Column({ type: 'varchar', length: 2, nullable: true })
+  country!: string | null;
 }

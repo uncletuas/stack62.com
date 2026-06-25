@@ -49,8 +49,9 @@ export class CreateRoomDto {
 }
 
 export class PostMessageDto {
+  // Body may be empty when the message carries attachments (e.g. a shared
+  // file with no caption). The service enforces "body OR attachments".
   @IsString()
-  @MinLength(1)
   @MaxLength(40000)
   body!: string;
 

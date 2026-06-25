@@ -117,7 +117,9 @@ export class SearchService {
       })),
       records: records
         .filter((item) =>
-          JSON.stringify(item.data ?? {}).toLowerCase().includes(query.q.toLowerCase()),
+          JSON.stringify(item.data ?? {})
+            .toLowerCase()
+            .includes(query.q.toLowerCase()),
         )
         .map((item) => ({
           id: item.id,

@@ -27,6 +27,14 @@ export class UserEntity extends AppBaseEntity {
   @Column({ length: 30, default: 'active' })
   status!: string;
 
+  // ── Geography (best-effort, captured at signup for analytics) ─────────
+  /** ISO 3166-1 alpha-2 country code, resolved from the signup IP. */
+  @Column({ type: 'varchar', length: 2, nullable: true })
+  country!: string | null;
+
+  @Column({ name: 'signup_ip', type: 'varchar', length: 45, nullable: true })
+  signupIp!: string | null;
+
   // ── Email verification ────────────────────────────────────────────
   // Verified email = user clicked the link in their welcome email.
   // Until verified we still allow sign-in (so we don't lock anyone

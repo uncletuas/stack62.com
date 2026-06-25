@@ -344,7 +344,10 @@ export class MeetingBotService {
       return;
     }
 
-    await this.sessionsRepo.update({ id: sessionId }, { status: 'summarising' });
+    await this.sessionsRepo.update(
+      { id: sessionId },
+      { status: 'summarising' },
+    );
 
     const transcriptText = transcripts
       .map((t) => `${t.speakerLabel ? `${t.speakerLabel}: ` : ''}${t.text}`)

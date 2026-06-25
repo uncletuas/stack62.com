@@ -1,7 +1,11 @@
 import { Column, Entity, Index } from 'typeorm';
 import { AppBaseEntity } from '../../../shared/database/base.entity';
 
-export type ExtractionStatus = 'pending' | 'extracting' | 'completed' | 'failed';
+export type ExtractionStatus =
+  | 'pending'
+  | 'extracting'
+  | 'completed'
+  | 'failed';
 
 export type ExtractionDocumentType =
   | 'receipt'

@@ -2,10 +2,7 @@ import {
   Body,
   Controller,
   Delete,
-  forwardRef,
   Get,
-  Inject,
-  Optional,
   Param,
   Post,
   Query,
@@ -13,7 +10,6 @@ import {
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtUser } from '../auth/interfaces/jwt-user.interface';
-import { SlackBridgeService } from '../slack/slack-bridge.service';
 import { CreateRoomDto, PostMessageDto } from './dto/rooms.dtos';
 import { RoomsService } from './rooms.service';
 
@@ -21,16 +17,7 @@ import { RoomsService } from './rooms.service';
 @ApiBearerAuth()
 @Controller('rooms')
 export class RoomsController {
-  constructor(
-    private readonly roomsService: RoomsService,
-    /**
-     * Optional: SlackModule may be absent in dev / minimal builds.
-     * We never want a missing Slack install to block local rooms.
-     */
-    @Optional()
-    @Inject(forwardRef(() => SlackBridgeService))
-    private readonly slackBridge: SlackBridgeService | null,
-  ) {}
+  constructor(private readonly roomsService: RoomsService) {}
 
   /**
    * List all rooms the caller is a member of. Optionally filter to a
@@ -97,22 +84,12 @@ export class RoomsController {
   }
 
   @Post(':id/messages')
-  async post(
+  post(
     @Param('id') id: string,
     @Body() body: PostMessageDto,
     @CurrentUser() user: JwtUser,
   ) {
-    const message = await this.roomsService.postMessage(
-      id,
-      body,
-      user.userId,
-    );
-    // Fire-and-forget the outbound Slack bridge. We swallow errors so
-    // a Slack outage doesn't fail the in-app message send.
-    if (this.slackBridge) {
-      this.slackBridge.bridgeOutbound(message).catch(() => undefined);
-    }
-    return message;
+    return this.roomsService.postMessage(id, body, user.userId);
   }
 
   @Post(':id/read')

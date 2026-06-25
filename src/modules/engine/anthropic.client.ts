@@ -10,8 +10,18 @@ export interface AnthropicTool {
 
 export type AnthropicContentBlock =
   | { type: 'text'; text: string }
-  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
-  | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean };
+  | {
+      type: 'tool_use';
+      id: string;
+      name: string;
+      input: Record<string, unknown>;
+    }
+  | {
+      type: 'tool_result';
+      tool_use_id: string;
+      content: string;
+      is_error?: boolean;
+    };
 
 export interface AnthropicMessage {
   role: 'user' | 'assistant';
@@ -63,7 +73,7 @@ export class AnthropicClient {
   isConfigured(): boolean {
     return Boolean(
       this.configService.get<string>('ANTHROPIC_API_KEY') ||
-        this.configService.get<string>('OPENROUTER_API_KEY'),
+      this.configService.get<string>('OPENROUTER_API_KEY'),
     );
   }
 
@@ -82,9 +92,7 @@ export class AnthropicClient {
     }
 
     const directKey =
-      req.apiKey ||
-      this.configService.get<string>('ANTHROPIC_API_KEY') ||
-      null;
+      req.apiKey || this.configService.get<string>('ANTHROPIC_API_KEY') || null;
 
     if (directKey) {
       return this.completeViaAnthropic(req, directKey);

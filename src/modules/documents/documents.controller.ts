@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -59,7 +60,10 @@ export class DocumentsController {
     resourceId: { source: 'param', key: 'documentId' },
   })
   @Get(':documentId')
-  findOne(@Param('documentId') documentId: string, @CurrentUser() user: JwtUser) {
+  findOne(
+    @Param('documentId') documentId: string,
+    @CurrentUser() user: JwtUser,
+  ) {
     return this.documentsService.findOne(documentId, user.userId);
   }
 
@@ -75,6 +79,32 @@ export class DocumentsController {
     @CurrentUser() user: JwtUser,
   ) {
     return this.documentsService.update(documentId, payload, user.userId);
+  }
+
+  @RequireAccess({
+    resource: 'document',
+    action: 'update',
+    resourceId: { source: 'param', key: 'documentId' },
+  })
+  @Delete(':documentId')
+  remove(
+    @Param('documentId') documentId: string,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.documentsService.remove(documentId, user.userId);
+  }
+
+  @RequireAccess({
+    resource: 'document',
+    action: 'create',
+    resourceId: { source: 'param', key: 'documentId' },
+  })
+  @Post(':documentId/duplicate')
+  duplicate(
+    @Param('documentId') documentId: string,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.documentsService.duplicate(documentId, user.userId);
   }
 
   @RequireAccess({
@@ -155,7 +185,11 @@ export class DocumentsController {
     @Body() payload: DocumentToTasksDto,
     @CurrentUser() user: JwtUser,
   ) {
-    return this.documentsService.turnIntoTasks(documentId, payload, user.userId);
+    return this.documentsService.turnIntoTasks(
+      documentId,
+      payload,
+      user.userId,
+    );
   }
 
   @RequireAccess({

@@ -62,18 +62,12 @@ export class WorkspaceStateController {
   }
 
   @Get(':docId')
-  async findOne(
-    @Param('docId') docId: string,
-    @CurrentUser() user: JwtUser,
-  ) {
+  async findOne(@Param('docId') docId: string, @CurrentUser() user: JwtUser) {
     return this.service.findById(docId, user.userId);
   }
 
   @Get(':docId/state')
-  async readState(
-    @Param('docId') docId: string,
-    @CurrentUser() user: JwtUser,
-  ) {
+  async readState(@Param('docId') docId: string, @CurrentUser() user: JwtUser) {
     return this.service.readState(docId, user.userId);
   }
 
@@ -100,7 +94,12 @@ export class WorkspaceStateController {
   @Post(':docId/actions')
   async dispatch(
     @Param('docId') docId: string,
-    @Body() body: { organizationId: string; workspaceId?: string; action: Omit<WorkspaceActionInput, 'docId'> },
+    @Body()
+    body: {
+      organizationId: string;
+      workspaceId?: string;
+      action: Omit<WorkspaceActionInput, 'docId'>;
+    },
     @CurrentUser() user: JwtUser,
   ) {
     return this.service.dispatch(
@@ -125,7 +124,8 @@ export class WorkspaceStateController {
   )
   async importFile(
     @UploadedFile() file: Express.Multer.File,
-    @Body() body: { organizationId: string; workspaceId: string; title?: string },
+    @Body()
+    body: { organizationId: string; workspaceId: string; title?: string },
     @CurrentUser() user: JwtUser,
   ) {
     if (!file) throw new BadRequestException('file is required.');
@@ -179,14 +179,8 @@ export class WorkspaceStateController {
     @CurrentUser() user: JwtUser,
     @Res() res: Response,
   ) {
-    if (
-      format !== 'docx' &&
-      format !== 'xlsx' &&
-      format !== 'pptx'
-    ) {
-      throw new BadRequestException(
-        'format must be one of: docx, xlsx, pptx.',
-      );
+    if (format !== 'docx' && format !== 'xlsx' && format !== 'pptx') {
+      throw new BadRequestException('format must be one of: docx, xlsx, pptx.');
     }
     const out = await this.exporter.export(docId, user.userId, format);
     res.setHeader('Content-Type', out.mimeType);

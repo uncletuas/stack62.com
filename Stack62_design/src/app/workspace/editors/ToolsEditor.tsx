@@ -34,6 +34,7 @@ import {
   fetchIntegrationProvidersStatus,
   fetchWhatsAppPhoneNumbers,
   googleOAuthUrl,
+  INTEGRATION_SETUP_HELP,
   metaOAuthUrl,
   quickBooksOAuthUrl,
   selectWhatsAppPhoneNumber,
@@ -69,7 +70,6 @@ const PROVIDER_ICON: Record<string, LucideIcon> = {
   outlook: AtSign,
   whatsapp: MessageCircle,
   twilio: MessageSquare,
-  slack: MessageSquare,
   discord: MessageSquare,
   teams: MessageSquare,
   paystack: CreditCard,
@@ -433,6 +433,7 @@ function ConnectionDialog({
   };
 
   const Icon = iconFor(provider.key);
+  const help = INTEGRATION_SETUP_HELP[provider.key];
 
   return (
     <div
@@ -461,6 +462,19 @@ function ConnectionDialog({
 
         <div className="max-h-[70vh] overflow-y-auto px-4 py-4">
           <div className="space-y-3">
+            {help && (
+              <div className="rounded-lg border border-app bg-app-hover/60 px-3 py-2.5 text-xs text-app-muted">
+                <p>{help.intro}</p>
+                {help.steps && (
+                  <ul className="mt-1.5 list-disc space-y-1 pl-4">
+                    {help.steps.map((s) => (
+                      <li key={s}>{s}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
             <Field label="Connection name">
               <Input
                 value={name}
@@ -478,7 +492,7 @@ function ConnectionDialog({
                       value={config[f] ?? ""}
                       onChange={(e) => setVal(setConfig, f, e.target.value)}
                       className="border-app bg-app"
-                      placeholder={f}
+                      placeholder={help?.fieldHints?.[f] ?? f}
                     />
                   </Field>
                 ))}
@@ -490,14 +504,18 @@ function ConnectionDialog({
                 {provider.credentialFields.map((f) => (
                   <Field key={f} label={HUMAN_KEY(f)}>
                     <Input
-                      type="password"
+                      type={
+                        ["host", "port", "imapHost", "imapPort"].includes(f)
+                          ? "text"
+                          : "password"
+                      }
                       autoComplete="off"
                       value={credentials[f] ?? ""}
                       onChange={(e) =>
                         setVal(setCredentials, f, e.target.value)
                       }
                       className="border-app bg-app font-mono"
-                      placeholder={f}
+                      placeholder={help?.fieldHints?.[f] ?? f}
                     />
                   </Field>
                 ))}

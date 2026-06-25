@@ -3,6 +3,9 @@ import { NestFactory } from '@nestjs/core';
 import { WorkerModule } from './worker.module';
 
 async function bootstrapWorker() {
+  // Mark this as the worker process so single-instance background work (e.g. the
+  // WhatsApp companion-device sockets) only runs in the API process.
+  process.env.STACK62_ROLE = 'worker';
   const appContext = await NestFactory.createApplicationContext(WorkerModule);
   const logger = new Logger('Stack62Worker');
 

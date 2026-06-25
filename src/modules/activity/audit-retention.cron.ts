@@ -31,7 +31,7 @@ export class AuditRetentionCron {
       return;
     }
     try {
-      const result = (await this.dataSource.query(`
+      const result = await this.dataSource.query(`
         WITH org_retention AS (
           SELECT
             o.id AS org_id,
@@ -46,7 +46,7 @@ export class AuditRetentionCron {
           AND r.retention_days > 0
           AND a.created_at < NOW() - (r.retention_days || ' days')::interval
         RETURNING a.id
-      `)) as Array<{ id: string }> | [Array<{ id: string }>, number];
+      `);
 
       const removed = Array.isArray(result)
         ? Array.isArray(result[0])

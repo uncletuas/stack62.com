@@ -55,13 +55,14 @@ export class OfficeTools {
       // ── AI-native workspace surface (state-first, action-based) ──
       tool(
         'office.workspace_create',
-        "Create a new AI-native workspace document, spreadsheet, or presentation. The doc lives in shared Yjs state (after phase 2) and every subsequent edit — by either you or the user — flows through office.dispatch_action. Returns the new docId.",
+        'Create a new AI-native workspace document, spreadsheet, or presentation. The doc lives in shared Yjs state (after phase 2) and every subsequent edit — by either you or the user — flows through office.dispatch_action. Returns the new docId.',
         {
           properties: {
             kind: {
               type: 'string',
               enum: ['document', 'sheet', 'slides'],
-              description: 'document = TipTap-based rich text. sheet = Fortune Sheet Google-Sheets-clone (400+ formulas, charts, conditional formatting, data validation, freeze panes, merge cells). slides = Konva slide deck.',
+              description:
+                'document = TipTap-based rich text. sheet = Fortune Sheet Google-Sheets-clone (400+ formulas, charts, conditional formatting, data validation, freeze panes, merge cells). slides = Konva slide deck.',
             },
             title: {
               type: 'string',
@@ -137,7 +138,8 @@ Always call office.workspace_read first to get sheetIds. Returns the new version
           properties: {
             docId: {
               type: 'string',
-              description: 'Target workspace doc id (from office.workspace_create or office.workspace_list).',
+              description:
+                'Target workspace doc id (from office.workspace_create or office.workspace_list).',
             },
             verb: {
               type: 'string',
@@ -590,7 +592,7 @@ Always call office.workspace_read first to get sheetIds. Returns the new version
           const systemId =
             typeof input.systemId === 'string' && input.systemId
               ? input.systemId
-              : ctx.systemId ?? null;
+              : (ctx.systemId ?? null);
           const entityDefinitionId =
             typeof input.entityDefinitionId === 'string' &&
             input.entityDefinitionId
@@ -616,9 +618,7 @@ Always call office.workspace_read first to get sheetIds. Returns the new version
           const headers = Array.from(
             new Set(
               records.flatMap((r) =>
-                r.data && typeof r.data === 'object'
-                  ? Object.keys(r.data as Record<string, unknown>)
-                  : [],
+                r.data && typeof r.data === 'object' ? Object.keys(r.data) : [],
               ),
             ),
           );
@@ -627,7 +627,7 @@ Always call office.workspace_read first to get sheetIds. Returns the new version
           const rows: string[][] = [
             ['_id', 'status', 'updatedAt', ...headers],
             ...records.slice(0, limit).map((r) => {
-              const data = (r.data ?? {}) as Record<string, unknown>;
+              const data = r.data ?? {};
               return [
                 r.id,
                 r.status ?? '',
@@ -687,7 +687,7 @@ Always call office.workspace_read first to get sheetIds. Returns the new version
             slides: {
               type: 'array',
               description:
-                "Content slides. Each is { title: string; bullets?: string[]; body?: string }.",
+                'Content slides. Each is { title: string; bullets?: string[]; body?: string }.',
               items: { type: 'object' },
             },
           },

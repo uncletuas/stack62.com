@@ -1,5 +1,6 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { BullModule } from '@nestjs/bullmq';
@@ -9,7 +10,10 @@ import { validateEnv } from './config/env.schema';
 import { CryptoModule } from './shared/crypto/crypto.module';
 import { AccessControlModule } from './shared/access-control/access-control.module';
 import { SecurityModule } from './shared/security/security.module';
+import { SystemControlModule } from './shared/system-control/system-control.module';
+import { SystemControlMiddleware } from './shared/system-control/system-control.middleware';
 import { EngineModule } from './modules/engine/engine.module';
+import { BrowserModule } from './modules/browser/browser.module';
 import { CoworkerModule } from './modules/coworker/coworker.module';
 import { HealthModule } from './modules/health/health.module';
 import { ActivityModule } from './modules/activity/activity.module';
@@ -37,20 +41,25 @@ import { MeetingBotModule } from './modules/meeting-bot/meeting-bot.module';
 import { RealtimeVoiceModule } from './modules/realtime-voice/realtime-voice.module';
 import { RoomsModule } from './modules/rooms/rooms.module';
 import { SemanticSearchModule } from './modules/semantic-search/semantic-search.module';
-import { SlackModule } from './modules/slack/slack.module';
 import { StreamingGenerationModule } from './modules/streaming-generation/streaming-generation.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { RunnerModule } from './modules/runner/runner.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
+import { EmailInboxModule } from './modules/email-inbox/email-inbox.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SearchModule } from './modules/search/search.module';
 import { BillingModule } from './modules/billing/billing.module';
+import { OrgIntelligenceModule } from './modules/org-intelligence/org-intelligence.module';
+import { WidgetModule } from './modules/widget/widget.module';
+import { AdminModule } from './modules/admin/admin.module';
 
 @Module({
   imports: [
     AccessControlModule,
     CryptoModule,
+    SystemControlModule,
     ScheduleModule.forRoot(),
+    EventEmitterModule.forRoot(),
     SecurityModule,
     ConfigModule.forRoot({
       isGlobal: true,
@@ -149,7 +158,6 @@ import { BillingModule } from './modules/billing/billing.module';
     MeetingBotModule,
     RealtimeVoiceModule,
     RoomsModule,
-    SlackModule,
     StreamingGenerationModule,
     DocumentsModule,
     ReportsModule,
@@ -157,8 +165,20 @@ import { BillingModule } from './modules/billing/billing.module';
     RunnerModule,
     IntegrationsModule,
     EngineModule,
+    BrowserModule,
     CoworkerModule,
+    EmailInboxModule,
     BillingModule,
+    OrgIntelligenceModule,
+    WidgetModule,
+    AdminModule,
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  // Apply the runtime emergency controls (maintenance / read-only / rate-limit)
+  // across every route. The middleware itself exempts the admin console,
+  // health checks and webhooks, and is fail-open.
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(SystemControlMiddleware).forRoutes('*');
+  }
+}

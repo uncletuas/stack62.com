@@ -206,10 +206,12 @@ export class CoworkerMemoryService {
     } else {
       qb.andWhere('m.system_id IS NULL');
     }
-    qb.orderBy(`CASE m.kind WHEN 'preference' THEN 0 WHEN 'fact' THEN 1 ELSE 2 END`, 'ASC');
+    qb.orderBy(
+      `CASE m.kind WHEN 'preference' THEN 0 WHEN 'fact' THEN 1 ELSE 2 END`,
+      'ASC',
+    );
     qb.addOrderBy('m.updated_at', 'DESC');
     qb.limit(limit);
     return qb.getMany();
   }
-
 }

@@ -43,7 +43,7 @@ export class RoomEntity extends AppBaseEntity {
   @Column({ type: 'varchar', length: 120, nullable: true })
   name!: string | null;
 
-  /** Optional short purpose, like a Slack channel topic. */
+  /** Optional short purpose, like a channel topic. */
   @Column({ type: 'text', nullable: true })
   topic!: string | null;
 

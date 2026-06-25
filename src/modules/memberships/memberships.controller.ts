@@ -14,6 +14,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtUser } from '../auth/interfaces/jwt-user.interface';
 import { RequireAccess } from '../../shared/access-control/access-control.decorator';
 import { AcceptInviteDto } from './dto/accept-invite.dto';
+import { BulkInviteMembersDto } from './dto/bulk-invite-members.dto';
 import { CreateMembershipDto } from './dto/create-membership.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
 import { ListMembershipsDto } from './dto/list-memberships.dto';
@@ -40,6 +41,14 @@ export class MembershipsController {
   @Post('invite')
   invite(@Body() payload: InviteMemberDto, @CurrentUser() user: JwtUser) {
     return this.membershipsService.inviteMember(payload, user.userId);
+  }
+
+  @Post('bulk-invite')
+  bulkInvite(
+    @Body() payload: BulkInviteMembersDto,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.membershipsService.bulkInvite(payload, user.userId);
   }
 
   /**
@@ -98,6 +107,11 @@ export class MembershipsController {
     @CurrentUser() user: JwtUser,
   ) {
     return this.membershipsService.findPendingInvites(orgId, user.userId);
+  }
+
+  @Delete('invites/:id')
+  revokeInvite(@Param('id') id: string, @CurrentUser() user: JwtUser) {
+    return this.membershipsService.revokeInvite(id, user.userId);
   }
 
   @Patch(':id')

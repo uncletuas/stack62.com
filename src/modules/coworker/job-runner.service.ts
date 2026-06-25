@@ -62,10 +62,8 @@ export class JobRunnerService {
           actorUserId: job.createdByUserId,
         },
         prompt: job.instructions,
-        systemHint: this.coworkerService.buildSystemPreamble(
-          coworker,
-          job.autopilot,
-        ) +
+        systemHint:
+          this.coworkerService.buildSystemPreamble(coworker, job.autopilot) +
           `\n\nThis is an automated job run titled "${job.title}". Complete the work fully — do not ask follow-up questions; act with the permissions you have. If something blocks you, finish with a clear note explaining what's missing.`,
         model: coworker.model ?? undefined,
         maxTurns: 12,

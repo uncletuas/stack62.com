@@ -189,7 +189,9 @@ export class AiImpactService {
             `${total} existing record(s) will be missing this required field.`,
           );
         } else if (total > 0) {
-          entry.notes.push(`${total} record(s) will get this new optional field.`);
+          entry.notes.push(
+            `${total} record(s) will get this new optional field.`,
+          );
         }
         continue;
       }
@@ -233,9 +235,10 @@ export class AiImpactService {
           !!f.after &&
           !f.before.required &&
           f.after.required &&
-          populated < (await this.recordsRepository.count({
-            where: { systemId, entityDefinitionId: entityId },
-          }))
+          populated <
+            (await this.recordsRepository.count({
+              where: { systemId, entityDefinitionId: entityId },
+            }))
         ) {
           const totalRecords = await this.recordsRepository.count({
             where: { systemId, entityDefinitionId: entityId },
@@ -263,7 +266,9 @@ export class AiImpactService {
       if (found > 0) {
         totals.workflowsAffected += found;
         totals.destructiveChanges += 1;
-        entry.notes.push(`Active workflow definition "${w.key}" will be removed.`);
+        entry.notes.push(
+          `Active workflow definition "${w.key}" will be removed.`,
+        );
       }
     }
 

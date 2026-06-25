@@ -21,6 +21,48 @@ services:
     volumes:
       - stack62_redis_data:/data
 
+  # Self-hosted small model + embeddings — the $0 local intelligence tier.
+  # Powers Tier 1 tool selection, low-level drafting/extraction, the semantic
+  # response cache, and the org-knowledge embeddings index. Frontier models
+  # (OpenAI) are reserved for genuinely hard work; see model-router.service.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: stack62-ollama
+    restart: unless-stopped
+    ports:
+      - '11434:11434'
+    volumes:
+      - stack62_ollama_data:/root/.ollama
+    # GPU is optional. To enable, uncomment and ensure the NVIDIA container
+    # toolkit is installed on the host:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # One-shot init: pulls the base instruct + embedding models, then builds the
+  # tailored `stack62-local` model from the mounted Modelfile. Exits when done;
+  # re-running is cheap (models are cached in the shared volume).
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: stack62-ollama-init
+    depends_on:
+      - ollama
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    volumes:
+      - ./ollama:/modelfiles:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        ollama pull ${SELF_HOSTED_LLM_MODEL:-qwen2.5:7b-instruct} &&
+        ollama pull ${EMBEDDING_MODEL_LOCAL:-nomic-embed-text} &&
+        ollama create ${OLLAMA_MODEL:-stack62-local} -f /modelfiles/Modelfile.stack62-local
+    restart: "no"
+
   api:
     build:
       context: .
@@ -32,12 +74,24 @@ services:
     environment:
       DATABASE_HOST: postgres
       REDIS_HOST: redis
+      # Local intelligence tier (no API cost). The Ollama client and the
+      # embeddings service both speak the OpenAI-compatible /v1 surface.
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-stack62-local}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      OPENAI_EMBEDDING_BASE_URL: ${OPENAI_EMBEDDING_BASE_URL:-http://ollama:11434/v1}
+      FILE_STORAGE_ROOT: ${FILE_STORAGE_ROOT:-/var/data/files}
+      DOCUMENTS_STORAGE_ROOT: ${DOCUMENTS_STORAGE_ROOT:-/var/data/documents}
+      GENERATED_SYSTEMS_ROOT: ${GENERATED_SYSTEMS_ROOT:-/var/data/generated}
     depends_on:
       - postgres
       - redis
+      - ollama
     ports:
       - '3000:3000'
     command: ["node", "dist/main.js"]
+    volumes:
+      - stack62_app_data:/var/data
 
   worker:
     build:
@@ -50,11 +104,23 @@ services:
     environment:
       DATABASE_HOST: postgres
       REDIS_HOST: redis
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-stack62-local}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      OPENAI_EMBEDDING_BASE_URL: ${OPENAI_EMBEDDING_BASE_URL:-http://ollama:11434/v1}
+      FILE_STORAGE_ROOT: ${FILE_STORAGE_ROOT:-/var/data/files}
+      DOCUMENTS_STORAGE_ROOT: ${DOCUMENTS_STORAGE_ROOT:-/var/data/documents}
+      GENERATED_SYSTEMS_ROOT: ${GENERATED_SYSTEMS_ROOT:-/var/data/generated}
     depends_on:
       - postgres
       - redis
+      - ollama
     command: ["node", "dist/worker.js"]
+    volumes:
+      - stack62_app_data:/var/data
 
 volumes:
   stack62_pg_data:
   stack62_redis_data:
+  stack62_ollama_data:
+  stack62_app_data:

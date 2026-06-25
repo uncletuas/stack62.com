@@ -1,0 +1,33 @@
+# AWS overlay for the base docker-compose.yml. Adds a Caddy edge that serves the
+# built frontend and reverse-proxies the API, so the whole system is reachable
+# at a single URL (http://<instance-ip>). Used as:
+#
+#   docker compose -f docker-compose.yml -f deploy/aws/docker-compose.aws.yml up -d --build
+services:
+  web:
+    build:
+      context: .
+      dockerfile: deploy/aws/web.Dockerfile
+      args:
+        # Absolute, same-origin API bases baked into each frontend at build time.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-https://stack62.loopital.com/v1}
+        VITE_ADMIN_API_BASE_URL: ${VITE_ADMIN_API_BASE_URL:-https://assembly.loopital.com/v1/admin}
+    container_name: stack62-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      # ':80' (HTTP by IP) by default; set to the domain in .env.aws for HTTPS.
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+      # Hostname for the staff ops console. Same Caddy, separate static root.
+      ADMIN_SITE_ADDRESS: ${ADMIN_SITE_ADDRESS:-assembly.loopital.com}
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - stack62_caddy_data:/data
+      - stack62_caddy_config:/config
+
+volumes:
+  stack62_caddy_data:
+  stack62_caddy_config:

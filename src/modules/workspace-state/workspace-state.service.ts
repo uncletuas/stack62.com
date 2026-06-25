@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { AccessControlService } from '../../shared/access-control/access-control.service';
 import { ActivityService } from '../activity/activity.service';
+import { OpenRouterService } from '../ai/openrouter.service';
 import {
   WorkspaceAction,
   WorkspaceActionEnvelopeSchema,
@@ -23,6 +24,7 @@ import {
   applyActionToDoc,
   decodeDoc,
   encodeDoc,
+  extractPlainText,
   makeFreshDoc,
   snapshotDoc,
 } from './yjs-state';
@@ -66,7 +68,12 @@ export class WorkspaceStateService {
     private readonly logRepo: Repository<WorkspaceActionLogEntity>,
     private readonly accessControl: AccessControlService,
     private readonly activity: ActivityService,
+    private readonly openRouter: OpenRouterService,
   ) {}
+
+  /** Doc ids currently being auto-titled, so a burst of saves doesn't
+   *  fire several LLM title requests for the same untitled doc. */
+  private readonly titlingInFlight = new Set<string>();
 
   // ── Lookup ─────────────────────────────────────────────────────
 
@@ -229,11 +236,7 @@ export class WorkspaceStateService {
         metadata: null,
       }),
     );
-    const envelope = this.envelope(
-      { ...action, docId: doc.id },
-      doc.id,
-      actor,
-    );
+    const envelope = this.envelope({ ...action, docId: doc.id }, doc.id, actor);
     await this.logRepo.save(
       this.logRepo.create({
         docId: doc.id,
@@ -294,9 +297,7 @@ export class WorkspaceStateService {
       ...action,
       id: randomUUID(),
       docId,
-      actorKind: actor.coworkerId
-        ? ('coworker' as const)
-        : ('user' as const),
+      actorKind: actor.coworkerId ? ('coworker' as const) : ('user' as const),
       actorUserId: actor.actorUserId,
       coworkerId: actor.coworkerId ?? null,
       occurredAt: new Date().toISOString(),
@@ -372,7 +373,116 @@ export class WorkspaceStateService {
     const doc = await this.findById(docId, actorUserId);
     doc.yjsState = Buffer.from(bytes);
     doc.currentVersion += 1;
+
+    // Google Docs-style auto-title: if the user never named the file,
+    // read what they've written and give it a meaningful title. This
+    // is best-effort and must never break autosave — any failure just
+    // leaves the placeholder title in place for the next save to retry.
+    if (
+      this.isPlaceholderTitle(doc.title) &&
+      !this.titlingInFlight.has(docId)
+    ) {
+      this.titlingInFlight.add(docId);
+      try {
+        const title = await this.deriveAutoTitle(doc);
+        // Re-check the placeholder in case a concurrent rename landed.
+        if (title && this.isPlaceholderTitle(doc.title)) {
+          doc.title = title;
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Auto-title failed for ${docId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      } finally {
+        this.titlingInFlight.delete(docId);
+      }
+    }
+
     await this.docsRepo.save(doc);
+  }
+
+  // ── Auto-title (untitled, Google Docs-style) ───────────────────────
+
+  /** True when the title is empty or still a generic "Untitled …". */
+  private isPlaceholderTitle(title: string | null | undefined): boolean {
+    if (!title) return true;
+    return /^untitled\b/i.test(title.trim());
+  }
+
+  /**
+   * Derive a short, meaningful title from the doc's current content.
+   * Tries the coworker (LLM) first so the title reflects what the
+   * document *means*, and falls back to the first meaningful line of
+   * text when AI isn't configured or errors out.
+   *
+   * Returns null when there isn't enough content to title yet (e.g. a
+   * brand-new empty doc) — we keep the placeholder until the user has
+   * actually written something.
+   */
+  private async deriveAutoTitle(
+    doc: WorkspaceDocEntity,
+  ): Promise<string | null> {
+    const text = extractPlainText(decodeDoc(doc.yjsState), doc.kind);
+    if (text.trim().length < 6) return null;
+
+    // 1) Ask the coworker to name it from the meaning of the content.
+    //    Bounded by a timeout so a slow/hung model never stalls the
+    //    autosave path — we just fall back to the first-line title.
+    try {
+      const completion = this.openRouter.complete([
+        {
+          role: 'system',
+          content:
+            'You name documents. Read the content and reply with ONLY a short, ' +
+            'descriptive title (3 to 8 words, no surrounding quotes, no trailing ' +
+            'punctuation). Do not explain.',
+        },
+        {
+          role: 'user',
+          content: `Suggest a title for this ${doc.kind}:\n\n${text.slice(0, 1500)}`,
+        },
+      ]);
+      const raw = await Promise.race([
+        completion,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000)),
+      ]);
+      const cleaned = this.cleanTitle(raw);
+      if (cleaned) return cleaned;
+    } catch (err) {
+      this.logger.warn(
+        `LLM titling unavailable, using first-line fallback: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+
+    // 2) Fallback: first meaningful line, trimmed to a sensible length.
+    return this.cleanTitle(text.split(/[\n.!?]/)[0] ?? text);
+  }
+
+  /**
+   * Normalise an LLM/first-line title candidate: strip quotes, code
+   * fences, and the "[AI disabled …]" sentinel, collapse whitespace,
+   * and cap the length at a word boundary. Returns null when nothing
+   * usable remains.
+   */
+  private cleanTitle(candidate: string | null | undefined): string | null {
+    if (!candidate) return null;
+    let title = candidate
+      .replace(/\[AI disabled[^\]]*\]/gi, '')
+      .replace(/^["'`\s]+|["'`\s]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!title) return null;
+    const MAX = 80;
+    if (title.length > MAX) {
+      const cut = title.slice(0, MAX);
+      const lastSpace = cut.lastIndexOf(' ');
+      title = (lastSpace > 40 ? cut.slice(0, lastSpace) : cut).trim();
+    }
+    return title || null;
   }
 
   async readActionLog(docId: string, actorUserId: string, limit = 100) {

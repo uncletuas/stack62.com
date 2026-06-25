@@ -36,8 +36,10 @@ class SendEmailDto {
 }
 
 /**
- * Plain-email endpoint for the front-end Compose UI. The Coworker tool
- * (email.send) goes through the same EmailSenderService.
+ * Legacy platform-mail endpoint. Sends through the deployment-wide
+ * EmailSenderService (env SMTP/Resend) — used for Stack62's own system mail.
+ * User/Coworker email now goes through the org's connected mailbox via
+ * IntegrationsService.sendOrgEmail (POST /integrations/email/send).
  */
 @ApiTags('emails')
 @ApiBearerAuth()
@@ -52,7 +54,8 @@ export class EmailsController {
   async send(@Body() body: SendEmailDto, @CurrentUser() user: JwtUser) {
     if (!this.sender.isConfigured()) {
       throw new BadRequestException(
-        'Email provider not configured. Set RESEND_API_KEY and RESEND_FROM_EMAIL.',
+        'Email is not configured. Set SMTP_HOST/SMTP_USER/SMTP_PASSWORD ' +
+          '(to send from a normal mailbox) or RESEND_API_KEY/RESEND_FROM_EMAIL.',
       );
     }
     let sent = 0;

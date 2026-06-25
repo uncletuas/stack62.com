@@ -36,7 +36,14 @@ export const INTEGRATION_MARKETPLACE: IntegrationProviderDefinition[] = [
     description:
       'Send workflow notifications through an SMTP-compatible relay.',
     capabilities: ['send_email'],
-    credentialFields: ['host', 'port', 'username', 'password'],
+    credentialFields: [
+      'host',
+      'port',
+      'username',
+      'password',
+      'imapHost',
+      'imapPort',
+    ],
     configFields: ['fromEmail', 'fromName'],
   },
   {
@@ -47,6 +54,16 @@ export const INTEGRATION_MARKETPLACE: IntegrationProviderDefinition[] = [
     capabilities: ['send_whatsapp'],
     credentialFields: ['accessToken', 'phoneNumberId'],
     configFields: ['defaultTemplate'],
+  },
+  {
+    key: 'whatsapp-web',
+    name: 'WhatsApp (Link a device)',
+    category: 'messaging',
+    description:
+      'Link a personal or business WhatsApp account as a companion device using a phone-number pairing code, then send and receive messages.',
+    capabilities: ['send_whatsapp', 'receive_whatsapp'],
+    credentialFields: [],
+    configFields: ['linkedPhoneNumber'],
   },
   {
     key: 'google-workspace',
@@ -106,15 +123,6 @@ export const INTEGRATION_MARKETPLACE: IntegrationProviderDefinition[] = [
     configFields: ['defaultIncomeAccountId'],
   },
   {
-    key: 'slack',
-    name: 'Slack',
-    category: 'messaging',
-    description: 'Post messages to Slack channels from workflows and the coworker.',
-    capabilities: ['post_message', 'dm'],
-    credentialFields: ['botToken'],
-    configFields: ['defaultChannel'],
-  },
-  {
     key: 'discord',
     name: 'Discord',
     category: 'messaging',
@@ -163,7 +171,8 @@ export const INTEGRATION_MARKETPLACE: IntegrationProviderDefinition[] = [
     key: 'salesforce',
     name: 'Salesforce',
     category: 'crm',
-    description: 'Read and write Salesforce objects (leads, accounts, opportunities).',
+    description:
+      'Read and write Salesforce objects (leads, accounts, opportunities).',
     capabilities: ['lead_create', 'account_lookup', 'opportunity_create'],
     credentialFields: ['accessToken', 'instanceUrl'],
     configFields: [],
@@ -236,12 +245,13 @@ export const INTEGRATION_MARKETPLACE: IntegrationProviderDefinition[] = [
 export const USER_OAUTH_INTEGRATIONS: IntegrationProviderDefinition[] = [
   {
     key: 'google-workspace',
-    name: 'Google Workspace',
-    category: 'productivity',
+    name: 'Connect Gmail (Google)',
+    category: 'email',
     description:
-      'Sign in with Google so the coworker can work with Gmail, Calendar, Meet, Docs, Sheets, and Drive after approval.',
+      'Sign in with Google so you and your coworker can send email from your own Gmail, plus work with Calendar, Meet, Docs, Sheets, and Drive after approval.',
     capabilities: [
       'gmail_message',
+      'send_email',
       'calendar_event',
       'meeting_create',
       'drive_file',
@@ -252,12 +262,29 @@ export const USER_OAUTH_INTEGRATIONS: IntegrationProviderDefinition[] = [
     configFields: [],
   },
   {
-    key: 'whatsapp-cloud',
-    name: 'WhatsApp Business',
+    key: 'smtp-email',
+    name: 'Connect email (SMTP)',
+    category: 'email',
+    description:
+      'Connect any email account (Yahoo, Zoho, Outlook, cPanel, or Gmail with an app password) by entering its SMTP details. Add IMAP details too and your coworker can also read and reply to incoming mail.',
+    capabilities: ['send_email'],
+    credentialFields: [
+      'host',
+      'port',
+      'username',
+      'password',
+      'imapHost',
+      'imapPort',
+    ],
+    configFields: ['fromEmail', 'fromName'],
+  },
+  {
+    key: 'whatsapp-web',
+    name: 'WhatsApp (Link a device)',
     category: 'messaging',
     description:
-      'Connect the official WhatsApp Business Platform through Meta Business onboarding, then choose a verified business phone number.',
-    capabilities: ['whatsapp_message', 'whatsapp_reply_draft'],
+      'Link a coworker’s WhatsApp by phone number: enter the number, get a one-time pairing code, type it into WhatsApp → Linked devices, and the account is connected for sending and receiving.',
+    capabilities: ['whatsapp_message', 'whatsapp_receive'],
     credentialFields: [],
     configFields: [],
   },

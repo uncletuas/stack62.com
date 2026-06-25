@@ -13,6 +13,14 @@ export class ListJobsDto {
   systemId?: string;
 
   @IsOptional()
-  @IsIn(['pending', 'scheduled', 'running', 'completed', 'failed', 'paused', 'cancelled'])
+  @IsIn([
+    'pending',
+    'scheduled',
+    'running',
+    'completed',
+    'failed',
+    'paused',
+    'cancelled',
+  ])
   status?: string;
 }

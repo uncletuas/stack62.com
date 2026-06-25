@@ -1,12 +1,7 @@
 import { Column, Entity } from 'typeorm';
 import { AppBaseEntity } from '../../../shared/database/base.entity';
 
-export type PlanTier =
-  | 'free'
-  | 'starter'
-  | 'pro'
-  | 'business'
-  | 'enterprise';
+export type PlanTier = 'free' | 'starter' | 'pro' | 'business' | 'enterprise';
 
 /**
  * Pricing plan catalog. Seeded at startup; not directly editable by users.
@@ -101,4 +96,12 @@ export class PlanEntity extends AppBaseEntity {
   /** Free-form bullet list rendered on the pricing page. */
   @Column({ type: 'jsonb', default: () => "'[]'" })
   features!: string[];
+
+  /**
+   * Set when an operator edits this plan from the admin console. Once set, the
+   * boot-time seed STOPS overwriting this plan from SEED_PLANS, so admin price
+   * and limit changes are not silently reverted on the next deploy.
+   */
+  @Column({ name: 'customized_at', type: 'timestamptz', nullable: true })
+  customizedAt!: Date | null;
 }

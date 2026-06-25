@@ -92,7 +92,7 @@ Practical examples that work end-to-end against the current schema:
 - **CRM** — Companies + Contacts + Deals modules, table + kanban views, "deal stage changed" workflow that drops a row into Tasks. Email send via the Gmail integration.
 - **Recruiting tracker** — Candidates + Stages, table + kanban, calendar view for interviews, integration with WhatsApp Business for candidate updates.
 - **Operations runbook** — checklists per shift, schedules with `assignedToCoworker=true` so the Coworker fires actions on a cadence, summary docs.
-- **Lightweight project tracker** — Projects + Tasks + Comments, dashboards aggregating count-by-status, Slack-style rooms for team chat.
+- **Lightweight project tracker** — Projects + Tasks + Comments, dashboards aggregating count-by-status, built-in rooms for team chat.
 - **Vendor/expense system** — Invoices module with AI-extracted fields from uploaded PDFs (via the existing `extractFields` flow), QuickBooks for ledger sync.
 
 ### What's not yet built

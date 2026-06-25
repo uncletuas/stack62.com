@@ -68,7 +68,11 @@ export class CoworkerRuntimeService {
       let deploymentId: string | null = null;
       let lastError = '';
 
-      for (let attempt = 1; attempt <= BUILD_MAX_REPAIR_ATTEMPTS; attempt += 1) {
+      for (
+        let attempt = 1;
+        attempt <= BUILD_MAX_REPAIR_ATTEMPTS;
+        attempt += 1
+      ) {
         this.throwIfStopped(operation);
         yield this.status(
           operation,
@@ -136,13 +140,22 @@ export class CoworkerRuntimeService {
             type: 'message.complete',
             text: `I built and deployed the system. The preview is ready now.`,
           };
-          yield { type: 'session.complete', turns: attempt, stopReason: 'ready' };
+          yield {
+            type: 'session.complete',
+            turns: attempt,
+            stopReason: 'ready',
+          };
           return;
         }
 
-        lastError = outcome.errorMessage ?? `Deployment ended as ${outcome.status}`;
+        lastError =
+          outcome.errorMessage ?? `Deployment ended as ${outcome.status}`;
         const logs = deploymentId
-          ? await this.runnerService.logs(deploymentId, input.ctx.actorUserId, 120)
+          ? await this.runnerService.logs(
+              deploymentId,
+              input.ctx.actorUserId,
+              120,
+            )
           : { lines: [] as string[] };
         yield this.toolResult(operation, 'runner.logs', false, {
           deploymentId,
@@ -160,7 +173,8 @@ export class CoworkerRuntimeService {
       );
       yield {
         type: 'session.error',
-        message: lastError || 'Deployment failed after automatic repair attempts.',
+        message:
+          lastError || 'Deployment failed after automatic repair attempts.',
       };
     } catch (err) {
       const stopped =
@@ -198,11 +212,7 @@ export class CoworkerRuntimeService {
 
     try {
       this.assertWorkspace(input);
-      yield this.status(
-        operation,
-        'thinking',
-        'Reading the meeting details.',
-      );
+      yield this.status(operation, 'thinking', 'Reading the meeting details.');
       const parsed = parseSchedulePrompt(input.prompt);
       if (!parsed) {
         yield this.status(
@@ -523,7 +533,9 @@ function resolvePromptDate(prompt: string) {
 }
 
 function parseParticipant(prompt: string) {
-  const match = prompt.match(/\b(?:with|for)\s+(.+?)(?:\s+(?:by|at|on|today|tomorrow)\b|$)/i);
+  const match = prompt.match(
+    /\b(?:with|for)\s+(.+?)(?:\s+(?:by|at|on|today|tomorrow)\b|$)/i,
+  );
   if (!match) return null;
   return match[1].replace(/[.,;]+$/g, '').trim();
 }

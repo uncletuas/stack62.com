@@ -18,7 +18,7 @@ rendered straight from GitHub as a first pass; a proper docs site
   autonomous mode, memory
 - [Files & sharing](./user-files.md) — folders, ACLs, share with
   anyone by email
-- [Integrations](./user-integrations.md) — Slack, Google, Resend
+- [Integrations](./user-integrations.md) — WhatsApp, Google, Resend
 
 ## Environment variables
 
@@ -48,7 +48,6 @@ Required vs optional:
 | Env var | What |
 |---|---|
 | `GOOGLE_AUTH_CLIENT_ID` + `GOOGLE_AUTH_CLIENT_SECRET` + `GOOGLE_AUTH_REDIRECT_URI` | Sign in with Google |
-| `SLACK_CLIENT_ID` + `SLACK_CLIENT_SECRET` + `SLACK_SIGNING_SECRET` | Slack integration |
 | `OPENAI_API_KEY` | Real-time voice (direct OpenAI, not OpenRouter) |
 | `REALTIME_MODEL` | Override the default `gpt-4o-realtime-preview` |
 | `VISION_MODEL` | Override the default vision-LLM for OCR (`anthropic/claude-3.5-sonnet`) |

@@ -1,0 +1,45 @@
+# One origin for the whole app. Frontend is served statically; everything under
+# /v1 is reverse-proxied to the API container. The Vite app is built with
+# VITE_API_BASE_URL=/v1, so it calls this same origin (no mixed content).
+#
+# The site address comes from $SITE_ADDRESS (set in .env.aws):
+#   :80                       → HTTP, reachable by the instance IP (default).
+#   stack62.loopital.com      → Caddy auto-provisions HTTPS via Let's Encrypt
+#                               (point the DNS A-record at the instance first).
+{
+	email loopital.finance@gmail.com
+}
+
+{$SITE_ADDRESS::80} {
+	encode gzip
+
+	handle /v1* {
+		reverse_proxy api:3000
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+# Internal staff operations console (assembly.loopital.com). Same backend, but
+# only the /v1/admin/* namespace is used; access is gated by the platform-staff
+# JWT audience + 2FA, never the customer session. Served from a separate static
+# root (/srv-admin) baked into the same web image. Point the assembly DNS
+# A-record at this instance; Caddy provisions HTTPS on demand. Hosted on the
+# same Caddy as the customer site to avoid a :443 port clash on one EC2 box.
+{$ADMIN_SITE_ADDRESS:assembly.loopital.com} {
+	encode gzip
+
+	handle /v1* {
+		reverse_proxy api:3000
+	}
+
+	handle {
+		root * /srv-admin
+		try_files {path} /index.html
+		file_server
+	}
+}

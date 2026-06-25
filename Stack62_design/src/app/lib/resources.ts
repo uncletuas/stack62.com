@@ -526,6 +526,19 @@ export async function updateDocument(
   });
 }
 
+export async function deleteDocument(documentId: string) {
+  return apiRequest<{ id: string; status: string }>(
+    `/documents/${documentId}`,
+    { method: 'DELETE' },
+  );
+}
+
+export async function duplicateDocument(documentId: string) {
+  return apiRequest<WorkspaceDocument>(`/documents/${documentId}/duplicate`, {
+    method: 'POST',
+  });
+}
+
 export async function fetchReports(query: {
   organizationId?: string;
   workspaceId?: string;
@@ -1077,6 +1090,50 @@ export async function listFiles(query: {
   ownerId?: string;
 }) {
   return apiRequest<StoredFile[]>('/files', { query });
+}
+
+export interface DriveFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  size?: string;
+  iconLink?: string;
+  modifiedTime?: string;
+}
+
+/** List the user's Google Drive files for the attachment picker. */
+export async function listGoogleDriveFiles(query: {
+  organizationId: string;
+  workspaceId?: string;
+  query?: string;
+}) {
+  const res = await apiRequest<{ files: DriveFile[] }>(
+    '/integrations/google-drive/files',
+    { query },
+  );
+  return res.files;
+}
+
+/** Import a Drive file into the Stack62 store; returns the stored file. */
+export async function importGoogleDriveFile(payload: {
+  organizationId: string;
+  workspaceId?: string;
+  fileId: string;
+}) {
+  return apiRequest<StoredFile>('/integrations/google-drive/import', {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+/**
+ * Fetch a single file by id. Use this when opening a file in an editor —
+ * it resolves regardless of which workspace/folder the file lives in,
+ * unlike listFiles() which is workspace-scoped and would miss files
+ * uploaded without a workspace.
+ */
+export async function fetchFile(fileId: string) {
+  return apiRequest<StoredFile>(`/files/${fileId}`);
 }
 
 export async function deleteFile(fileId: string) {
@@ -1949,6 +2006,41 @@ export interface IntegrationProviderStatus {
   missing: string[];
 }
 
+/**
+ * Short, user-facing setup guidance shown in the connect dialogs, keyed by
+ * provider key. `fieldHints` provides better input placeholders/examples.
+ */
+export const INTEGRATION_SETUP_HELP: Record<
+  string,
+  { intro: string; steps?: string[]; fieldHints?: Record<string, string> }
+> = {
+  'smtp-email': {
+    intro:
+      'Connect any email account with its outgoing (SMTP) server details. Add the incoming (IMAP) details too so your coworker can read and reply to new mail. Common providers:',
+    steps: [
+      'Gmail — SMTP smtp.gmail.com:587, IMAP imap.gmail.com:993. Turn on 2-Step Verification, then create an App Password (Google account → Security → App passwords) and use it as the password.',
+      'Outlook / Microsoft 365 — SMTP smtp.office365.com:587, IMAP outlook.office365.com:993.',
+      'Yahoo — SMTP smtp.mail.yahoo.com:465, IMAP imap.mail.yahoo.com:993 (use an app password).',
+      'Zoho — SMTP smtp.zoho.com:465, IMAP imap.zoho.com:993.',
+      'Username is usually your full email address. "From email" is the address recipients will see. IMAP fields are optional — leave them blank for send-only.',
+    ],
+    fieldHints: {
+      host: 'smtp.gmail.com',
+      port: '587',
+      username: 'you@example.com',
+      password: 'app password',
+      imapHost: 'imap.gmail.com',
+      imapPort: '993',
+      fromEmail: 'you@example.com',
+      fromName: 'Your Name or Business',
+    },
+  },
+  'google-workspace': {
+    intro:
+      'Click "Sign in with Google" and approve access. Your coworker can then send (and read) email from your own Gmail — nothing else to fill in.',
+  },
+};
+
 // ── User profile / avatar ─────────────────────────────────────────
 
 export interface UserProfileDto {
@@ -2073,6 +2165,7 @@ export function sendIntegrationEmail(payload: {
   text: string;
   html?: string;
   metadata?: Record<string, unknown>;
+  attachmentFileIds?: string[];
 }) {
   return apiRequest<{ provider: string; id: string | null; ok: boolean }>(
     '/integrations/email/send',
@@ -2086,11 +2179,137 @@ export function sendIntegrationWhatsApp(payload: {
   to: string;
   message: string;
   metadata?: Record<string, unknown>;
+  replyToMessageId?: string;
 }) {
   return apiRequest<{ provider: string; id: string | null; ok: boolean }>(
     '/integrations/whatsapp/send',
     { method: 'POST', body: payload },
   );
+}
+
+/** Send a stored file as a WhatsApp media message (needs a linked device). */
+export function sendIntegrationWhatsAppMedia(payload: {
+  organizationId: string;
+  workspaceId?: string;
+  to: string;
+  fileId: string;
+  caption?: string;
+  ptt?: boolean;
+  forceType?: 'image' | 'video' | 'audio' | 'document' | 'sticker';
+  replyToMessageId?: string;
+}) {
+  return apiRequest<{ provider: string; id: string | null; ok: boolean }>(
+    '/integrations/whatsapp/send-media',
+    { method: 'POST', body: payload },
+  );
+}
+
+// ── Email inbox (incoming mail) ───────────────────────────────────
+export interface EmailConversation {
+  id: string;
+  organizationId: string;
+  workspaceId: string | null;
+  connectionId: string;
+  providerKey: string;
+  counterpartyEmail: string;
+  counterpartyName: string | null;
+  subject: string | null;
+  lastMessageAt: string | null;
+  lastMessagePreview: string | null;
+  lastDirection: string | null;
+  unreadCount: number;
+  autoReplyOverride: boolean | null;
+  status: string;
+}
+
+export interface EmailMessage {
+  id: string;
+  conversationId: string;
+  direction: string;
+  subject: string | null;
+  bodyText: string;
+  bodyHtml: string | null;
+  authoredBy: string;
+  status: string;
+  receivedAt: string | null;
+  createdAt: string;
+}
+
+export function fetchEmailConversations(query: {
+  organizationId: string;
+  workspaceId?: string;
+}) {
+  return apiRequest<EmailConversation[]>('/integrations/email/conversations', {
+    query,
+  });
+}
+
+export function fetchEmailConversationMessages(conversationId: string) {
+  return apiRequest<{
+    conversation: EmailConversation;
+    messages: EmailMessage[];
+  }>(`/integrations/email/conversations/${conversationId}/messages`);
+}
+
+export function updateEmailConversation(
+  conversationId: string,
+  patch: { markRead?: boolean; autoReplyOverride?: boolean | null },
+) {
+  return apiRequest<EmailConversation>(
+    `/integrations/email/conversations/${conversationId}`,
+    { method: 'PATCH', body: patch },
+  );
+}
+
+export function sendEmailReply(
+  conversationId: string,
+  payload: { bodyText: string; subject?: string },
+) {
+  return apiRequest<{ ok: boolean; provider: string }>(
+    `/integrations/email/conversations/${conversationId}/send`,
+    { method: 'POST', body: payload },
+  );
+}
+
+export interface EmailAgentConfig {
+  id: string;
+  organizationId: string;
+  workspaceId: string;
+  enabled: boolean;
+  autoSend: boolean;
+  responseSchedule: 'always' | 'business_hours' | 'after_hours';
+  tone: string | null;
+  identityName: string | null;
+  identityRole: string | null;
+  signature: string | null;
+  businessInfo: string | null;
+  maxAutoRepliesPerDay: number;
+}
+
+export function fetchEmailAgent(query: {
+  organizationId: string;
+  workspaceId: string;
+}) {
+  return apiRequest<EmailAgentConfig>('/coworker/email-agent', { query });
+}
+
+export function updateEmailAgent(payload: {
+  organizationId: string;
+  workspaceId: string;
+  enabled?: boolean;
+  autoSend?: boolean;
+  responseSchedule?: 'always' | 'business_hours' | 'after_hours';
+  tone?: string;
+  identityName?: string;
+  identityRole?: string;
+  signature?: string;
+  businessInfo?: string;
+  maxAutoRepliesPerDay?: number;
+}) {
+  return apiRequest<EmailAgentConfig>('/coworker/email-agent', {
+    method: 'PATCH',
+    body: payload,
+  });
 }
 
 export function googleOAuthUrl(payload: {
@@ -2296,6 +2515,200 @@ export function selectWhatsAppPhoneNumber(
       method: 'POST',
       body: payload,
     },
+  );
+}
+
+// ── WhatsApp "Link a device" (companion device via pairing code) ────────────
+
+export interface WhatsAppWebLinkResult {
+  connectionId: string;
+  providerKey: string;
+  phoneNumber: string;
+  pairingCode: string | null;
+  pairingCodeExpiresAt: string | null;
+  status: string;
+  instructions: string;
+}
+
+export interface WhatsAppWebStatus {
+  connectionId: string;
+  status: 'pairing' | 'connecting' | 'ready' | 'logged_out' | 'error';
+  phoneNumber: string | null;
+  waJid: string | null;
+  pairingCode: string | null;
+  pairingCodeExpiresAt: string | null;
+  lastConnectedAt: string | null;
+}
+
+export function startWhatsAppWebLink(payload: {
+  organizationId: string;
+  workspaceId?: string;
+  phoneNumber: string;
+  name?: string;
+  connectionId?: string;
+}) {
+  return apiRequest<WhatsAppWebLinkResult>('/integrations/whatsapp-web/link', {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+export function fetchWhatsAppWebStatus(connectionId: string) {
+  return apiRequest<WhatsAppWebStatus>(
+    `/integrations/connections/${connectionId}/whatsapp-web/status`,
+  );
+}
+
+export function whatsAppWebLogout(connectionId: string) {
+  return apiRequest<{ connectionId: string; status: string }>(
+    `/integrations/connections/${connectionId}/whatsapp-web/logout`,
+    { method: 'POST' },
+  );
+}
+
+// ── WhatsApp coworker auto-reply config ─────────────────────────────────────
+
+export interface WhatsAppBusinessHours {
+  timezone: string;
+  days: number[];
+  start: string;
+  end: string;
+}
+
+export interface WhatsAppAgentConfig {
+  id: string;
+  organizationId: string;
+  workspaceId: string;
+  autoReplyEnabled: boolean;
+  responseSchedule: 'always' | 'business_hours' | 'after_hours';
+  businessHours: WhatsAppBusinessHours | null;
+  tone: string | null;
+  responseDelaySeconds: number;
+  identityName: string | null;
+  identityRole: string | null;
+  signature: string | null;
+  businessInfo: string | null;
+  awayMessage: string | null;
+  maxAutoRepliesPerDay: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function fetchWhatsAppAgent(organizationId: string, workspaceId: string) {
+  return apiRequest<WhatsAppAgentConfig>('/coworker/whatsapp-agent', {
+    query: { organizationId, workspaceId },
+  });
+}
+
+export function updateWhatsAppAgent(payload: {
+  organizationId: string;
+  workspaceId: string;
+  autoReplyEnabled?: boolean;
+  responseSchedule?: 'always' | 'business_hours' | 'after_hours';
+  businessHours?: WhatsAppBusinessHours;
+  tone?: string | null;
+  responseDelaySeconds?: number;
+  identityName?: string | null;
+  identityRole?: string | null;
+  signature?: string | null;
+  businessInfo?: string | null;
+  awayMessage?: string | null;
+  maxAutoRepliesPerDay?: number;
+}) {
+  return apiRequest<WhatsAppAgentConfig>('/coworker/whatsapp-agent', {
+    method: 'PATCH',
+    body: payload,
+  });
+}
+
+// ── WhatsApp conversations (chats the system identifies) ─────────────────────
+
+export interface WhatsAppConversation {
+  id: string;
+  organizationId: string;
+  workspaceId: string | null;
+  connectionId: string;
+  channel: 'web' | 'cloud';
+  contactPhone: string;
+  contactJid: string | null;
+  contactName: string | null;
+  contactAvatarUrl: string | null;
+  lastMessageAt: string | null;
+  lastMessagePreview: string | null;
+  lastDirection: 'inbound' | 'outbound' | null;
+  unreadCount: number;
+  autoReplyOverride: boolean | null;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WhatsAppConversationMessage {
+  id: string;
+  conversationId: string;
+  direction: 'inbound' | 'outbound';
+  text: string;
+  authoredBy: 'contact' | 'coworker' | 'user';
+  status: string;
+  createdAt: string;
+  mediaType: 'image' | 'video' | 'audio' | 'document' | 'sticker' | null;
+  mediaFileId: string | null;
+  mediaMimeType: string | null;
+  mediaFilename: string | null;
+  replyToMessageId: string | null;
+  replyToPreview: string | null;
+  reactions: { me?: string; them?: string } | null;
+  deleted: boolean;
+}
+
+/** React to a WhatsApp message with an emoji (empty string clears it). */
+export function reactWhatsAppMessage(messageId: string, emoji: string) {
+  return apiRequest<WhatsAppConversationMessage>(
+    `/integrations/whatsapp/messages/${messageId}/react`,
+    { method: 'POST', body: { emoji } },
+  );
+}
+
+/** Delete a WhatsApp message for everyone. */
+export function deleteWhatsAppMessage(messageId: string) {
+  return apiRequest<WhatsAppConversationMessage>(
+    `/integrations/whatsapp/messages/${messageId}/delete`,
+    { method: 'POST' },
+  );
+}
+
+export function fetchWhatsAppConversations(
+  organizationId: string,
+  workspaceId?: string,
+) {
+  return apiRequest<WhatsAppConversation[]>(
+    '/integrations/whatsapp/conversations',
+    { query: { organizationId, workspaceId } },
+  );
+}
+
+export function fetchWhatsAppConversationMessages(conversationId: string) {
+  return apiRequest<{
+    conversation: WhatsAppConversation;
+    messages: WhatsAppConversationMessage[];
+  }>(`/integrations/whatsapp/conversations/${conversationId}/messages`);
+}
+
+export function updateWhatsAppConversation(
+  conversationId: string,
+  body: { markRead?: boolean; autoReplyOverride?: boolean | null },
+) {
+  return apiRequest<WhatsAppConversation>(
+    `/integrations/whatsapp/conversations/${conversationId}`,
+    { method: 'PATCH', body },
+  );
+}
+
+/** Fetch + persist a contact's WhatsApp profile picture on demand. */
+export function refreshWhatsAppAvatar(conversationId: string) {
+  return apiRequest<WhatsAppConversation>(
+    `/integrations/whatsapp/conversations/${conversationId}/refresh-avatar`,
+    { method: 'POST' },
   );
 }
 
@@ -2608,6 +3021,34 @@ export async function inviteOrganizationMember(payload: {
     method: 'POST',
     body: payload,
   });
+}
+
+export interface BulkInviteResult {
+  results: Array<{
+    email: string;
+    status: 'invited' | 'added' | 'failed';
+    message?: string;
+  }>;
+  summary: { invited: number; added: number; failed: number; total: number };
+}
+
+export async function bulkInviteOrganizationMembers(payload: {
+  organizationId: string;
+  workspaceId?: string;
+  emails: string[];
+  role?: string;
+}) {
+  return apiRequest<BulkInviteResult>(`/memberships/bulk-invite`, {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+export async function revokeOrgInvite(inviteId: string) {
+  return apiRequest<{ id: string; status: string }>(
+    `/memberships/invites/${inviteId}`,
+    { method: 'DELETE' },
+  );
 }
 
 export async function removeMembership(membershipId: string) {

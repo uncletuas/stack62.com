@@ -62,7 +62,13 @@ export class EngineRuntimeService {
 
     try {
       const result = await tool.handler(validated.input, ctx);
-      await this.logToolCall(tool, validated.input, ctx, 'succeeded', result.output);
+      await this.logToolCall(
+        tool,
+        validated.input,
+        ctx,
+        'succeeded',
+        result.output,
+      );
       return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Tool failed.';
@@ -160,8 +166,11 @@ export class EngineRuntimeService {
 
   private actionForVerb(verb: string): AccessAction | null {
     if (['search', 'read', 'get', 'list', 'find'].includes(verb)) return 'read';
-    if (['create', 'upload', 'generate', 'draft'].includes(verb)) return 'create';
-    if (['update', 'edit', 'assign', 'rewrite', 'pause', 'resume'].includes(verb)) {
+    if (['create', 'upload', 'generate', 'draft'].includes(verb))
+      return 'create';
+    if (
+      ['update', 'edit', 'assign', 'rewrite', 'pause', 'resume'].includes(verb)
+    ) {
       return 'update';
     }
     if (['share'].includes(verb)) return 'share';
@@ -179,7 +188,10 @@ export class EngineRuntimeService {
     status: ToolRunStatus,
     output: unknown,
   ) {
-    const actor = ctx.actor ?? { kind: 'user' as const, userId: ctx.actorUserId };
+    const actor = ctx.actor ?? {
+      kind: 'user' as const,
+      userId: ctx.actorUserId,
+    };
     const actorMeta = {
       kind: actor.kind,
       userId: actor.userId,

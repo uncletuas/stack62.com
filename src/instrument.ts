@@ -13,20 +13,29 @@
  */
 import * as Sentry from '@sentry/node';
 
+// Sentry SDK v8 no longer re-exports the `Integration` type from @sentry/node.
+// Derive it from the profiling integration's own return type so this stays
+// correct across SDK versions without naming a moved export.
+type SentryIntegration = ReturnType<
+  typeof import('@sentry/profiling-node').nodeProfilingIntegration
+>;
+
 const dsn = process.env.SENTRY_DSN;
 
 if (dsn) {
   // Profiling uses a native addon that may not be available on all platforms
   // (e.g. Alpine musl). Load it lazily so a missing binary doesn't crash startup.
-  let profilingIntegrations: Sentry.Integration[] = [];
+  let profilingIntegrations: SentryIntegration[] = [];
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { nodeProfilingIntegration } = require('@sentry/profiling-node') as {
-      nodeProfilingIntegration: () => Sentry.Integration;
+      nodeProfilingIntegration: () => SentryIntegration;
     };
     profilingIntegrations = [nodeProfilingIntegration()];
   } catch {
-    console.warn('[sentry] profiling-node unavailable on this platform — profiling disabled');
+    console.warn(
+      '[sentry] profiling-node unavailable on this platform — profiling disabled',
+    );
   }
 
   Sentry.init({
@@ -38,9 +47,7 @@ if (dsn) {
       process.env.RENDER_GIT_COMMIT?.slice(0, 8) ||
       'dev',
     integrations: profilingIntegrations,
-    tracesSampleRate: Number(
-      process.env.SENTRY_TRACES_SAMPLE_RATE || '0.1',
-    ),
+    tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE || '0.1'),
     profilesSampleRate: Number(
       process.env.SENTRY_PROFILES_SAMPLE_RATE || '0.1',
     ),
@@ -57,7 +64,7 @@ if (dsn) {
       return event;
     },
   });
-  // eslint-disable-next-line no-console
+
   console.log(
     `[sentry] backend initialised (env=${process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || 'development'})`,
   );

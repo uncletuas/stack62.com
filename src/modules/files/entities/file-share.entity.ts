@@ -27,7 +27,12 @@ export class FileShareEntity extends AppBaseEntity {
    * Set when the recipient hasn't signed up yet. We attach the share to
    * their account when they register with this email.
    */
-  @Column({ name: 'target_email', type: 'varchar', length: 320, nullable: true })
+  @Column({
+    name: 'target_email',
+    type: 'varchar',
+    length: 320,
+    nullable: true,
+  })
   targetEmail!: string | null;
 
   /** Anonymous-link token, when `subjectType=link`. */

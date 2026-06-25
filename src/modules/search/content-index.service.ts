@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ContentChunkEntity, ContentChunkSourceType } from './entities/content-chunk.entity';
+import {
+  ContentChunkEntity,
+  ContentChunkSourceType,
+} from './entities/content-chunk.entity';
 
 export interface IndexContentInput {
   organizationId: string;
@@ -71,7 +74,10 @@ export class ContentIndexService {
       qb.andWhere('chunk.systemId = :systemId', { systemId: input.systemId });
     }
 
-    const rows = await qb.orderBy('chunk.updatedAt', 'DESC').take(1500).getMany();
+    const rows = await qb
+      .orderBy('chunk.updatedAt', 'DESC')
+      .take(1500)
+      .getMany();
     const qEmbedding = embedText(input.query);
     const qTokens = tokenize(input.query);
 
@@ -99,7 +105,10 @@ export class ContentIndexService {
 }
 
 export function normalizeText(text: string) {
-  return text.replace(/\u0000/g, '').replace(/[ \t]+/g, ' ').trim();
+  return text
+    .replace(/\u0000/g, '')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
 }
 
 function splitIntoChunks(text: string) {
@@ -120,7 +129,8 @@ function embedText(text: string) {
     const index = hashToken(token) % EMBEDDING_DIM;
     vector[index] += 1;
   }
-  const magnitude = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0)) || 1;
+  const magnitude =
+    Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0)) || 1;
   return vector.map((value) => Number((value / magnitude).toFixed(6)));
 }
 

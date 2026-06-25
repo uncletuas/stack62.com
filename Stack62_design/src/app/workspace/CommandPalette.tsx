@@ -5,6 +5,7 @@ import {
   Database,
   FileText,
   GitBranch,
+  Globe,
   Layers,
   ListTodo,
   Mail,
@@ -119,6 +120,14 @@ export function CommandPalette() {
         run: open("streaming-doc", "Generate document"),
       },
       {
+        id: "open:browser",
+        label: "Open web browser",
+        hint: "Browse the web; the coworker can search, open and read pages",
+        group: "Action",
+        icon: Globe,
+        run: open("browser", "Browser"),
+      },
+      {
         id: "create:email",
         label: "New email",
         hint: "Compose and send via your connected email account",
@@ -126,6 +135,17 @@ export function CommandPalette() {
         icon: Mail,
         run: () => {
           window.dispatchEvent(new CustomEvent("stack62:open-email"));
+          setPaletteOpen(false);
+        },
+      },
+      {
+        id: "go:email-inbox",
+        label: "Email inbox",
+        hint: "See incoming email from your connected mailbox",
+        group: "Go",
+        icon: Mail,
+        run: () => {
+          window.dispatchEvent(new CustomEvent("stack62:open-email-inbox"));
           setPaletteOpen(false);
         },
       },

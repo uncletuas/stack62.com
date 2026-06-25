@@ -24,7 +24,10 @@ export class CommandTools {
 
   constructor(private readonly configService: ConfigService) {
     this.generatedRoot = path.resolve(
-      this.configService.get<string>('GENERATED_SYSTEMS_ROOT', 'generated/systems'),
+      this.configService.get<string>(
+        'GENERATED_SYSTEMS_ROOT',
+        'generated/systems',
+      ),
     );
   }
 
@@ -94,7 +97,9 @@ export class CommandTools {
     const normalized = command.replace(/\s+/g, ' ').trim();
     const allowed =
       ALLOWED_COMMANDS.has(normalized) ||
-      [...ALLOWED_COMMANDS].some((prefix) => normalized.startsWith(`${prefix} `));
+      [...ALLOWED_COMMANDS].some((prefix) =>
+        normalized.startsWith(`${prefix} `),
+      );
     if (!allowed) {
       throw new BadRequestException(
         `Command is not on the allowed sandbox command list: ${normalized}`,
@@ -111,16 +116,22 @@ export class CommandTools {
       stderr: string;
     }>((resolve, reject) => {
       const [cmd, ...args] = command.split(/\s+/);
-      const child = spawn(process.platform === 'win32' && cmd === 'npm' ? 'npm.cmd' : cmd, args, {
-        cwd,
-        env: this.buildChildEnv(),
-        windowsHide: true,
-      });
+      const child = spawn(
+        process.platform === 'win32' && cmd === 'npm' ? 'npm.cmd' : cmd,
+        args,
+        {
+          cwd,
+          env: this.buildChildEnv(),
+          windowsHide: true,
+        },
+      );
       let stdout = '';
       let stderr = '';
       const timer = setTimeout(() => {
         child.kill();
-        reject(new BadRequestException(`Command timed out after ${timeoutMs}ms.`));
+        reject(
+          new BadRequestException(`Command timed out after ${timeoutMs}ms.`),
+        );
       }, timeoutMs);
       child.stdout.on('data', (chunk: Buffer) => {
         stdout += chunk.toString('utf8');

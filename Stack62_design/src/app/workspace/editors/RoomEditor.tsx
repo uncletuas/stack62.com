@@ -1,25 +1,35 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Download,
+  FileText,
+  HardDrive,
   Hash,
-  Link2,
+  Loader2,
   MessageSquare,
+  Paperclip,
   Plus,
   Send,
-  Slack,
   Sparkles,
   Users,
+  X,
 } from "lucide-react";
 import {
   roomsApi,
-  slackApi,
   type RoomDto,
   type RoomMessageDto,
-  type SlackChannelDto,
-  type SlackMappingDto,
-  type SlackStatusDto,
 } from "../../lib/dms-resources";
+import { fetchFileBlobUrl, uploadFile, userAvatarUrl } from "../../lib/resources";
 import { appDialog } from "../../components/app-dialog";
+import { AttachmentPicker } from "../../components/AttachmentPicker";
 import { useAppContext } from "../../context/app-context";
+
+interface PendingAttachment {
+  id: string;
+  filename: string;
+  fileId: string | null;
+  uploading: boolean;
+  error: string | null;
+}
 
 /**
  * Coworker Rooms surface.
@@ -42,9 +52,10 @@ export function RoomEditor() {
   const [draft, setDraft] = useState("");
   const [posting, setPosting] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [slackStatus, setSlackStatus] = useState<SlackStatusDto | null>(null);
-  const [slackPanelOpen, setSlackPanelOpen] = useState(false);
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [showPicker, setShowPicker] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadRooms = useCallback(async () => {
     if (!orgId) return;
@@ -71,17 +82,6 @@ export function RoomEditor() {
   useEffect(() => {
     loadRooms();
   }, [loadRooms]);
-
-  useEffect(() => {
-    if (!orgId) return;
-    slackApi.status(orgId).then(setSlackStatus).catch(() => undefined);
-  }, [orgId]);
-
-  const connectSlack = async () => {
-    if (!orgId) return;
-    const { url } = await slackApi.installUrl(orgId);
-    window.location.href = url;
-  };
 
   useEffect(() => {
     if (activeRoomId) {
@@ -118,15 +118,71 @@ export function RoomEditor() {
     setActiveRoomId(room.id);
   };
 
+  const onPickFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0 || !orgId) return;
+    const items: PendingAttachment[] = Array.from(files).map((file) => ({
+      id: `a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      filename: file.name,
+      fileId: null,
+      uploading: true,
+      error: null,
+    }));
+    setAttachments((cur) => [...cur, ...items]);
+    for (let i = 0; i < items.length; i += 1) {
+      const item = items[i];
+      try {
+        const stored = await uploadFile({
+          file: files[i],
+          organizationId: orgId,
+          scope: "attachment",
+        });
+        setAttachments((cur) =>
+          cur.map((a) =>
+            a.id === item.id ? { ...a, uploading: false, fileId: stored.id } : a,
+          ),
+        );
+      } catch (err) {
+        setAttachments((cur) =>
+          cur.map((a) =>
+            a.id === item.id
+              ? {
+                  ...a,
+                  uploading: false,
+                  error: err instanceof Error ? err.message : "Upload failed",
+                }
+              : a,
+          ),
+        );
+      }
+    }
+  };
+
   const sendMessage = async () => {
-    if (!draft.trim() || !activeRoomId) return;
+    const ready = attachments.filter((a) => a.fileId && !a.error);
+    const uploadsBusy = attachments.some((a) => a.uploading);
+    if (
+      (!draft.trim() && ready.length === 0) ||
+      !activeRoomId ||
+      uploadsBusy ||
+      posting
+    ) {
+      return;
+    }
     setPosting(true);
     try {
       const message = await roomsApi.post(activeRoomId, {
         body: draft.trim(),
+        attachments: ready.length
+          ? ready.map((a) => ({
+              kind: "file" as const,
+              id: a.fileId as string,
+              label: a.filename,
+            }))
+          : undefined,
       });
       setMessages((prev) => [...prev, message]);
       setDraft("");
+      setAttachments([]);
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo({
           top: scrollRef.current.scrollHeight,
@@ -181,39 +237,7 @@ export function RoomEditor() {
             ))
           )}
         </div>
-
-        {/* Slack section */}
-        <div className="border-t border-app px-3 py-3">
-          {slackStatus?.connected ? (
-            <button
-              onClick={() => setSlackPanelOpen(true)}
-              className="flex w-full items-center gap-2 rounded-md border border-app px-2 py-1.5 text-xs text-app-faint hover:bg-app-hover"
-            >
-              <Slack className="size-3.5" />
-              <span className="flex-1 truncate text-left">
-                {slackStatus.teamName || "Slack"} • Bridge…
-              </span>
-            </button>
-          ) : (
-            <button
-              onClick={connectSlack}
-              className="flex w-full items-center gap-2 rounded-md border border-app px-2 py-1.5 text-xs hover:bg-app-hover"
-            >
-              <Slack className="size-3.5" />
-              Add to Slack
-            </button>
-          )}
-        </div>
       </aside>
-
-      {slackPanelOpen && (
-        <SlackBridgePanel
-          orgId={orgId}
-          rooms={rooms}
-          activeRoomId={activeRoomId}
-          onClose={() => setSlackPanelOpen(false)}
-        />
-      )}
 
       {/* Thread */}
       <div className="flex min-w-0 flex-1 flex-col">
@@ -248,7 +272,69 @@ export function RoomEditor() {
             </div>
 
             <div className="border-t border-app bg-app-surface px-3 py-3">
-              <div className="flex gap-2">
+              {attachments.length > 0 && (
+                <ul className="mb-2 flex flex-wrap gap-1.5">
+                  {attachments.map((a) => (
+                    <li
+                      key={a.id}
+                      className={`flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] ${
+                        a.error
+                          ? "border-rose-300 bg-rose-50 text-rose-700"
+                          : a.uploading
+                            ? "border-app bg-app text-app-faint"
+                            : "border-accent/50 bg-accent/10 text-accent"
+                      }`}
+                      title={a.error ?? a.filename}
+                    >
+                      {a.uploading ? (
+                        <Loader2 className="size-3 animate-spin" />
+                      ) : (
+                        <Paperclip className="size-3" />
+                      )}
+                      <span className="max-w-[160px] truncate">{a.filename}</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAttachments((cur) =>
+                            cur.filter((x) => x.id !== a.id),
+                          )
+                        }
+                        className="rounded-full p-0.5 hover:bg-app-hover"
+                        title="Remove"
+                      >
+                        <X className="size-2.5" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="flex items-end gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    void onPickFiles(e.target.files);
+                    e.target.value = "";
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="rounded-md border border-app bg-app p-2 text-app-muted hover:border-accent hover:text-accent"
+                  title="Attach files from this device"
+                >
+                  <Paperclip className="size-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowPicker(true)}
+                  className="rounded-md border border-app bg-app p-2 text-app-muted hover:border-accent hover:text-accent"
+                  title="Attach from Library or Google Drive"
+                >
+                  <HardDrive className="size-4" />
+                </button>
                 <textarea
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
@@ -268,8 +354,13 @@ export function RoomEditor() {
                 />
                 <button
                   onClick={sendMessage}
-                  disabled={posting || !draft.trim()}
-                  className="rounded-md bg-accent px-3 text-accent-fg hover:opacity-90 disabled:opacity-50"
+                  disabled={
+                    posting ||
+                    attachments.some((a) => a.uploading) ||
+                    (!draft.trim() &&
+                      !attachments.some((a) => a.fileId && !a.error))
+                  }
+                  className="rounded-md bg-accent px-3 py-2 text-accent-fg hover:opacity-90 disabled:opacity-50"
                 >
                   <Send className="size-4" />
                 </button>
@@ -289,6 +380,27 @@ export function RoomEditor() {
           </div>
         )}
       </div>
+
+      {orgId && (
+        <AttachmentPicker
+          organizationId={orgId}
+          open={showPicker}
+          onClose={() => setShowPicker(false)}
+          onPicked={(file) =>
+            setAttachments((cur) => [
+              ...cur,
+              {
+                id: `a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                filename: file.filename,
+                fileId: file.id,
+                uploading: false,
+                error: null,
+              },
+            ])
+          }
+          title="Attach to message"
+        />
+      )}
     </div>
   );
 }
@@ -326,15 +438,21 @@ function MessageRow({ msg }: { msg: RoomMessageDto }) {
   const isCoworker = msg.authorKind === "coworker";
   return (
     <div className="flex gap-3">
-      <div
-        className={`grid size-7 shrink-0 place-items-center rounded-full text-xs font-semibold ${
-          isCoworker
-            ? "bg-accent/15 text-accent"
-            : "bg-app-hover text-app-faint"
-        }`}
-      >
-        {isCoworker ? <Sparkles className="size-3.5" /> : "U"}
-      </div>
+      {isCoworker ? (
+        <div className="grid size-7 shrink-0 place-items-center rounded-full bg-accent/15 text-accent">
+          <Sparkles className="size-3.5" />
+        </div>
+      ) : msg.authorUserId ? (
+        <img
+          src={userAvatarUrl(msg.authorUserId)}
+          alt=""
+          className="size-7 shrink-0 rounded-full object-cover"
+        />
+      ) : (
+        <div className="grid size-7 shrink-0 place-items-center rounded-full bg-app-hover text-xs font-semibold text-app-faint">
+          U
+        </div>
+      )}
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-semibold">
@@ -347,11 +465,66 @@ function MessageRow({ msg }: { msg: RoomMessageDto }) {
             })}
           </span>
         </div>
-        <div className="mt-0.5 whitespace-pre-wrap break-words text-sm">
-          {msg.body}
-        </div>
+        {msg.body && (
+          <div className="mt-0.5 whitespace-pre-wrap break-words text-sm">
+            {msg.body}
+          </div>
+        )}
+        {msg.attachments && msg.attachments.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {msg.attachments
+              .filter((a) => a.kind === "file")
+              .map((a) => (
+                <RoomFileChip key={a.id} fileId={a.id} label={a.label} />
+              ))}
+          </div>
+        )}
       </div>
     </div>
+  );
+}
+
+/** A downloadable file attachment chip in a room message. */
+function RoomFileChip({
+  fileId,
+  label,
+}: {
+  fileId: string;
+  label?: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  const download = async () => {
+    setBusy(true);
+    try {
+      const url = await fetchFileBlobUrl(fileId);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = label ?? "file";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch {
+      /* ignore */
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={() => void download()}
+      className="flex max-w-[220px] items-center gap-1.5 rounded-md border border-app bg-app px-2 py-1 text-left text-xs text-app-muted transition hover:border-accent hover:text-app"
+      title={`Download ${label ?? "file"}`}
+    >
+      {busy ? (
+        <Loader2 className="size-3 shrink-0 animate-spin" />
+      ) : (
+        <FileText className="size-3 shrink-0 text-accent" />
+      )}
+      <span className="truncate">{label ?? "File"}</span>
+      <Download className="size-3 shrink-0 opacity-60" />
+    </button>
   );
 }
 
@@ -380,164 +553,6 @@ function EmptyState({ room }: { room: RoomDto }) {
           Type a message to start the conversation. Summon the Coworker with{" "}
           <code className="rounded bg-app px-1 py-0.5">@stack62</code>.
         </p>
-      </div>
-    </div>
-  );
-}
-
-function SlackBridgePanel({
-  orgId,
-  rooms,
-  activeRoomId,
-  onClose,
-}: {
-  orgId: string;
-  rooms: RoomDto[];
-  activeRoomId: string | null;
-  onClose: () => void;
-}) {
-  const [channels, setChannels] = useState<SlackChannelDto[]>([]);
-  const [mappings, setMappings] = useState<SlackMappingDto[]>([]);
-  const [selectedRoom, setSelectedRoom] = useState<string>(activeRoomId || "");
-  const [selectedChannel, setSelectedChannel] = useState<string>("");
-  const [submitting, setSubmitting] = useState(false);
-  const [feedback, setFeedback] = useState<string | null>(null);
-
-  useEffect(() => {
-    Promise.all([
-      slackApi.channels(orgId).catch(() => []),
-      slackApi.mappings(orgId).catch(() => []),
-    ]).then(([c, m]) => {
-      setChannels(c);
-      setMappings(m);
-    });
-  }, [orgId]);
-
-  const createMapping = async () => {
-    if (!selectedRoom || !selectedChannel) return;
-    setSubmitting(true);
-    setFeedback(null);
-    try {
-      const channel = channels.find((c) => c.id === selectedChannel);
-      await slackApi.createMapping({
-        organizationId: orgId,
-        roomId: selectedRoom,
-        slackChannelId: selectedChannel,
-        slackChannelName: channel?.name,
-      });
-      const refreshed = await slackApi.mappings(orgId);
-      setMappings(refreshed);
-      setFeedback("Bridge created — messages will now sync both ways.");
-    } catch (err) {
-      setFeedback(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const revoke = async (id: string) => {
-    await slackApi.deleteMapping(id);
-    const refreshed = await slackApi.mappings(orgId);
-    setMappings(refreshed);
-  };
-
-  return (
-    <div className="fixed inset-0 z-40 grid place-items-center bg-black/40 p-4">
-      <div className="w-full max-w-lg rounded-lg border border-app bg-app-surface shadow-xl">
-        <div className="flex items-center justify-between border-b border-app px-4 py-3">
-          <div className="flex items-center gap-2">
-            <Link2 className="size-4 text-app-faint" />
-            <h3 className="text-sm font-semibold">Bridge to Slack</h3>
-          </div>
-          <button onClick={onClose} className="text-app-faint hover:text-app">
-            ×
-          </button>
-        </div>
-
-        <div className="space-y-4 p-4 text-sm">
-          <p className="text-xs text-app-faint">
-            Pick a Stack62 room and a Slack channel. Messages flow both ways
-            while the bridge is active.
-          </p>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase text-app-faint">
-                Stack62 room
-              </label>
-              <select
-                value={selectedRoom}
-                onChange={(e) => setSelectedRoom(e.target.value)}
-                className="w-full rounded-md border border-app bg-app px-2 py-1.5 text-sm"
-              >
-                <option value="">Pick a room…</option>
-                {rooms
-                  .filter((r) => r.kind !== "coworker_private")
-                  .map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name || `(${r.kind})`}
-                    </option>
-                  ))}
-              </select>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase text-app-faint">
-                Slack channel
-              </label>
-              <select
-                value={selectedChannel}
-                onChange={(e) => setSelectedChannel(e.target.value)}
-                className="w-full rounded-md border border-app bg-app px-2 py-1.5 text-sm"
-              >
-                <option value="">Pick a channel…</option>
-                {channels.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    #{c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <button
-            onClick={createMapping}
-            disabled={submitting || !selectedRoom || !selectedChannel}
-            className="rounded-md bg-accent px-3 py-1.5 text-sm text-accent-fg hover:opacity-90 disabled:opacity-50"
-          >
-            {submitting ? "Linking…" : "Create bridge"}
-          </button>
-
-          {feedback && (
-            <p className="text-xs text-app-faint">{feedback}</p>
-          )}
-
-          {mappings.length > 0 && (
-            <section>
-              <h4 className="mb-1.5 text-xs font-semibold uppercase text-app-faint">
-                Active bridges ({mappings.length})
-              </h4>
-              <ul className="space-y-1.5 rounded-md border border-app bg-app p-2 text-xs">
-                {mappings.map((m) => (
-                  <li
-                    key={m.id}
-                    className="flex items-center justify-between gap-2"
-                  >
-                    <span className="truncate">
-                      {rooms.find((r) => r.id === m.roomId)?.name || "Room"}{" "}
-                      ↔ #{m.slackChannelName || m.slackChannelId}
-                    </span>
-                    <button
-                      onClick={() => revoke(m.id)}
-                      className="text-app-faint hover:text-red-500"
-                    >
-                      Unlink
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-        </div>
       </div>
     </div>
   );

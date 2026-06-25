@@ -85,7 +85,7 @@ export class WorkspaceImportService {
     if (wb.worksheets.length === 0) {
       throw new BadRequestException('Spreadsheet has no sheets.');
     }
-    
+
     // Step 1: Create empty sheet doc
     const createResult = await this.state.dispatch(
       {
@@ -103,11 +103,13 @@ export class WorkspaceImportService {
     );
 
     const docId = createResult.action.docId;
-    
+
     // Step 2: Read the current state to get sheet IDs
     const docState = await this.state.readState(docId, opts.actorUserId);
-    const { sheets } = docState.state as { sheets: Array<{ id: string; name: string }> };
-    let mainSheetId = sheets[0]?.id;
+    const { sheets } = docState.state as {
+      sheets: Array<{ id: string; name: string }>;
+    };
+    const mainSheetId = sheets[0]?.id;
     let totalRows = 0;
     let totalCols = 0;
 
@@ -115,7 +117,7 @@ export class WorkspaceImportService {
     for (let wsIdx = 0; wsIdx < wb.worksheets.length; wsIdx++) {
       const ws = wb.worksheets[wsIdx];
       if (!ws) continue;
-      
+
       // For first sheet, use existing sheetId; for others, add new sheet
       let sheetId: string;
       if (wsIdx === 0 && mainSheetId) {
@@ -135,7 +137,10 @@ export class WorkspaceImportService {
             actorUserId: opts.actorUserId,
           },
         );
-        const updatedState = await this.state.readState(docId, opts.actorUserId);
+        const updatedState = await this.state.readState(
+          docId,
+          opts.actorUserId,
+        );
         const updatedSheets = (updatedState.state as any).sheets;
         sheetId = updatedSheets[updatedSheets.length - 1]?.id;
       }
@@ -224,18 +229,24 @@ export class WorkspaceImportService {
     const docId = createResult.action.docId;
 
     // Step 2: Read presentation structure to find slides
-    const presentationXml = await zip.file('ppt/presentation.xml')?.async('string');
+    const presentationXml = await zip
+      .file('ppt/presentation.xml')
+      ?.async('string');
     if (!presentationXml) {
-      throw new BadRequestException('Invalid PPTX file: missing presentation.xml');
+      throw new BadRequestException(
+        'Invalid PPTX file: missing presentation.xml',
+      );
     }
 
     // Parse slide order from presentation XML
-    const slideRefs = [...presentationXml.matchAll(/<p:sldId[^>]*r:id="([^"]+)"/g)].map(
-      (match) => match[1],
-    );
+    const slideRefs = [
+      ...presentationXml.matchAll(/<p:sldId[^>]*r:id="([^"]+)"/g),
+    ].map((match) => match[1]);
 
     // Get slides relationships to map r:id to slide files
-    const relsXml = await zip.file('ppt/_rels/presentation.xml.rels')?.async('string');
+    const relsXml = await zip
+      .file('ppt/_rels/presentation.xml.rels')
+      ?.async('string');
     const slideFiles: string[] = [];
     if (relsXml) {
       for (const rId of slideRefs) {
@@ -278,7 +289,9 @@ export class WorkspaceImportService {
       if (!slideId) continue;
 
       // Extract text from slide
-      const textMatches = [...slideXml.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map((m) => m[1]);
+      const textMatches = [...slideXml.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(
+        (m) => m[1],
+      );
       const slideText = textMatches.join(' ').trim();
 
       // Add a text element to the slide if there's text
@@ -561,7 +574,8 @@ function pushText(stack: TipTapNode[], text: string, marks: string[]) {
     target.type === 'tableCell' ||
     target.type === 'tableHeader'
   ) {
-    let wrapper: TipTapNode | undefined = target.content?.[target.content.length - 1];
+    let wrapper: TipTapNode | undefined =
+      target.content?.[target.content.length - 1];
     if (!wrapper || wrapper.type !== 'paragraph') {
       wrapper = { type: 'paragraph', content: [] };
       pushChild(target, wrapper);

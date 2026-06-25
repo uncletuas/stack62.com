@@ -81,6 +81,7 @@ const TITLES: Record<ActivityKey, string> = {
   templates: "Templates",
   tools: "Tools",
   teams: "Team",
+  browser: "Browser",
   settings: "Settings",
 };
 

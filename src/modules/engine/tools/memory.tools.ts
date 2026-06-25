@@ -22,8 +22,15 @@ export class MemoryTools {
         'Record a long-term fact you should recall in later turns. Use sparingly — only for stable preferences, identifiers, or commitments that will likely matter again. Re-running with the same key replaces the prior value. Keys are short slugs (e.g. "user.office-hours", "qb.api-key-rotated").',
         {
           properties: {
-            key: { type: 'string', description: 'Short slug, unique per fact. e.g. "user.office-hours".' },
-            text: { type: 'string', description: 'The memory itself, written for the future-you.' },
+            key: {
+              type: 'string',
+              description:
+                'Short slug, unique per fact. e.g. "user.office-hours".',
+            },
+            text: {
+              type: 'string',
+              description: 'The memory itself, written for the future-you.',
+            },
             kind: {
               type: 'string',
               enum: ['fact', 'preference', 'episode'],
@@ -65,7 +72,10 @@ export class MemoryTools {
         'Search your own prior captured memories before answering. Returns up to 10 most recent matches whose key or text contains the query (case-insensitive substring). Use this when the user asks something where context from earlier sessions would help.',
         {
           properties: {
-            query: { type: 'string', description: 'What to look up (substring matched).' },
+            query: {
+              type: 'string',
+              description: 'What to look up (substring matched).',
+            },
           },
           required: ['query'],
         },

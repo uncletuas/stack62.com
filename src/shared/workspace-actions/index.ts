@@ -261,7 +261,12 @@ const SheetSetMergesSchema = z.object({
   /** Map from "r_c" key to {r,c,rs,cs} — rs/cs are row/col span counts. Pass {} to clear all merges. */
   merges: z.record(
     z.string(),
-    z.object({ r: positiveIntSchema, c: positiveIntSchema, rs: z.number().int().positive(), cs: z.number().int().positive() }),
+    z.object({
+      r: positiveIntSchema,
+      c: positiveIntSchema,
+      rs: z.number().int().positive(),
+      cs: z.number().int().positive(),
+    }),
   ),
 });
 
@@ -334,9 +339,7 @@ const SheetSetNamedRangeSchema = z.object({
 const SlidesAddSlideSchema = z.object({
   verb: z.literal('slides.add_slide'),
   afterSlideId: uuidSchema.optional(),
-  layout: z
-    .enum(['blank', 'title', 'title-content', 'two-column'])
-    .optional(),
+  layout: z.enum(['blank', 'title', 'title-content', 'two-column']).optional(),
   background: z.string().optional(), // hex color or url
 });
 
@@ -510,7 +513,10 @@ export type WorkspaceActionVerb = (typeof WORKSPACE_ACTION_VERBS)[number];
 export type WorkspaceDocKind = 'document' | 'sheet' | 'slides';
 
 /** Calculate inverse action to undo a given action */
-export function getInverseAction(action: WorkspaceActionPayload, previousState?: unknown): WorkspaceActionPayload | null {
+export function getInverseAction(
+  action: WorkspaceActionPayload,
+  previousState?: unknown,
+): WorkspaceActionPayload | null {
   switch (action.verb) {
     case 'sheet.set_cell':
       // Need previous cell value to invert

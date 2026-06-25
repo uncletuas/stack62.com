@@ -11,7 +11,7 @@ import { WorkspaceRealtimeService } from './modules/workspace-state/workspace-re
 
 async function bootstrap() {
   // rawBody:true keeps req.rawBody available for webhook signature
-  // verification (Slack /v1/slack/events, Stripe webhook later, etc.)
+  // verification (Paystack webhook, integration callbacks, etc.)
   const app = await NestFactory.create(AppModule, { rawBody: true });
 
   const configService = app.get(ConfigService);

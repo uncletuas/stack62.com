@@ -68,8 +68,8 @@ export class GoogleOAuthService {
   isConfigured(): boolean {
     return Boolean(
       this.configService.get<string>('GOOGLE_AUTH_CLIENT_ID') &&
-        this.configService.get<string>('GOOGLE_AUTH_CLIENT_SECRET') &&
-        this.configService.get<string>('GOOGLE_AUTH_REDIRECT_URI'),
+      this.configService.get<string>('GOOGLE_AUTH_CLIENT_SECRET') &&
+      this.configService.get<string>('GOOGLE_AUTH_REDIRECT_URI'),
     );
   }
 
@@ -132,7 +132,10 @@ export class GoogleOAuthService {
         metadata: {
           email: user.email,
           provider: 'google',
-          accountType: state.intent === 'signup_organization' ? 'organization' : 'individual',
+          accountType:
+            state.intent === 'signup_organization'
+              ? 'organization'
+              : 'individual',
         },
       });
 
@@ -268,9 +271,7 @@ export class GoogleOAuthService {
       client_secret: this.configService.get<string>(
         'GOOGLE_AUTH_CLIENT_SECRET',
       )!,
-      redirect_uri: this.configService.get<string>(
-        'GOOGLE_AUTH_REDIRECT_URI',
-      )!,
+      redirect_uri: this.configService.get<string>('GOOGLE_AUTH_REDIRECT_URI')!,
       grant_type: 'authorization_code',
     });
     const res = await fetch(GOOGLE_TOKEN_URL, {

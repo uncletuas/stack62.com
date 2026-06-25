@@ -1,11 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import {
-  Document,
-  HeadingLevel,
-  Packer,
-  Paragraph,
-  TextRun,
-} from 'docx';
+import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
 import * as Excel from 'exceljs';
 import PptxGenJS from 'pptxgenjs';
 import * as Y from 'yjs';
@@ -41,19 +35,14 @@ export class WorkspaceExportService {
     actorUserId: string,
     format: 'docx' | 'xlsx' | 'pptx',
   ): Promise<{ buffer: Buffer; filename: string; mimeType: string }> {
-    const { doc, bytes } = await this.state.readBinaryState(
-      docId,
-      actorUserId,
-    );
+    const { doc, bytes } = await this.state.readBinaryState(docId, actorUserId);
     const yDoc = new Y.Doc();
     if (bytes && bytes.length > 0) {
       Y.applyUpdate(yDoc, new Uint8Array(bytes));
     }
     if (format === 'docx') {
       if (doc.kind !== 'document') {
-        throw new BadRequestException(
-          `Cannot export ${doc.kind} as .docx.`,
-        );
+        throw new BadRequestException(`Cannot export ${doc.kind} as .docx.`);
       }
       const buffer = await this.exportDocx(yDoc, doc.title);
       return {
@@ -65,9 +54,7 @@ export class WorkspaceExportService {
     }
     if (format === 'xlsx') {
       if (doc.kind !== 'sheet') {
-        throw new BadRequestException(
-          `Cannot export ${doc.kind} as .xlsx.`,
-        );
+        throw new BadRequestException(`Cannot export ${doc.kind} as .xlsx.`);
       }
       const buffer = await this.exportXlsx(yDoc, doc.title);
       return {
@@ -79,9 +66,7 @@ export class WorkspaceExportService {
     }
     if (format === 'pptx') {
       if (doc.kind !== 'slides') {
-        throw new BadRequestException(
-          `Cannot export ${doc.kind} as .pptx.`,
-        );
+        throw new BadRequestException(`Cannot export ${doc.kind} as .pptx.`);
       }
       const buffer = await this.exportPptx(yDoc, doc.title);
       return {
@@ -98,7 +83,11 @@ export class WorkspaceExportService {
 
   private async exportDocx(yDoc: Y.Doc, title: string): Promise<Buffer> {
     const snap = snapshotDoc(yDoc, 'document') as {
-      blocks: Array<{ id: string; type: string; data: Record<string, unknown> }>;
+      blocks: Array<{
+        id: string;
+        type: string;
+        data: Record<string, unknown>;
+      }>;
     };
     // Phase 1 of the editor stash inserts via doc.insert_block land
     // in a "blocks" Y.Array; the TipTap XmlFragment is owned by the
@@ -122,10 +111,7 @@ export class WorkspaceExportService {
       if (!text) continue;
       const type = block.data?.type ?? block.type;
       if (type === 'heading') {
-        const level = Math.max(
-          1,
-          Math.min(4, Number(block.data?.level ?? 1)),
-        );
+        const level = Math.max(1, Math.min(4, Number(block.data?.level ?? 1)));
         paragraphs.push(
           new Paragraph({
             text,
@@ -137,10 +123,7 @@ export class WorkspaceExportService {
             ][level - 1],
           }),
         );
-      } else if (
-        type === 'bulletList' ||
-        block.type === 'bullets'
-      ) {
+      } else if (type === 'bulletList' || block.type === 'bullets') {
         const items = (block.data?.items as string[] | undefined) ?? [];
         for (const item of items) {
           paragraphs.push(
@@ -173,7 +156,12 @@ export class WorkspaceExportService {
 
   private async exportXlsx(yDoc: Y.Doc, title: string): Promise<Buffer> {
     const snap = snapshotDoc(yDoc, 'sheet') as {
-      sheets: Array<{ id: string; name: string; rowCount: number; colCount: number }>;
+      sheets: Array<{
+        id: string;
+        name: string;
+        rowCount: number;
+        colCount: number;
+      }>;
       cells: Record<string, { value?: unknown; formula?: string }>;
     };
     const wb = new Excel.Workbook();
@@ -276,9 +264,7 @@ export class WorkspaceExportService {
     const arrayBuf = (await pres.write({ outputType: 'nodebuffer' })) as
       | Buffer
       | ArrayBuffer;
-    return Buffer.isBuffer(arrayBuf)
-      ? arrayBuf
-      : Buffer.from(arrayBuf as ArrayBuffer);
+    return Buffer.isBuffer(arrayBuf) ? arrayBuf : Buffer.from(arrayBuf);
   }
 }
 

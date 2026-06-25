@@ -15,6 +15,9 @@ import { FileEditor } from "./FileEditor";
 const BriefingEditor = lazy(() =>
   import("./BriefingEditor").then((m) => ({ default: m.BriefingEditor })),
 );
+const BrowserEditor = lazy(() =>
+  import("./BrowserEditor").then((m) => ({ default: m.BrowserEditor })),
+);
 const FilesExplorerEditor = lazy(() =>
   import("./FilesExplorerEditor").then((m) => ({
     default: m.FilesExplorerEditor,
@@ -25,6 +28,9 @@ const HistoryEditor = lazy(() =>
 );
 const InboxEditor = lazy(() =>
   import("./InboxEditor").then((m) => ({ default: m.InboxEditor })),
+);
+const EmailInboxEditor = lazy(() =>
+  import("./EmailInboxEditor").then((m) => ({ default: m.EmailInboxEditor })),
 );
 const JobEditor = lazy(() =>
   import("./JobEditor").then((m) => ({ default: m.JobEditor })),
@@ -146,6 +152,8 @@ function RenderEditor() {
       return <ShareEditor key={activeTab.id} tab={activeTab} />;
     case "tools":
       return <ToolsEditor key={activeTab.id} tab={activeTab} />;
+    case "email-inbox":
+      return <EmailInboxEditor />;
     case "teams":
       return <TeamsEditor />;
     case "inbox":
@@ -158,6 +166,8 @@ function RenderEditor() {
       return <TemplatesEditor />;
     case "files-explorer":
       return <FilesExplorerEditor />;
+    case "browser":
+      return <BrowserEditor key={activeTab.id} tab={activeTab} />;
     case "room":
       return <RoomEditor key={activeTab.id} />;
     case "streaming-doc":

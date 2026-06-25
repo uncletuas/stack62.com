@@ -509,6 +509,27 @@ export class RunnerService
     return abs;
   }
 
+  /**
+   * Postgres schema name for a system. Keyed on systemId (not deploymentId)
+   * so a system's data survives redeploys. Sanitized to a safe identifier.
+   */
+  private schemaName(systemId: string): string {
+    return `sys_${systemId.replace(/[^a-z0-9]/gi, '').toLowerCase()}`;
+  }
+
+  /**
+   * Provision the per-system Postgres schema before the generated app boots.
+   * The generated app also runs CREATE SCHEMA IF NOT EXISTS defensively, but
+   * doing it here guarantees the schema exists and is reused across redeploys.
+   */
+  private async ensureSchema(systemId: string): Promise<string> {
+    const schema = this.schemaName(systemId);
+    await this.deploymentsRepository.manager.query(
+      `CREATE SCHEMA IF NOT EXISTS "${schema}"`,
+    );
+    return schema;
+  }
+
   private async buildAndStart(deploymentId: string) {
     const d = await this.deploymentsRepository.findOneByOrFail({
       id: deploymentId,
@@ -651,6 +672,8 @@ export class RunnerService
       detail: 'starting',
     });
 
+    const schema = await this.ensureSchema(d.systemId);
+
     const port = await this.allocatePort();
     this.runnerEventsService.emit({
       systemId: d.systemId,
@@ -706,6 +729,7 @@ export class RunnerService
             PORT: port,
             NODE_ENV: 'production',
             STACK62_SANDBOX: '1',
+            SYSTEM_SCHEMA: schema,
           }),
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
@@ -833,6 +857,8 @@ export class RunnerService
       detail: 'starting in Docker sandbox',
     });
 
+    const schema = await this.ensureSchema(d.systemId);
+
     const port = await this.allocatePort();
     const containerName = `stack62-${d.id.replace(/-/g, '').slice(0, 24)}`;
     const logPath = path.join(this.logsRoot, `${d.id}.log`);
@@ -854,6 +880,12 @@ export class RunnerService
       'NODE_ENV=production',
       '-e',
       'STACK62_SANDBOX=1',
+      '-e',
+      `SYSTEM_SCHEMA=${schema}`,
+      '-e',
+      `DATABASE_URL=${process.env.DATABASE_URL ?? ''}`,
+      '-e',
+      `DATABASE_SSL=${process.env.DATABASE_SSL ?? ''}`,
       '--memory',
       `${this.nodeMaxOldSpaceMb}m`,
       '--cpus',
@@ -1040,7 +1072,7 @@ export class RunnerService
         errorMessage:
           code === 0
             ? null
-            : errorMessage ?? `Process exited with code ${code}`,
+            : (errorMessage ?? `Process exited with code ${code}`),
         pid: null,
       },
     );

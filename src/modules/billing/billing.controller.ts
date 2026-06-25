@@ -1,11 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Post,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Public } from '../../shared/decorators/public.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -39,10 +32,7 @@ export class BillingController {
 
   @ApiBearerAuth()
   @Post('checkout')
-  startCheckout(
-    @Body() body: StartCheckoutDto,
-    @CurrentUser() user: JwtUser,
-  ) {
+  startCheckout(@Body() body: StartCheckoutDto, @CurrentUser() user: JwtUser) {
     return this.billingService.startCheckout({
       organizationId: body.organizationId,
       actorUserId: user.userId,

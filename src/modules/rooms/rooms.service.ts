@@ -80,10 +80,7 @@ export class RoomsService {
     );
 
     // The creator is always an owner.
-    const memberIds = new Set([
-      actorUserId,
-      ...(payload.memberUserIds || []),
-    ]);
+    const memberIds = new Set([actorUserId, ...(payload.memberUserIds || [])]);
     await this.membersRepo.save(
       Array.from(memberIds).map((userId, idx) =>
         this.membersRepo.create({
@@ -221,8 +218,10 @@ export class RoomsService {
     options: { authorKind?: 'user' | 'coworker' | 'system' } = {},
   ): Promise<RoomMessageEntity> {
     const room = await this.getRoom(roomId, userId);
-    if (!payload.body || !payload.body.trim()) {
-      throw new BadRequestException('Message body is required.');
+    if (!payload.body?.trim() && !payload.attachments?.length) {
+      throw new BadRequestException(
+        'A message needs body text or at least one attachment.',
+      );
     }
 
     const message = await this.messagesRepo.save(
@@ -230,7 +229,7 @@ export class RoomsService {
         roomId,
         authorKind: options.authorKind ?? 'user',
         authorUserId: options.authorKind === 'user' ? userId : null,
-        body: payload.body.trim(),
+        body: (payload.body ?? '').trim(),
         parentMessageId: payload.parentMessageId ?? null,
         mentions: payload.mentions?.length ? payload.mentions : null,
         attachments: payload.attachments?.length ? payload.attachments : null,
@@ -298,10 +297,7 @@ export class RoomsService {
     actorUserId: string,
   ): Promise<void> {
     const actorMember = await this.requireMember(roomId, actorUserId);
-    if (
-      actorMember.role === 'member' &&
-      actorUserId !== targetUserId
-    ) {
+    if (actorMember.role === 'member' && actorUserId !== targetUserId) {
       throw new ForbiddenException(
         'Only room owners or admins can remove other members.',
       );

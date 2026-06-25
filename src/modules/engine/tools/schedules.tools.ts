@@ -29,7 +29,8 @@ export class SchedulesTools {
           properties: {
             title: {
               type: 'string',
-              description: 'Short label the user will recognise in the schedules list.',
+              description:
+                'Short label the user will recognise in the schedules list.',
             },
             kind: {
               type: 'string',
@@ -60,7 +61,10 @@ export class SchedulesTools {
               description:
                 'When true (default), the Coworker handles the schedule autonomously when autonomousMode is on. When false, the schedule reminds the human only.',
             },
-            taskId: { type: 'string', description: 'Link to an existing task.' },
+            taskId: {
+              type: 'string',
+              description: 'Link to an existing task.',
+            },
             systemId: { type: 'string', description: 'Optional system scope.' },
           },
           required: ['title', 'kind', 'startsAt'],
@@ -76,8 +80,7 @@ export class SchedulesTools {
             workspaceId: ctx.workspaceId,
             systemId:
               typeof input.systemId === 'string' ? input.systemId : undefined,
-            taskId:
-              typeof input.taskId === 'string' ? input.taskId : undefined,
+            taskId: typeof input.taskId === 'string' ? input.taskId : undefined,
             title: String(input.title),
             kind: String(input.kind),
             startsAt: new Date(String(input.startsAt)),
@@ -128,7 +131,8 @@ export class SchedulesTools {
           properties: {
             includePast: {
               type: 'boolean',
-              description: 'Set true to include schedules already past their startsAt.',
+              description:
+                'Set true to include schedules already past their startsAt.',
             },
           },
         },
@@ -146,25 +150,27 @@ export class SchedulesTools {
             },
             ctx.actorUserId,
           );
-          const trimmed = list.slice(0, 20).map(
-            (s: {
-              id: string;
-              title: string;
-              kind: string;
-              status: string;
-              startsAt: Date;
-              recurrenceRule: string | null;
-              assignedToCoworker: boolean;
-            }) => ({
-              id: s.id,
-              title: s.title,
-              kind: s.kind,
-              status: s.status,
-              startsAt: s.startsAt,
-              recurrenceRule: s.recurrenceRule,
-              assignedToCoworker: s.assignedToCoworker,
-            }),
-          );
+          const trimmed = list
+            .slice(0, 20)
+            .map(
+              (s: {
+                id: string;
+                title: string;
+                kind: string;
+                status: string;
+                startsAt: Date;
+                recurrenceRule: string | null;
+                assignedToCoworker: boolean;
+              }) => ({
+                id: s.id,
+                title: s.title,
+                kind: s.kind,
+                status: s.status,
+                startsAt: s.startsAt,
+                recurrenceRule: s.recurrenceRule,
+                assignedToCoworker: s.assignedToCoworker,
+              }),
+            );
           return {
             output: { schedules: trimmed },
             summary: `${trimmed.length} schedule${trimmed.length === 1 ? '' : 's'}.`,

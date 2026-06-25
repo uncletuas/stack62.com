@@ -7,7 +7,10 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { ActivityService } from '../activity/activity.service';
 import { AuditService } from '../audit/audit.service';
+import { FilesService } from '../files/files.service';
 import { IntegrationsService } from './integrations.service';
+import { WhatsAppConversationService } from './whatsapp-conversation.service';
+import { WhatsAppWebService } from './whatsapp-web.service';
 
 interface DispatchContext {
   organizationId: string;
@@ -21,16 +24,14 @@ interface SendEmailInput {
   subject: string;
   text?: string;
   html?: string;
+  attachmentFileIds?: string[];
 }
 
 interface SendMessageInput {
   to: string;
   message: string;
-}
-
-interface SlackPostInput {
-  channel?: string;
-  text: string;
+  /** Reply to an existing stored message (quoted), web channel only. */
+  replyToMessageId?: string;
 }
 
 interface DiscordPostInput {
@@ -64,6 +65,23 @@ interface PaystackInitInput {
   metadata?: Record<string, unknown>;
 }
 
+/** Map a file's MIME/extension to a WhatsApp media kind. */
+function mediaTypeForMime(
+  mime: string,
+  filename: string,
+): 'image' | 'video' | 'audio' | 'document' {
+  const m = (mime || '').toLowerCase();
+  if (m.startsWith('image/')) return 'image';
+  if (m.startsWith('video/')) return 'video';
+  if (m.startsWith('audio/')) return 'audio';
+  // Fall back to extension when the MIME is generic (octet-stream).
+  const ext = (filename.split('.').pop() ?? '').toLowerCase();
+  if (/^(png|jpe?g|gif|webp|bmp|heic)$/.test(ext)) return 'image';
+  if (/^(mp4|mov|webm|mkv|avi|m4v)$/.test(ext)) return 'video';
+  if (/^(mp3|ogg|opus|wav|m4a|aac)$/.test(ext)) return 'audio';
+  return 'document';
+}
+
 @Injectable()
 export class ProviderRuntimeService {
   private readonly logger = new Logger(ProviderRuntimeService.name);
@@ -73,54 +91,167 @@ export class ProviderRuntimeService {
     private readonly activity: ActivityService,
     private readonly audit: AuditService,
     private readonly configService: ConfigService,
+    private readonly whatsAppWeb: WhatsAppWebService,
+    private readonly files: FilesService,
+    private readonly conversations: WhatsAppConversationService,
   ) {}
 
-  async sendEmail(ctx: DispatchContext, input: SendEmailInput) {
-    const conn = await this.integrations.resolveConnection(
+  /**
+   * Send a media attachment over WhatsApp from a stored file. Routes through a
+   * linked device (phone-number pairing), which is the surface the in-app
+   * WhatsApp thread uses. Records the outbound message into the conversation
+   * thread so it appears immediately. Cloud-API media upload isn't wired yet —
+   * we fail clearly rather than silently dropping the attachment.
+   */
+  async sendWhatsAppMedia(
+    ctx: DispatchContext & { actorUserId: string },
+    input: {
+      to: string;
+      fileId: string;
+      caption?: string;
+      ptt?: boolean;
+      forceType?: 'image' | 'video' | 'audio' | 'document' | 'sticker';
+      replyToMessageId?: string;
+    },
+  ) {
+    const webConn = await this.integrations.resolveConnection(
       ctx.organizationId,
-      'resend',
+      'whatsapp-web',
       ctx.workspaceId,
     );
-    if (conn) {
-      const creds = this.integrations.decryptCredentials(conn);
-      const apiKey = creds?.apiKey as string | undefined;
-      const from = (conn.config?.fromEmail as string | undefined) ??
-        this.configService.get<string>('RESEND_FROM_EMAIL');
-      if (!apiKey || !from) {
-        throw new BadRequestException(
-          'Resend connection is missing apiKey or fromEmail.',
-        );
-      }
-      const result = await this.postJson<{ id?: string }>(
-        'https://api.resend.com/emails',
-        { from, to: input.to, subject: input.subject, text: input.text, html: input.html },
-        { Authorization: `Bearer ${apiKey}` },
-      );
-      await this.log(ctx, 'integration.email.send', conn.id, conn.providerKey, {
-        toCount: input.to.length,
-        subject: input.subject,
-      });
-      return { provider: 'resend', id: result.id ?? null, ok: true };
-    }
-
-    const smtp = await this.integrations.resolveConnection(
-      ctx.organizationId,
-      'smtp-email',
-      ctx.workspaceId,
-    );
-    if (smtp) {
-      // Without a Node SMTP client dependency, surface a clear error.
+    if (!webConn || !(await this.whatsAppWeb.isReady(webConn.id))) {
       throw new BadRequestException(
-        'SMTP transport is configured but the runtime SMTP client is not bundled. Use Resend or another email provider until SMTP is enabled.',
+        'Sending media on WhatsApp needs a linked device. Pair a phone number in Settings ▸ WhatsApp first.',
       );
     }
+    const { file, buffer } = await this.files.read(
+      input.fileId,
+      ctx.actorUserId,
+    );
+    const mediaType =
+      input.forceType ?? mediaTypeForMime(file.mimeType, file.filename);
+    const quoted = await this.resolveQuoted(input.replyToMessageId);
+    const sent = await this.whatsAppWeb.sendMedia(
+      webConn,
+      input.to,
+      {
+        buffer,
+        mime: file.mimeType,
+        filename: file.filename,
+        mediaType,
+        ptt: input.ptt,
+      },
+      input.caption,
+      ctx,
+      quoted ? { quoted: quoted.stub } : {},
+    );
+    await this.conversations.recordOutbound({
+      organizationId: ctx.organizationId,
+      workspaceId: ctx.workspaceId ?? null,
+      connectionId: webConn.id,
+      channel: 'web',
+      contactPhone: input.to,
+      text: input.caption ?? '',
+      waMessageId: sent.id,
+      authoredBy: ctx.source === 'engine' ? 'coworker' : 'user',
+      status: 'sent',
+      media: {
+        mediaType,
+        mediaFileId: file.id,
+        mediaMimeType: file.mimeType,
+        mediaFilename: file.filename,
+      },
+      replyToMessageId: quoted?.messageId ?? null,
+      replyToPreview: quoted?.preview ?? null,
+    });
+    return sent;
+  }
 
-    throw new NotFoundException(
-      'No active email connection. Connect Resend in the Marketplace.',
+  /** Resolve a stored message id into a Baileys quoted stub + preview. */
+  private async resolveQuoted(messageId?: string) {
+    if (!messageId) return null;
+    try {
+      const message = await this.conversations.getMessageById(messageId);
+      const conversation = await this.conversations.getConversationById(
+        message.conversationId,
+      );
+      const preview =
+        message.text ||
+        (message.mediaType ? `[${message.mediaType}]` : '') ||
+        ' ';
+      const stub = this.whatsAppWeb.buildQuoted({
+        contactJid: conversation.contactJid,
+        contactPhone: conversation.contactPhone,
+        waMessageId: message.waMessageId,
+        fromMe: message.direction === 'outbound',
+        preview,
+      });
+      if (!stub) return null;
+      return { stub, messageId: message.id, preview };
+    } catch {
+      return null;
+    }
+  }
+
+  async sendEmail(ctx: DispatchContext, input: SendEmailInput) {
+    // Sends from the org's own connected mailbox (Gmail OAuth, SMTP, or
+    // Resend). Resolution + logging live in IntegrationsService so the
+    // Compose UI and the Coworker share one code path. No shared-key fallback.
+    return this.integrations.sendOrgEmail(
+      {
+        organizationId: ctx.organizationId,
+        workspaceId: ctx.workspaceId,
+        actorUserId: ctx.actorUserId,
+      },
+      {
+        to: input.to,
+        subject: input.subject,
+        text: input.text,
+        html: input.html,
+        attachmentFileIds: input.attachmentFileIds,
+      },
     );
   }
 
   async sendWhatsApp(ctx: DispatchContext, input: SendMessageInput) {
+    // Prefer a linked "device" (WhatsApp Web) connection when one is ready —
+    // that's the personal/business account a coworker paired by phone number.
+    const webConn = await this.integrations.resolveConnection(
+      ctx.organizationId,
+      'whatsapp-web',
+      ctx.workspaceId,
+    );
+    if (webConn && (await this.whatsAppWeb.isReady(webConn.id))) {
+      const quoted = await this.resolveQuoted(input.replyToMessageId);
+      const sent = await this.whatsAppWeb.sendText(
+        webConn,
+        input.to,
+        input.message,
+        ctx,
+        quoted ? { quoted: quoted.stub } : {},
+      );
+      // For replies we record at send time so the reply context persists
+      // (the fromMe echo would otherwise overwrite with no reply info; it
+      // dedupes on waMessageId, so this stays a single row). Plain messages
+      // keep relying on the echo to avoid changing existing behaviour.
+      if (quoted) {
+        await this.conversations.recordOutbound({
+          organizationId: ctx.organizationId,
+          workspaceId: ctx.workspaceId ?? null,
+          connectionId: webConn.id,
+          channel: 'web',
+          contactPhone: input.to,
+          text: input.message,
+          waMessageId: sent.id,
+          authoredBy: ctx.source === 'engine' ? 'coworker' : 'user',
+          status: 'sent',
+          replyToMessageId: quoted.messageId,
+          replyToPreview: quoted.preview,
+        });
+      }
+      return sent;
+    }
+
     const conn = await this.integrations.resolveConnection(
       ctx.organizationId,
       'whatsapp-cloud',
@@ -128,7 +259,7 @@ export class ProviderRuntimeService {
     );
     if (!conn) {
       throw new NotFoundException(
-        'No WhatsApp Cloud connection. Add one in the Marketplace.',
+        'No WhatsApp connection. Link a device (phone-number pairing) or add WhatsApp Cloud in the Marketplace.',
       );
     }
     const creds = this.integrations.decryptCredentials(conn);
@@ -154,9 +285,15 @@ export class ProviderRuntimeService {
       },
       { Authorization: `Bearer ${accessToken}` },
     );
-    await this.log(ctx, 'integration.whatsapp.send', conn.id, conn.providerKey, {
-      to: this.maskPhone(input.to),
-    });
+    await this.log(
+      ctx,
+      'integration.whatsapp.send',
+      conn.id,
+      conn.providerKey,
+      {
+        to: this.maskPhone(input.to),
+      },
+    );
     return {
       provider: 'whatsapp-cloud',
       id: result.messages?.[0]?.id ?? null,
@@ -203,46 +340,14 @@ export class ProviderRuntimeService {
     );
     const data = (await response.json()) as { sid?: string; message?: string };
     if (!response.ok) {
-      throw new BadRequestException(data.message ?? `Twilio failed (${response.status})`);
+      throw new BadRequestException(
+        data.message ?? `Twilio failed (${response.status})`,
+      );
     }
     await this.log(ctx, 'integration.sms.send', conn.id, conn.providerKey, {
       to: this.maskPhone(input.to),
     });
     return { provider: 'sms-twilio', id: data.sid ?? null, ok: true };
-  }
-
-  async postSlack(ctx: DispatchContext, input: SlackPostInput) {
-    const conn = await this.integrations.resolveConnection(
-      ctx.organizationId,
-      'slack',
-      ctx.workspaceId,
-    );
-    if (!conn) {
-      throw new NotFoundException(
-        'No Slack connection. Add one in the Marketplace.',
-      );
-    }
-    const creds = this.integrations.decryptCredentials(conn);
-    const botToken = creds?.botToken as string | undefined;
-    const channel =
-      input.channel ?? (conn.config?.defaultChannel as string | undefined);
-    if (!botToken || !channel) {
-      throw new BadRequestException(
-        'Slack connection is missing botToken or default channel.',
-      );
-    }
-    const result = await this.postJson<{ ok: boolean; ts?: string; error?: string }>(
-      'https://slack.com/api/chat.postMessage',
-      { channel, text: input.text },
-      { Authorization: `Bearer ${botToken}` },
-    );
-    if (!result.ok) {
-      throw new BadRequestException(`Slack: ${result.error ?? 'unknown error'}`);
-    }
-    await this.log(ctx, 'integration.slack.post', conn.id, conn.providerKey, {
-      channel,
-    });
-    return { provider: 'slack', id: result.ts ?? null, ok: true };
   }
 
   async postDiscord(ctx: DispatchContext, input: DiscordPostInput) {
@@ -273,7 +378,13 @@ export class ProviderRuntimeService {
         `Discord webhook failed (${response.status})`,
       );
     }
-    await this.log(ctx, 'integration.discord.post', conn.id, conn.providerKey, {});
+    await this.log(
+      ctx,
+      'integration.discord.post',
+      conn.id,
+      conn.providerKey,
+      {},
+    );
     return { provider: 'discord', ok: true };
   }
 
@@ -307,9 +418,17 @@ export class ProviderRuntimeService {
       {},
     );
     if (!result.ok) {
-      throw new BadRequestException(`Telegram: ${result.description ?? 'unknown error'}`);
+      throw new BadRequestException(
+        `Telegram: ${result.description ?? 'unknown error'}`,
+      );
     }
-    await this.log(ctx, 'integration.telegram.send', conn.id, conn.providerKey, {});
+    await this.log(
+      ctx,
+      'integration.telegram.send',
+      conn.id,
+      conn.providerKey,
+      {},
+    );
     return {
       provider: 'telegram',
       id: result.result?.message_id ?? null,
@@ -327,7 +446,11 @@ export class ProviderRuntimeService {
     if (!baseUrl) {
       throw new BadRequestException('No webhook URL configured.');
     }
-    const method = (input.method ?? (conn?.config?.method as string) ?? 'POST').toUpperCase();
+    const method = (
+      input.method ??
+      (conn?.config?.method as string) ??
+      'POST'
+    ).toUpperCase();
     const headers: Record<string, string> = { ...(input.headers ?? {}) };
     if (conn) {
       const creds = this.integrations.decryptCredentials(conn);
@@ -351,8 +474,8 @@ export class ProviderRuntimeService {
         method === 'GET'
           ? undefined
           : typeof input.body === 'string'
-          ? input.body
-          : JSON.stringify(input.body ?? {}),
+            ? input.body
+            : JSON.stringify(input.body ?? {}),
     });
     const text = await response.text();
     let parsed: unknown = text;
@@ -362,10 +485,16 @@ export class ProviderRuntimeService {
       /* leave as text */
     }
     if (conn) {
-      await this.log(ctx, 'integration.http.request', conn.id, conn.providerKey, {
-        method,
-        status: response.status,
-      });
+      await this.log(
+        ctx,
+        'integration.http.request',
+        conn.id,
+        conn.providerKey,
+        {
+          method,
+          status: response.status,
+        },
+      );
     }
     return {
       ok: response.ok,
@@ -384,8 +513,7 @@ export class ProviderRuntimeService {
     const secretKey =
       (this.integrations.decryptCredentials(conn!)?.secretKey as
         | string
-        | undefined) ??
-      this.configService.get<string>('PAYSTACK_SECRET_KEY');
+        | undefined) ?? this.configService.get<string>('PAYSTACK_SECRET_KEY');
     if (!secretKey) {
       throw new BadRequestException('Paystack is not configured.');
     }
@@ -413,9 +541,15 @@ export class ProviderRuntimeService {
       { Authorization: `Bearer ${secretKey}` },
     );
     if (conn) {
-      await this.log(ctx, 'integration.payment.initialize', conn.id, conn.providerKey, {
-        amountKobo: input.amountKobo,
-      });
+      await this.log(
+        ctx,
+        'integration.payment.initialize',
+        conn.id,
+        conn.providerKey,
+        {
+          amountKobo: input.amountKobo,
+        },
+      );
     }
     return {
       provider: 'paystack',
@@ -424,6 +558,64 @@ export class ProviderRuntimeService {
       authorizationUrl: result.data?.authorization_url ?? null,
       accessCode: result.data?.access_code ?? null,
       reference: result.data?.reference ?? null,
+    };
+  }
+
+  async paystackVerify(ctx: DispatchContext, input: { reference: string }) {
+    const conn = await this.integrations.resolveConnection(
+      ctx.organizationId,
+      'paystack',
+      ctx.workspaceId,
+    );
+    const secretKey =
+      (conn
+        ? (this.integrations.decryptCredentials(conn)?.secretKey as
+            | string
+            | undefined)
+        : undefined) ?? this.configService.get<string>('PAYSTACK_SECRET_KEY');
+    if (!secretKey) {
+      throw new BadRequestException('Paystack is not configured.');
+    }
+    const response = await fetch(
+      `https://api.paystack.co/transaction/verify/${encodeURIComponent(
+        input.reference,
+      )}`,
+      { headers: { Authorization: `Bearer ${secretKey}` } },
+    );
+    const data = (await response.json()) as {
+      status?: boolean;
+      message?: string;
+      data?: {
+        status?: string;
+        amount?: number;
+        reference?: string;
+        customer?: { email?: string };
+      };
+    };
+    if (!response.ok) {
+      throw new BadRequestException(
+        data.message ?? `Paystack verify failed (${response.status})`,
+      );
+    }
+    if (conn) {
+      await this.log(
+        ctx,
+        'integration.payment.verify',
+        conn.id,
+        conn.providerKey,
+        {
+          reference: input.reference,
+          paymentStatus: data.data?.status ?? null,
+        },
+      );
+    }
+    return {
+      provider: 'paystack',
+      ok: Boolean(data.status),
+      paymentStatus: data.data?.status ?? null,
+      amountKobo: data.data?.amount ?? null,
+      reference: data.data?.reference ?? input.reference,
+      customerEmail: data.data?.customer?.email ?? null,
     };
   }
 
@@ -482,9 +674,7 @@ export class ProviderRuntimeService {
     key: string,
   ) {
     const { createHash, createHmac } = await import('node:crypto');
-    const amzDate = new Date()
-      .toISOString()
-      .replace(/[:-]|\.\d{3}/g, '');
+    const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
     const dateStamp = amzDate.slice(0, 8);
     const payloadHash = createHash('sha256').update(body).digest('hex');
     const host = `${bucket}.s3.${region}.amazonaws.com`;
@@ -507,11 +697,17 @@ export class ProviderRuntimeService {
       credentialScope,
       createHash('sha256').update(canonicalRequest).digest('hex'),
     ].join('\n');
-    const kDate = createHmac('sha256', `AWS4${secretAccessKey}`).update(dateStamp).digest();
+    const kDate = createHmac('sha256', `AWS4${secretAccessKey}`)
+      .update(dateStamp)
+      .digest();
     const kRegion = createHmac('sha256', kDate).update(region).digest();
     const kService = createHmac('sha256', kRegion).update('s3').digest();
-    const kSigning = createHmac('sha256', kService).update('aws4_request').digest();
-    const signature = createHmac('sha256', kSigning).update(stringToSign).digest('hex');
+    const kSigning = createHmac('sha256', kService)
+      .update('aws4_request')
+      .digest();
+    const signature = createHmac('sha256', kSigning)
+      .update(stringToSign)
+      .digest('hex');
     const authorization =
       `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${credentialScope}, ` +
       `SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, ` +
@@ -564,6 +760,20 @@ export class ProviderRuntimeService {
       connectionId,
       actorUserId,
     );
+    // WhatsApp Web stores its session separately (no connection credentials);
+    // "verify" means: is the paired device live?
+    if (conn.providerKey === 'whatsapp-web') {
+      const ready = await this.whatsAppWeb.isReady(conn.id);
+      conn.lastCheckedAt = new Date();
+      await this.integrations.touchConnection(conn);
+      return ready
+        ? { ok: true, message: 'WhatsApp device is linked and online.' }
+        : {
+            ok: false,
+            message:
+              'WhatsApp device is not linked yet. Start the link flow and enter the pairing code.',
+          };
+    }
     const creds = this.integrations.decryptCredentials(conn);
     if (!creds) {
       return { ok: false, message: 'No credentials stored.' };
@@ -576,25 +786,25 @@ export class ProviderRuntimeService {
           });
           return res.ok
             ? { ok: true, message: 'Resend key accepted.' }
-            : { ok: false, message: `Resend rejected the key (${res.status}).` };
-        }
-        case 'slack': {
-          const res = await fetch('https://slack.com/api/auth.test', {
-            headers: { Authorization: `Bearer ${creds.botToken}` },
-          });
-          const data = (await res.json()) as { ok?: boolean; error?: string };
-          return data.ok
-            ? { ok: true, message: 'Slack token accepted.' }
-            : { ok: false, message: `Slack: ${data.error ?? 'auth failed'}` };
+            : {
+                ok: false,
+                message: `Resend rejected the key (${res.status}).`,
+              };
         }
         case 'telegram': {
           const res = await fetch(
             `https://api.telegram.org/bot${creds.botToken}/getMe`,
           );
-          const data = (await res.json()) as { ok?: boolean; description?: string };
+          const data = (await res.json()) as {
+            ok?: boolean;
+            description?: string;
+          };
           return data.ok
             ? { ok: true, message: 'Telegram bot reachable.' }
-            : { ok: false, message: `Telegram: ${data.description ?? 'failed'}` };
+            : {
+                ok: false,
+                message: `Telegram: ${data.description ?? 'failed'}`,
+              };
         }
         case 'hubspot': {
           const res = await fetch(
@@ -603,7 +813,10 @@ export class ProviderRuntimeService {
           );
           return res.ok
             ? { ok: true, message: 'HubSpot token accepted.' }
-            : { ok: false, message: `HubSpot rejected the token (${res.status}).` };
+            : {
+                ok: false,
+                message: `HubSpot rejected the token (${res.status}).`,
+              };
         }
         case 'notion': {
           const res = await fetch('https://api.notion.com/v1/users/me', {
@@ -614,7 +827,10 @@ export class ProviderRuntimeService {
           });
           return res.ok
             ? { ok: true, message: 'Notion token accepted.' }
-            : { ok: false, message: `Notion rejected the token (${res.status}).` };
+            : {
+                ok: false,
+                message: `Notion rejected the token (${res.status}).`,
+              };
         }
         case 'airtable': {
           const res = await fetch('https://api.airtable.com/v0/meta/whoami', {
@@ -622,7 +838,10 @@ export class ProviderRuntimeService {
           });
           return res.ok
             ? { ok: true, message: 'Airtable token accepted.' }
-            : { ok: false, message: `Airtable rejected the token (${res.status}).` };
+            : {
+                ok: false,
+                message: `Airtable rejected the token (${res.status}).`,
+              };
         }
         case 'calendly': {
           const res = await fetch('https://api.calendly.com/users/me', {
@@ -630,20 +849,32 @@ export class ProviderRuntimeService {
           });
           return res.ok
             ? { ok: true, message: 'Calendly token accepted.' }
-            : { ok: false, message: `Calendly rejected the token (${res.status}).` };
+            : {
+                ok: false,
+                message: `Calendly rejected the token (${res.status}).`,
+              };
         }
         case 'mailchimp': {
           const prefix = creds.serverPrefix as string | undefined;
           if (!prefix)
-            return { ok: false, message: 'Missing serverPrefix (e.g. "us21").' };
-          const res = await fetch(`https://${prefix}.api.mailchimp.com/3.0/ping`, {
-            headers: {
-              Authorization: `Basic ${Buffer.from(`anystring:${creds.apiKey}`).toString('base64')}`,
+            return {
+              ok: false,
+              message: 'Missing serverPrefix (e.g. "us21").',
+            };
+          const res = await fetch(
+            `https://${prefix}.api.mailchimp.com/3.0/ping`,
+            {
+              headers: {
+                Authorization: `Basic ${Buffer.from(`anystring:${creds.apiKey}`).toString('base64')}`,
+              },
             },
-          });
+          );
           return res.ok
             ? { ok: true, message: 'Mailchimp key accepted.' }
-            : { ok: false, message: `Mailchimp rejected the key (${res.status}).` };
+            : {
+                ok: false,
+                message: `Mailchimp rejected the key (${res.status}).`,
+              };
         }
         case 'webhook':
         case 'discord':
@@ -705,7 +936,7 @@ export class ProviderRuntimeService {
         `Connection "${conn.name}" has no credentials.`,
       );
     }
-    const cfg = (conn.config ?? {}) as Record<string, unknown>;
+    const cfg = conn.config ?? {};
     const { url, headers } = this.buildAuthedRequest(
       conn.providerKey,
       input.path,
@@ -738,8 +969,8 @@ export class ProviderRuntimeService {
         method === 'GET'
           ? undefined
           : typeof input.body === 'string'
-          ? input.body
-          : JSON.stringify(input.body ?? {}),
+            ? input.body
+            : JSON.stringify(input.body ?? {}),
     });
     const text = await response.text();
     let parsed: unknown = text;
@@ -812,11 +1043,6 @@ export class ProviderRuntimeService {
             ? join(`${creds.instanceUrl}/services/data/v59.0`)
             : null,
           headers: { Authorization: `Bearer ${creds.accessToken}` },
-        };
-      case 'slack':
-        return {
-          url: join('https://slack.com/api'),
-          headers: { Authorization: `Bearer ${creds.botToken}` },
         };
       case 'quickbooks': {
         const realmId =

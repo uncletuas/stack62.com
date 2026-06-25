@@ -283,6 +283,102 @@ const MODULE_LIBRARY: Array<{
       ],
     },
   },
+  {
+    keyword: 'invoice',
+    industry: 'finance',
+    module: {
+      name: 'Invoicing & Payments',
+      key: 'invoicing',
+      description:
+        'Issue invoices, collect payments, and track what customers owe.',
+      entities: [
+        {
+          name: 'Invoices',
+          key: 'invoices',
+          description: 'Customer invoices and their payment status.',
+          fields: [
+            {
+              name: 'Invoice Number',
+              key: 'invoice-number',
+              dataType: 'text',
+              required: true,
+            },
+            {
+              name: 'Customer Name',
+              key: 'customer-name',
+              dataType: 'text',
+              required: true,
+            },
+            { name: 'Customer Email', key: 'customer-email', dataType: 'text' },
+            {
+              name: 'Amount',
+              key: 'amount',
+              dataType: 'number',
+              required: true,
+            },
+            { name: 'Status', key: 'status', dataType: 'text' },
+            { name: 'Due Date', key: 'due-date', dataType: 'date' },
+          ],
+        },
+        {
+          name: 'Payments',
+          key: 'payments',
+          description: 'Payments received against invoices.',
+          fields: [
+            {
+              name: 'Invoice',
+              key: 'invoice',
+              dataType: 'relation',
+              required: true,
+            },
+            {
+              name: 'Amount Paid',
+              key: 'amount-paid',
+              dataType: 'number',
+              required: true,
+            },
+            { name: 'Method', key: 'method', dataType: 'text' },
+            { name: 'Reference', key: 'reference', dataType: 'text' },
+            { name: 'Paid At', key: 'paid-at', dataType: 'date' },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    keyword: 'support',
+    industry: 'operations',
+    module: {
+      name: 'Customer Support',
+      key: 'support-desk',
+      description: 'Track customer support requests from open to resolved.',
+      entities: [
+        {
+          name: 'Tickets',
+          key: 'tickets',
+          description: 'Inbound customer support requests.',
+          fields: [
+            {
+              name: 'Subject',
+              key: 'subject',
+              dataType: 'text',
+              required: true,
+            },
+            {
+              name: 'Customer Name',
+              key: 'customer-name',
+              dataType: 'text',
+              required: true,
+            },
+            { name: 'Channel', key: 'channel', dataType: 'text' },
+            { name: 'Priority', key: 'priority', dataType: 'text' },
+            { name: 'Status', key: 'status', dataType: 'text' },
+            { name: 'Assignee', key: 'assignee', dataType: 'text' },
+          ],
+        },
+      ],
+    },
+  },
 ];
 
 @Injectable()

@@ -256,6 +256,32 @@ export function SlidesEditor({
     setDeck(parseDeck(text));
   }, [text]);
 
+  // Preload every image referenced by the deck (e.g. imported from a
+  // .pptx as base64) into the cache so it renders on the Konva canvas, not
+  // just in the HTML thumbnails. A ref tracks in-flight/loaded srcs so we
+  // never kick off a duplicate load.
+  const requestedSrcsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    for (const slide of deck.slides) {
+      for (const el of slide.elements) {
+        if (el.type !== "image" || !el.src) continue;
+        if (requestedSrcsRef.current.has(el.src)) continue;
+        requestedSrcsRef.current.add(el.src);
+        const src = el.src;
+        const img = new window.Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+          if (!cancelled) setImageCache((prev) => ({ ...prev, [src]: img }));
+        };
+        img.src = src;
+      }
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [deck]);
+
   const emit = useCallback((newDeck: Deck) => {
     const serialized = JSON.stringify(newDeck);
     lastEmittedRef.current = serialized;

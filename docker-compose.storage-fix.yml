@@ -1,0 +1,17 @@
+services:
+  api:
+    environment:
+      FILE_STORAGE_ROOT: /var/data/files
+      DOCUMENTS_STORAGE_ROOT: /var/data/documents
+      GENERATED_SYSTEMS_ROOT: /var/data/generated
+    volumes:
+      - stack62_app_data:/var/data
+  worker:
+    environment:
+      FILE_STORAGE_ROOT: /var/data/files
+      DOCUMENTS_STORAGE_ROOT: /var/data/documents
+      GENERATED_SYSTEMS_ROOT: /var/data/generated
+    volumes:
+      - stack62_app_data:/var/data
+volumes:
+  stack62_app_data:

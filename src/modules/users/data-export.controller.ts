@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Get,
-  Header,
-  Logger,
-  Res,
-} from '@nestjs/common';
+import { Controller, Get, Header, Logger, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -50,7 +44,10 @@ export class DataExportController {
 
   @Get('export')
   @Header('Content-Type', 'application/json')
-  @Header('Content-Disposition', 'attachment; filename="stack62-data-export.json"')
+  @Header(
+    'Content-Disposition',
+    'attachment; filename="stack62-data-export.json"',
+  )
   async export(@CurrentUser() user: JwtUser, @Res() res: Response) {
     const userRow = await this.usersRepo.findOne({
       where: { id: user.userId },

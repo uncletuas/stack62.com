@@ -1,23 +1,12 @@
 import { useNavigate } from "react-router";
 import {
   ArrowRight,
-  BarChart2,
-  Bell,
   Bot,
-  CheckCircle2,
-  Clock,
   FileText,
-  MessageSquare,
-  ShieldCheck,
-  Sparkles,
-  TrendingUp,
-  Users,
-  Zap,
-  ChevronRight,
-  BrainCircuit,
+  GitPullRequest,
+  LayoutDashboard,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
-import { Card } from "../components/ui/card";
 import { PublicShell } from "./PublicShell";
 
 export function LandingPage() {
@@ -27,35 +16,34 @@ export function LandingPage() {
     <PublicShell>
       {/* ── Hero ──────────────────────────────────────────────────── */}
       <section className="relative overflow-hidden">
-        <div className="absolute inset-0 -z-10">
-          <div className="absolute -top-40 left-1/2 -translate-x-1/2 h-[700px] w-[1200px] rounded-full bg-gradient-to-br from-violet-100 via-indigo-100 to-sky-100 dark:from-violet-900/30 dark:via-indigo-900/25 dark:to-sky-900/20 blur-3xl opacity-70" />
-          <div className="absolute top-20 right-0 h-[300px] w-[400px] rounded-full bg-gradient-to-bl from-amber-100/60 to-transparent dark:from-amber-900/20 blur-2xl" />
+        {/* single, restrained glow — one accent, no rainbow */}
+        <div className="pointer-events-none absolute inset-0 -z-10">
+          <div className="absolute left-1/2 -top-48 h-[640px] w-[900px] -translate-x-1/2 rounded-full bg-indigo-500/15 blur-[140px] dark:bg-indigo-500/20" />
         </div>
-        <div className="max-w-6xl mx-auto px-6 pt-24 pb-16 text-center">
-          <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-xs font-semibold text-indigo-700 dark:text-indigo-300 mb-6 border border-indigo-200/60 dark:border-indigo-800/60">
-            <Sparkles className="h-3.5 w-3.5" />
-            AI-powered business operations
-          </span>
-          <h1 className="text-5xl md:text-[64px] font-bold tracking-tight leading-[1.02] mb-6">
-            Run your business.
+
+        <div className="mx-auto max-w-3xl px-6 pt-28 pb-12 text-center">
+
+          <h1 className="mb-6 text-5xl font-bold leading-[1.05] tracking-tight md:text-[68px]">
+            Describe your business.
             <br />
-            <span className="bg-gradient-to-r from-indigo-600 via-violet-600 to-purple-600 dark:from-indigo-400 dark:via-violet-400 dark:to-purple-400 bg-clip-text text-transparent">
-              Your AI coworker handles the rest.
+            <span className="text-indigo-600 dark:text-indigo-400">
+              Watch it run itself.
             </span>
           </h1>
-          <p className="max-w-2xl mx-auto text-xl text-slate-600 dark:text-slate-300 mb-10 leading-relaxed">
-            Stack62 is the one environment where your whole business runs —
-            operations, approvals, documents, team communication — with an AI
-            coworker that manages the operational load so you can focus on
-            decisions that move the needle.
+
+          <p className="mx-auto mb-9 max-w-xl text-lg leading-relaxed text-slate-600 dark:text-slate-300">
+            Stack62 turns plain-English descriptions into real business
+            systems — CRM, finance, HR, operations — and keeps them running
+            with an AI coworker. You approve every change. It handles the rest.
           </p>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+
+          <div className="flex flex-col justify-center gap-3 sm:flex-row">
             <Button
               size="lg"
-              className="px-8 text-base bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600"
+              className="bg-indigo-600 px-8 text-base hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600"
               onClick={() => navigate("/sign-up")}
             >
-              Get started free <ArrowRight className="ml-1.5 h-4 w-4" />
+              Start free <ArrowRight className="ml-1.5 h-4 w-4" />
             </Button>
             <Button
               size="lg"
@@ -63,548 +51,342 @@ export function LandingPage() {
               className="px-8 text-base"
               onClick={() => navigate("/pricing")}
             >
-              See plans
+              See pricing
             </Button>
           </div>
           <p className="mt-4 text-xs text-slate-400 dark:text-slate-500">
-            No credit card required · Set up in minutes
-          </p>
-
-          {/* Hero visual — morning briefing from the AI coworker */}
-          <div className="mt-16 mx-auto max-w-4xl">
-            <Card className="overflow-hidden border-slate-200/70 dark:border-slate-800/70 shadow-2xl shadow-slate-900/10 dark:shadow-black/50">
-              {/* Window chrome */}
-              <div className="bg-slate-50 dark:bg-slate-900/80 border-b border-slate-200/70 dark:border-slate-800/70 px-4 py-2.5 flex items-center gap-2">
-                <span className="h-3 w-3 rounded-full bg-rose-400" />
-                <span className="h-3 w-3 rounded-full bg-amber-400" />
-                <span className="h-3 w-3 rounded-full bg-emerald-400" />
-                <div className="ml-3 text-xs text-slate-500 dark:text-slate-400 font-medium">
-                  Stack62 — Good morning, Marcus
-                </div>
-              </div>
-
-              <div className="p-6 grid md:grid-cols-5 gap-4 text-left bg-white dark:bg-slate-950/50">
-                {/* Left: AI briefing + stat strip */}
-                <div className="md:col-span-3 flex flex-col gap-4">
-                  {/* AI greeting */}
-                  <div className="flex items-start gap-3">
-                    <div className="h-8 w-8 rounded-full bg-indigo-600 flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <Bot className="h-4 w-4 text-white" />
-                    </div>
-                    <div className="bg-slate-50 dark:bg-slate-900/60 rounded-xl rounded-tl-none px-4 py-3 text-sm text-slate-700 dark:text-slate-200 leading-relaxed max-w-xs border border-slate-200/50 dark:border-slate-800/50">
-                      Good morning. I've handled <strong>8 routine tasks</strong> overnight and flagged <strong>3 things that need your call.</strong>
-                    </div>
-                  </div>
-
-                  {/* Stat strip */}
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="bg-emerald-50 dark:bg-emerald-950/40 rounded-lg px-3 py-3 border border-emerald-100 dark:border-emerald-900/50">
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <TrendingUp className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-                        <span className="text-[10px] font-medium text-emerald-700 dark:text-emerald-400 uppercase tracking-wide">Revenue</span>
-                      </div>
-                      <div className="text-lg font-bold text-emerald-800 dark:text-emerald-300">+12%</div>
-                      <div className="text-[10px] text-emerald-600 dark:text-emerald-500">this week</div>
-                    </div>
-                    <div className="bg-amber-50 dark:bg-amber-950/40 rounded-lg px-3 py-3 border border-amber-100 dark:border-amber-900/50">
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <Bell className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
-                        <span className="text-[10px] font-medium text-amber-700 dark:text-amber-400 uppercase tracking-wide">Pending</span>
-                      </div>
-                      <div className="text-lg font-bold text-amber-800 dark:text-amber-300">3</div>
-                      <div className="text-[10px] text-amber-600 dark:text-amber-500">need your call</div>
-                    </div>
-                    <div className="bg-indigo-50 dark:bg-indigo-950/40 rounded-lg px-3 py-3 border border-indigo-100 dark:border-indigo-900/50">
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <CheckCircle2 className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
-                        <span className="text-[10px] font-medium text-indigo-700 dark:text-indigo-400 uppercase tracking-wide">Done</span>
-                      </div>
-                      <div className="text-lg font-bold text-indigo-800 dark:text-indigo-300">8</div>
-                      <div className="text-[10px] text-indigo-600 dark:text-indigo-500">by coworker</div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Right: Pending decision card */}
-                <div className="md:col-span-2 flex flex-col justify-center">
-                  <div className="rounded-xl border border-slate-200/80 dark:border-slate-800/80 overflow-hidden">
-                    <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-900/60 flex items-center justify-between border-b border-slate-200/60 dark:border-slate-800/60">
-                      <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Procurement request</span>
-                      <span className="text-[10px] bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-400 font-medium px-2 py-0.5 rounded-full">Needs you</span>
-                    </div>
-                    <div className="px-4 py-3 bg-white dark:bg-slate-950/40">
-                      <div className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-0.5">Office supplies · $4,200</div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400 mb-3">Submitted by James · 2 hours ago</div>
-                      <div className="text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900/50 rounded-lg p-2.5 mb-3 border border-slate-200/50 dark:border-slate-800/50 leading-relaxed">
-                        <span className="font-medium text-indigo-600 dark:text-indigo-400">Coworker:</span> This is within Q3 budget. 3 similar requests approved this quarter.
-                      </div>
-                      <div className="flex gap-2">
-                        <button className="flex-1 text-xs py-1.5 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition font-medium">
-                          Decline
-                        </button>
-                        <button className="flex-1 text-xs py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition font-medium">
-                          Approve
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </Card>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Trust band ───────────────────────────────────────────── */}
-      <section className="border-y border-slate-200/70 dark:border-slate-800/70 bg-white/60 dark:bg-slate-950/60 backdrop-blur-sm">
-        <div className="max-w-6xl mx-auto px-6 py-6 flex flex-wrap justify-center gap-x-10 gap-y-4">
-          <TrustItem icon={<ShieldCheck className="h-4 w-4" />} label="SOC 2 Type II ready" />
-          <TrustItem icon={<CheckCircle2 className="h-4 w-4" />} label="Human-in-the-loop AI" />
-          <TrustItem icon={<Users className="h-4 w-4" />} label="Built for whole teams" />
-          <TrustItem icon={<Zap className="h-4 w-4" />} label="Live in under 10 minutes" />
-          <TrustItem icon={<ShieldCheck className="h-4 w-4" />} label="Your data stays yours" />
-        </div>
-      </section>
-
-      {/* ── The shift ─────────────────────────────────────────────── */}
-      <section className="max-w-6xl mx-auto px-6 py-24">
-        <div className="text-center mb-14">
-          <p className="text-sm font-semibold uppercase tracking-wider text-indigo-500 dark:text-indigo-400 mb-3">
-            A new way to run operations
-          </p>
-          <h2 className="text-4xl font-bold tracking-tight mb-4">
-            Stop managing tools. Start making decisions.
-          </h2>
-          <p className="text-lg text-slate-600 dark:text-slate-300 max-w-2xl mx-auto">
-            Most executives spend 60% of their week on coordination, chasing
-            updates, and routine approvals. Stack62 shifts that — your AI
-            coworker runs the operations; you run the strategy.
+            Free forever plan · No credit card · Live in minutes
           </p>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-6">
-          {/* Without Stack62 */}
-          <Card className="p-8 border-slate-200/70 dark:border-slate-800/70 bg-slate-50/80 dark:bg-slate-900/40">
-            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-6">Without Stack62</div>
-            <ul className="space-y-4">
-              {[
-                "Scattered across 8+ tools for CRM, HR, docs, comms",
-                "Chasing team updates via email and Slack threads",
-                "Hours lost to routine approvals with no context",
-                "Reports built manually, always a week out of date",
-                "Decisions made with incomplete information",
-                "New hire needs weeks before they can find anything",
-              ].map((item) => (
-                <li key={item} className="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-400">
-                  <span className="mt-0.5 h-5 w-5 rounded-full border-2 border-slate-300 dark:border-slate-700 flex-shrink-0" />
-                  {item}
-                </li>
-              ))}
-            </ul>
-          </Card>
-
-          {/* With Stack62 */}
-          <Card className="p-8 border-indigo-200/70 dark:border-indigo-800/40 bg-gradient-to-br from-indigo-50/80 to-violet-50/60 dark:from-indigo-950/40 dark:to-violet-950/30">
-            <div className="text-xs font-semibold uppercase tracking-wider text-indigo-500 dark:text-indigo-400 mb-6">With Stack62</div>
-            <ul className="space-y-4">
-              {[
-                "Every business operation in one environment",
-                "AI coworker surfaces what needs you, handles what doesn't",
-                "Approve in seconds — coworker provides context with every request",
-                "Live dashboards update automatically as your business moves",
-                "Business intelligence surfaced proactively, not on request",
-                "Team sees everything relevant to their role from day one",
-              ].map((item) => (
-                <li key={item} className="flex items-start gap-3 text-sm text-slate-700 dark:text-slate-200">
-                  <CheckCircle2 className="mt-0.5 h-5 w-5 text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
-                  {item}
-                </li>
-              ))}
-            </ul>
-          </Card>
+        {/* Hero visual — the coworker's morning briefing, mono-indigo */}
+        <div className="mx-auto max-w-3xl px-6 pb-8">
+          <HeroPreview />
         </div>
       </section>
 
-      {/* ── Capabilities ─────────────────────────────────────────── */}
-      <section id="solutions" className="bg-slate-50/80 dark:bg-slate-900/40 py-24 border-y border-slate-200/60 dark:border-slate-800/60">
-        <div className="max-w-6xl mx-auto px-6">
-          <div className="text-center mb-14">
-            <p className="text-sm font-semibold uppercase tracking-wider text-indigo-500 dark:text-indigo-400 mb-3">
-              Everything in one place
-            </p>
-            <h2 className="text-4xl font-bold tracking-tight mb-4">
-              One AI-powered environment.<br />Every business operation.
-            </h2>
-            <p className="text-lg text-slate-600 dark:text-slate-300 max-w-2xl mx-auto">
-              Stack62 replaces the patchwork of tools your team juggles every
-              day — with a single, intelligent environment that gets smarter
-              the more you use it.
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-5">
-            <Capability
-              icon={<BrainCircuit className="h-5 w-5" />}
-              accent="indigo"
-              title="AI Coworker"
-              body="Your always-on AI teammate that understands your business, handles routine tasks, surfaces insights, and tells you exactly what needs a human decision — and why."
-            />
-            <Capability
-              icon={<Bell className="h-5 w-5" />}
-              accent="amber"
-              title="Decision Hub"
-              body="All approvals, requests, and decisions in one place — each with full context and a coworker recommendation. Approve or delegate in seconds, not hours."
-            />
-            <Capability
-              icon={<BarChart2 className="h-5 w-5" />}
-              accent="emerald"
-              title="Business Intelligence"
-              body="Live dashboards, automated reports, and proactive alerts when metrics move. Know what's happening in your business without asking anyone."
-            />
-            <Capability
-              icon={<Users className="h-5 w-5" />}
-              accent="violet"
-              title="Team Collaboration"
-              body="Shared workspaces, role-based visibility, and team communication built in. Everyone sees what they need — no more, no less."
-            />
-            <Capability
-              icon={<Zap className="h-5 w-5" />}
-              accent="sky"
-              title="Workflow Automation"
-              body="Routine processes run automatically — notifications, follow-ups, escalations, data updates. Your coworker watches every workflow and flags anomalies."
-            />
-            <Capability
-              icon={<FileText className="h-5 w-5" />}
-              accent="rose"
-              title="Documents & Reports"
-              body="Proposals, contracts, reports, invoices — generated in seconds from your live business data. Word, PDF, Excel, PowerPoint — pick your format."
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* ── How it works ─────────────────────────────────────────── */}
-      <section id="how-it-works" className="py-24">
-        <div className="max-w-6xl mx-auto px-6">
-          <div className="text-center mb-16">
-            <p className="text-sm font-semibold uppercase tracking-wider text-indigo-500 dark:text-indigo-400 mb-3">
-              How it works
-            </p>
-            <h2 className="text-4xl font-bold tracking-tight mb-4">
-              Your business on Stack62 in four steps
-            </h2>
-            <p className="text-lg text-slate-600 dark:text-slate-300 max-w-xl mx-auto">
-              No implementation team. No months of setup. Just describe your
-              business and watch your operations come to life.
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-4 gap-6">
-            <HowStep
-              n="01"
-              icon={<MessageSquare className="h-5 w-5" />}
-              title="Describe your business"
-              body="Tell Stack62 how your business works in plain language — your team, your workflows, what you track, how decisions get made."
-            />
-            <HowStep
-              n="02"
-              icon={<Sparkles className="h-5 w-5" />}
-              title="Coworker sets it up"
-              body="Your AI coworker builds your operations environment — CRM, workflows, approval chains, dashboards — to match exactly how you work."
-            />
-            <HowStep
-              n="03"
-              icon={<CheckCircle2 className="h-5 w-5" />}
-              title="You review every change"
-              body="Nothing changes without your sign-off. Every update is shown to you first with a plain-English explanation. Approve, tweak, or say no."
-            />
-            <HowStep
-              n="04"
-              icon={<TrendingUp className="h-5 w-5" />}
-              title="Run and grow"
-              body="Operations run live with your team. The coworker keeps watching, flagging issues, handling routine tasks, and helping you scale."
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* ── Use cases / personas ──────────────────────────────────── */}
-      <section className="bg-slate-900 dark:bg-slate-950 text-white py-24">
-        <div className="max-w-6xl mx-auto px-6">
-          <div className="text-center mb-16">
-            <p className="text-sm font-semibold uppercase tracking-wider text-indigo-400 mb-3">
-              Built for leaders
-            </p>
-            <h2 className="text-4xl font-bold tracking-tight">
-              Whatever your role, Stack62 gives you leverage
-            </h2>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-6">
-            <PersonaCard
-              role="CEO / Founder"
-              headline="See everything. Decide faster."
-              points={[
-                "Morning briefing with what needs your attention",
-                "Revenue, pipeline, and team metrics in one view",
-                "Strategic decisions supported by live data",
-                "Coworker flags risks before they become problems",
-              ]}
-            />
-            <PersonaCard
-              role="Operations Manager"
-              headline="Automate the routine. Elevate your team."
-              points={[
-                "Approval workflows that run without chasing",
-                "Procurement, HR requests, vendor management — all in one",
-                "Automations that handle follow-ups and escalations",
-                "Full visibility on every process status, live",
-              ]}
-              highlight
-            />
-            <PersonaCard
-              role="Team Lead"
-              headline="Keep your team in sync without more meetings."
-              points={[
-                "Shared workspace everyone can see and use",
-                "AI surfaces the right info at the right time",
-                "Communication and records in the same place",
-                "Onboard new teammates in hours, not weeks",
-              ]}
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* ── Integrations strip ────────────────────────────────────── */}
-      <section className="max-w-6xl mx-auto px-6 py-20 text-center">
-        <p className="text-sm font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-6">
-          Connects to the tools you already use
+      {/* ── Trust line ────────────────────────────────────────────── */}
+      <section className="mx-auto max-w-5xl px-6 py-8">
+        <p className="mb-5 text-center text-xs font-medium uppercase tracking-wider text-slate-400 dark:text-slate-500">
+          Connects to the tools you already run on
         </p>
-        <div className="flex flex-wrap justify-center gap-3">
-          {["Slack", "WhatsApp Business", "Google Workspace", "Microsoft 365", "QuickBooks", "Gmail", "Paystack"].map((tool) => (
-            <span
-              key={tool}
-              className="px-4 py-2 rounded-full text-sm font-medium bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 text-slate-700 dark:text-slate-300 shadow-sm"
-            >
-              {tool}
-            </span>
+        <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-3 text-sm font-medium text-slate-500 dark:text-slate-400">
+          {[
+            "WhatsApp Business",
+            "Google Workspace",
+            "Microsoft 365",
+            "QuickBooks",
+            "Gmail",
+            "Paystack",
+          ].map((tool) => (
+            <span key={tool}>{tool}</span>
           ))}
         </div>
-        <p className="mt-6 text-sm text-slate-500 dark:text-slate-400">
-          Real integrations, not duct tape — your data flows both ways.
-        </p>
       </section>
 
-      {/* ── Pricing teaser ───────────────────────────────────────── */}
-      <section className="border-t border-slate-200/70 dark:border-slate-800/70 bg-slate-50/60 dark:bg-slate-900/40 py-24">
-        <div className="max-w-4xl mx-auto px-6 text-center">
-          <h2 className="text-4xl font-bold tracking-tight mb-4">
-            Start for free. Scale when you're ready.
+      {/* ── The core loop (the differentiator) ────────────────────── */}
+      <section id="how" className="mx-auto max-w-5xl px-6 py-24">
+        <div className="mx-auto mb-16 max-w-2xl text-center">
+          <p className="mb-3 text-sm font-semibold uppercase tracking-wider text-indigo-500 dark:text-indigo-400">
+            How it works
+          </p>
+          <h2 className="mb-4 text-4xl font-bold tracking-tight">
+            AI does the work. You stay in control.
           </h2>
-          <p className="text-lg text-slate-600 dark:text-slate-300 max-w-xl mx-auto mb-10">
-            Try Stack62 with no credit card — set up your first operations
-            environment and experience an AI coworker in action. Subscribe
-            when it's earning its keep.
+          <p className="text-lg text-slate-600 dark:text-slate-300">
+            Every change your coworker makes is planned, explained, and shown
+            to you before anything happens. Nothing ships without your approval.
           </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button
-              size="lg"
-              className="px-8 text-base bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600"
-              onClick={() => navigate("/sign-up")}
-            >
-              Start for free <ArrowRight className="ml-1.5 h-4 w-4" />
-            </Button>
-            <Button
-              size="lg"
-              variant="outline"
-              className="px-8 text-base"
-              onClick={() => navigate("/pricing")}
-            >
-              View pricing <ChevronRight className="ml-1 h-4 w-4" />
-            </Button>
-          </div>
-          <p className="mt-4 text-xs text-slate-400 dark:text-slate-500">
-            Plans from $49/month · No setup fees · Cancel anytime
-          </p>
+        </div>
+
+        <div className="grid gap-6 md:grid-cols-3">
+          <LoopStep
+            n="01"
+            title="Describe"
+            body="Tell Stack62 how your business works in plain language. Your coworker drafts the systems, workflows, and dashboards to match."
+          />
+          <LoopStep
+            n="02"
+            title="Review & approve"
+            body="See a plain-English plan and a clear diff of exactly what will change. Approve it, tweak it, or say no — you decide."
+          />
+          <LoopStep
+            n="03"
+            title="It runs — live"
+            body="Your systems run on Stack62 with your team. The coworker keeps watching, handling routine work and flagging what needs you."
+          />
         </div>
       </section>
 
-      {/* ── FAQ ─────────────────────────────────────────────────── */}
-      <section id="faq" className="max-w-3xl mx-auto px-6 py-24">
-        <h2 className="text-3xl font-bold tracking-tight mb-10 text-center">
+      {/* ── Capabilities ──────────────────────────────────────────── */}
+      <section
+        id="features"
+        className="border-y border-slate-200/70 bg-slate-50/60 py-24 dark:border-slate-800/70 dark:bg-slate-900/30"
+      >
+        <div className="mx-auto max-w-5xl px-6">
+          <div className="mx-auto mb-16 max-w-2xl text-center">
+            <p className="mb-3 text-sm font-semibold uppercase tracking-wider text-indigo-500 dark:text-indigo-400">
+              One environment
+            </p>
+            <h2 className="mb-4 text-4xl font-bold tracking-tight">
+              Everything your business runs on, in one place
+            </h2>
+            <p className="text-lg text-slate-600 dark:text-slate-300">
+              Stack62 replaces the patchwork of tools your team juggles — with
+              a single intelligent environment that gets smarter as you use it.
+            </p>
+          </div>
+
+          <div className="grid gap-px overflow-hidden rounded-2xl border border-slate-200/70 bg-slate-200/70 dark:border-slate-800/70 dark:bg-slate-800/70 md:grid-cols-2">
+            <Feature
+              icon={<Bot className="h-5 w-5" />}
+              title="AI Coworker"
+              body="An always-on teammate that understands your business, handles routine tasks, and tells you exactly what needs a human decision — and why."
+            />
+            <Feature
+              icon={<GitPullRequest className="h-5 w-5" />}
+              title="Systems that keep running"
+              body="CRM, finance, HR, procurement — drafted from a prompt and run live on Stack62. Not throwaway scaffolding; real software that evolves."
+            />
+            <Feature
+              icon={<LayoutDashboard className="h-5 w-5" />}
+              title="Decisions & intelligence"
+              body="Approvals, requests, and live dashboards in one place — each with full context and a coworker recommendation. Decide in seconds."
+            />
+            <Feature
+              icon={<FileText className="h-5 w-5" />}
+              title="Documents & communication"
+              body="Proposals, reports, and invoices generated from live data, plus team chat, email, and WhatsApp — all in the same workspace."
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* ── Pricing teaser ────────────────────────────────────────── */}
+      <section className="mx-auto max-w-3xl px-6 py-24 text-center">
+        <h2 className="mb-4 text-4xl font-bold tracking-tight">
+          Start free. Scale when it earns its keep.
+        </h2>
+        <p className="mx-auto mb-9 max-w-lg text-lg text-slate-600 dark:text-slate-300">
+          Build your first system and meet your AI coworker with no credit
+          card. Upgrade only when your team needs more.
+        </p>
+        <div className="flex flex-col justify-center gap-3 sm:flex-row">
+          <Button
+            size="lg"
+            className="bg-indigo-600 px-8 text-base hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600"
+            onClick={() => navigate("/sign-up")}
+          >
+            Start free <ArrowRight className="ml-1.5 h-4 w-4" />
+          </Button>
+          <Button
+            size="lg"
+            variant="outline"
+            className="px-8 text-base"
+            onClick={() => navigate("/pricing")}
+          >
+            View plans
+          </Button>
+        </div>
+        <p className="mt-4 text-xs text-slate-400 dark:text-slate-500">
+          Free forever · Paid plans from $19 / seat / month · Cancel anytime
+        </p>
+      </section>
+
+      {/* ── FAQ ───────────────────────────────────────────────────── */}
+      <section id="faq" className="mx-auto max-w-2xl px-6 pb-24">
+        <h2 className="mb-10 text-center text-3xl font-bold tracking-tight">
           Common questions
         </h2>
-        <div className="space-y-5">
+        <div className="space-y-1">
           <Faq
-            q="Do I need to be technical to use Stack62?"
-            a="Not at all. Stack62 is built for business owners and operators, not engineers. You describe what you need in plain English — the AI handles everything else. If you can write an email, you can run your operations on Stack62."
+            q="Do I need to be technical?"
+            a="No. Stack62 is built for business owners and operators, not engineers. You describe what you need in plain English and the AI handles the rest. If you can write an email, you can run your operations here."
           />
           <Faq
-            q="Will the AI make changes to my business without asking me?"
-            a="Never. Every change goes through you first. The AI proposes, explains its reasoning, and waits for your approval. You're always in control — the coworker does the work, not the deciding."
+            q="Will the AI change things without asking me?"
+            a="Never. Every change is planned, explained, and shown to you as a clear diff before anything happens. The coworker proposes; you approve. You're always in control."
           />
           <Faq
-            q="Can my whole team use Stack62?"
-            a="Yes — Stack62 is built for teams. Invite your team by email, assign roles, and everyone sees exactly what's relevant to their work. Role-based access means sensitive data stays with the right people."
-          />
-          <Faq
-            q="How is Stack62 different from tools like Salesforce or Monday.com?"
-            a="Those tools make you adapt your business to their structure. Stack62 adapts to your business — the AI builds the environment around how you actually work, not a rigid template. And it keeps helping as your needs evolve."
+            q="How is this different from Salesforce or Monday.com?"
+            a="Those tools make you adapt your business to their structure. Stack62 builds the environment around how you actually work — from a prompt — and keeps improving it as your needs change."
           />
           <Faq
             q="What happens to my business data?"
-            a="Your data is yours — always. It lives in your isolated tenant, the AI only sees what it needs for a specific task, and every access is logged. Stack62 is designed for SOC 2 Type II compliance and will never train on your data."
+            a="It's yours, always. It lives in your isolated tenant, the AI only sees what a task needs, every access is logged, and we never train on your data."
           />
         </div>
       </section>
 
-      {/* ── Final CTA ───────────────────────────────────────────── */}
-      <section className="max-w-4xl mx-auto px-6 pb-28">
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 p-1">
-          <div className="rounded-xl bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 px-12 py-16 text-center text-white">
-            <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PHBhdGggZD0iTTM2IDM0djItSDM0di0yaDF2LTNBM2EgMyAwIDAgMSAzMCAzMHYtMUgzMXYxYTIgMiAwIDAgMCAyIDJoMXYxaC0xdjJoMXYxaDF2LTFoMXYtMmgtMXYtMWgxem0tNiA2djJIMjh2LTJoMXYtM0EzIDMgMCAwIDEgMjUgMzR2LTFoMXYxYTIgMiAwIDAgMCAyIDJoMXYxaC0xdjJoMXYxaDF2LTFoMXYtMmgtMXYtMWgxeiIvPjwvZz48L2c+PC9zdmc+')] opacity-50" />
-            <h2 className="relative text-4xl font-bold tracking-tight mb-4">
-              Your business deserves better than spreadsheets and Slack threads.
-            </h2>
-            <p className="relative text-indigo-100 max-w-xl mx-auto mb-10 text-lg leading-relaxed">
-              Join businesses running smarter with an AI coworker. Set up your
-              environment in minutes and see the difference in your first week.
-            </p>
-            <Button
-              size="lg"
-              variant="secondary"
-              className="px-10 text-base font-semibold bg-white text-indigo-700 hover:bg-indigo-50"
-              onClick={() => navigate("/sign-up")}
-            >
-              Start free today <ArrowRight className="ml-1.5 h-4 w-4" />
-            </Button>
-            <p className="relative mt-4 text-xs text-indigo-200">
-              No credit card · No setup fee · Cancel anytime
-            </p>
-          </div>
+      {/* ── Final CTA ─────────────────────────────────────────────── */}
+      <section className="mx-auto max-w-4xl px-6 pb-28">
+        <div className="relative overflow-hidden rounded-3xl bg-slate-900 px-8 py-16 text-center dark:bg-slate-900/80 dark:ring-1 dark:ring-slate-800">
+          <div className="pointer-events-none absolute left-1/2 -top-24 h-72 w-[36rem] -translate-x-1/2 rounded-full bg-indigo-600/30 blur-[100px]" />
+          <h2 className="relative mb-4 text-4xl font-bold tracking-tight text-white">
+            Your business deserves a coworker, not more tabs.
+          </h2>
+          <p className="relative mx-auto mb-9 max-w-lg text-lg leading-relaxed text-slate-300">
+            Set up your environment in minutes and see the difference in your
+            first week.
+          </p>
+          <Button
+            size="lg"
+            className="relative bg-white px-10 text-base font-semibold text-slate-900 hover:bg-slate-100"
+            onClick={() => navigate("/sign-up")}
+          >
+            Start free today <ArrowRight className="ml-1.5 h-4 w-4" />
+          </Button>
+          <p className="relative mt-4 text-xs text-slate-400">
+            No credit card · No setup fee · Cancel anytime
+          </p>
         </div>
       </section>
     </PublicShell>
   );
 }
 
-// ── Sub-components ──────────────────────────────────────────────
+// ── Sub-components ────────────────────────────────────────────────
 
-function TrustItem({ icon, label }: { icon: React.ReactNode; label: string }) {
+function HeroPreview() {
   return (
-    <div className="flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-400">
-      <span className="text-indigo-500 dark:text-indigo-400">{icon}</span>
-      {label}
+    <div className="overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-2xl shadow-slate-900/10 dark:border-slate-800/70 dark:bg-slate-950/60 dark:shadow-black/40">
+      {/* window chrome */}
+      <div className="flex items-center gap-2 border-b border-slate-200/70 bg-slate-50 px-4 py-2.5 dark:border-slate-800/70 dark:bg-slate-900/70">
+        <span className="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700" />
+        <span className="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700" />
+        <span className="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700" />
+        <div className="ml-3 text-xs font-medium text-slate-400 dark:text-slate-500">
+          Stack62 — Good morning, Marcus
+        </div>
+      </div>
+
+      <div className="grid gap-4 bg-white p-5 text-left dark:bg-slate-950/40 md:grid-cols-5">
+        {/* coworker briefing */}
+        <div className="flex flex-col gap-4 md:col-span-3">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-indigo-600">
+              <Bot className="h-4 w-4 text-white" />
+            </div>
+            <div className="max-w-sm rounded-xl rounded-tl-none border border-slate-200/60 bg-slate-50 px-4 py-3 text-sm leading-relaxed text-slate-700 dark:border-slate-800/60 dark:bg-slate-900/60 dark:text-slate-200">
+              Good morning. I handled <strong>8 routine tasks</strong> overnight
+              and flagged <strong>3 things</strong> that need your call.
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2.5">
+            <Stat label="Done by coworker" value="8" />
+            <Stat label="Need your call" value="3" />
+            <Stat label="Revenue · week" value="+12%" />
+          </div>
+        </div>
+
+        {/* a pending decision (the Plan→Approve moment) */}
+        <div className="flex flex-col justify-center md:col-span-2">
+          <div className="overflow-hidden rounded-xl border border-slate-200/80 dark:border-slate-800/80">
+            <div className="flex items-center justify-between border-b border-slate-200/60 bg-slate-50 px-4 py-2.5 dark:border-slate-800/60 dark:bg-slate-900/60">
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Procurement request
+              </span>
+              <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400">
+                Needs you
+              </span>
+            </div>
+            <div className="bg-white px-4 py-3 dark:bg-slate-950/40">
+              <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                Office supplies · $4,200
+              </div>
+              <div className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+                Submitted by James · 2h ago
+              </div>
+              <div className="mb-3 rounded-lg border border-slate-200/50 bg-slate-50 p-2.5 text-xs leading-relaxed text-slate-600 dark:border-slate-800/50 dark:bg-slate-900/50 dark:text-slate-300">
+                <span className="font-medium text-indigo-600 dark:text-indigo-400">
+                  Coworker:
+                </span>{" "}
+                Within Q3 budget. 3 similar requests approved this quarter.
+              </div>
+              <div className="flex gap-2">
+                <button className="flex-1 rounded-md border border-slate-200 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800">
+                  Decline
+                </button>
+                <button className="flex-1 rounded-md bg-indigo-600 py-1.5 text-xs font-medium text-white transition hover:bg-indigo-700">
+                  Approve
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
-const accentMap = {
-  indigo: "bg-indigo-100 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400",
-  amber: "bg-amber-100 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400",
-  emerald: "bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400",
-  violet: "bg-violet-100 dark:bg-violet-950/50 text-violet-600 dark:text-violet-400",
-  sky: "bg-sky-100 dark:bg-sky-950/50 text-sky-600 dark:text-sky-400",
-  rose: "bg-rose-100 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400",
-} as const;
-
-function Capability({
-  icon,
-  title,
-  body,
-  accent,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  body: string;
-  accent: keyof typeof accentMap;
-}) {
+function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <Card className="p-6 border-slate-200/70 dark:border-slate-800/70 bg-white dark:bg-slate-900/50 hover:shadow-lg hover:shadow-slate-900/5 transition-all duration-200 hover:-translate-y-0.5">
-      <div className={`h-10 w-10 rounded-xl flex items-center justify-center mb-4 ${accentMap[accent]}`}>
-        {icon}
+    <div className="rounded-lg border border-slate-200/70 bg-slate-50/80 px-3 py-2.5 dark:border-slate-800/70 dark:bg-slate-900/40">
+      <div className="text-lg font-bold text-slate-800 dark:text-slate-100">
+        {value}
       </div>
-      <h3 className="font-bold tracking-tight mb-2">{title}</h3>
-      <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-        {body}
-      </p>
-    </Card>
+      <div className="text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
+        {label}
+      </div>
+    </div>
   );
 }
 
-function HowStep({
+function LoopStep({
   n,
-  icon,
   title,
   body,
 }: {
   n: string;
+  title: string;
+  body: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200/70 bg-white p-7 dark:border-slate-800/70 dark:bg-slate-900/40">
+      <div className="mb-4 font-mono text-sm font-semibold text-indigo-500 dark:text-indigo-400">
+        {n}
+      </div>
+      <h3 className="mb-2 text-lg font-bold tracking-tight">{title}</h3>
+      <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+        {body}
+      </p>
+    </div>
+  );
+}
+
+function Feature({
+  icon,
+  title,
+  body,
+}: {
   icon: React.ReactNode;
   title: string;
   body: string;
 }) {
   return (
-    <div className="relative">
-      <div className="flex items-center gap-3 mb-4">
-        <div className="h-10 w-10 rounded-xl bg-indigo-600/10 dark:bg-indigo-400/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
-          {icon}
-        </div>
-        <span className="text-xs font-mono font-semibold text-slate-400 dark:text-slate-500">{n}</span>
+    <div className="bg-white p-7 transition-colors hover:bg-slate-50/60 dark:bg-slate-950/40 dark:hover:bg-slate-900/40">
+      <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400">
+        {icon}
       </div>
-      <h3 className="text-base font-bold tracking-tight mb-2">{title}</h3>
-      <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">{body}</p>
-    </div>
-  );
-}
-
-function PersonaCard({
-  role,
-  headline,
-  points,
-  highlight = false,
-}: {
-  role: string;
-  headline: string;
-  points: string[];
-  highlight?: boolean;
-}) {
-  return (
-    <div
-      className={`rounded-2xl p-8 ${
-        highlight
-          ? "bg-indigo-600 ring-2 ring-indigo-400/30 shadow-2xl shadow-indigo-900/40"
-          : "bg-slate-800/60 dark:bg-slate-800/80"
-      }`}
-    >
-      <div className={`text-xs font-semibold uppercase tracking-wider mb-3 ${highlight ? "text-indigo-200" : "text-slate-400"}`}>
-        {role}
-      </div>
-      <h3 className={`text-xl font-bold mb-6 leading-tight ${highlight ? "text-white" : "text-slate-100"}`}>
-        {headline}
-      </h3>
-      <ul className="space-y-3">
-        {points.map((p) => (
-          <li key={p} className={`flex items-start gap-2.5 text-sm leading-relaxed ${highlight ? "text-indigo-100" : "text-slate-300"}`}>
-            <CheckCircle2 className={`h-4 w-4 mt-0.5 flex-shrink-0 ${highlight ? "text-indigo-300" : "text-indigo-400"}`} />
-            {p}
-          </li>
-        ))}
-      </ul>
+      <h3 className="mb-2 text-base font-bold tracking-tight">{title}</h3>
+      <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+        {body}
+      </p>
     </div>
   );
 }
 
 function Faq({ q, a }: { q: string; a: string }) {
   return (
-    <details className="group border-b border-slate-200/70 dark:border-slate-800/70 pb-5">
-      <summary className="flex justify-between items-center cursor-pointer list-none font-semibold text-slate-900 dark:text-slate-100 py-1">
+    <details className="group border-b border-slate-200/70 py-4 dark:border-slate-800/70">
+      <summary className="flex cursor-pointer list-none items-center justify-between py-1 font-semibold text-slate-900 dark:text-slate-100">
         {q}
-        <span className="ml-4 h-6 w-6 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 dark:text-slate-400 group-open:rotate-45 transition-transform duration-200 flex-shrink-0 text-sm">
+        <span className="ml-4 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-slate-100 text-sm text-slate-500 transition-transform duration-200 group-open:rotate-45 dark:bg-slate-800 dark:text-slate-400">
           +
         </span>
       </summary>
-      <p className="mt-4 text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+      <p className="mt-3 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
         {a}
       </p>
     </details>

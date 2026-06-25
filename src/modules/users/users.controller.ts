@@ -121,10 +121,7 @@ export class UsersController {
    */
   @Public()
   @Get(':userId/avatar')
-  async getAvatar(
-    @Param('userId') userId: string,
-    @Res() res: Response,
-  ) {
+  async getAvatar(@Param('userId') userId: string, @Res() res: Response) {
     const user = await this.usersService.findById(userId);
     if (!user.avatarFileId) {
       res.status(404).json({ message: 'No avatar set.' });

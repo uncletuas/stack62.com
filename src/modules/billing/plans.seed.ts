@@ -8,6 +8,7 @@ type PlanSeed = Omit<
   | 'deletedAt'
   | 'stripeMonthlyPriceId'
   | 'stripeYearlyPriceId'
+  | 'customizedAt'
 > & {
   stripeMonthlyPriceId?: null;
   stripeYearlyPriceId?: null;
@@ -67,7 +68,7 @@ export const SEED_PLANS: PlanSeed[] = [
       '1,000 AI requests / month',
       '3 active systems',
       '10 GB storage',
-      'Core integrations (Gmail, WhatsApp, Slack)',
+      'Core integrations (Gmail, WhatsApp)',
       '30-day audit log retention',
       'Email support',
     ],
@@ -142,7 +143,7 @@ export const SEED_PLANS: PlanSeed[] = [
     tier: 'enterprise',
     name: 'Enterprise',
     tagline:
-      "Designed for organizations that need SSO, custom deployment, and 24/7 support.",
+      'Designed for organizations that need SSO, custom deployment, and 24/7 support.',
     monthlyPriceCents: 0, // contact sales
     yearlyPriceCents: 0,
     currency: 'USD',

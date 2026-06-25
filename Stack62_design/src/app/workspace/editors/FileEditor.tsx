@@ -1,22 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import {
-  Bold,
+  ChevronLeft,
+  ChevronRight,
   Download,
+  Film,
   FileText,
   Image as ImageIcon,
-  Italic,
   ExternalLink,
   LayoutPanelTop,
   Loader2,
+  Maximize2,
+  Minimize2,
+  MoreVertical,
+  Music,
+  Play,
   Presentation,
   Printer,
   Save,
   Sparkles,
   Table2,
   Trash2,
-  Type,
   Upload,
+  X,
 } from "lucide-react";
 import { appDialog } from "../../components/app-dialog";
 import { Button } from "../../components/ui/button";
@@ -24,10 +30,10 @@ import { useAppContext } from "../../context/app-context";
 import {
   fetchFileBlobUrl,
   fetchDocument,
+  fetchFile,
   fetchFileContent,
   fileDownloadUrl,
   deleteFile,
-  listFiles,
   openInGoogleWorkspace,
   updateDocument,
   saveFileContent,
@@ -44,7 +50,9 @@ import { SlidesEditor } from "./SlidesEditor";
 const EDITABLE_RE = /\.(docx|xlsx|xls|pptx|txt|md|csv|json|js|ts|tsx|html|css|sql|yaml|yml|xml|log|rtf)$/i;
 
 type SavingState = "idle" | "saving" | "saved" | "error";
-type SurfaceKind = "document" | "sheet" | "slides" | "pdf" | "image" | "text" | "unsupported";
+type SurfaceKind = "document" | "sheet" | "slides" | "pdf" | "image" | "video" | "audio" | "text" | "unsupported";
+
+const MEDIA_RE = /\.(mp4|webm|mov|m4v|ogv|mkv|mp3|wav|ogg|oga|m4a|aac|flac)$/i;
 
 interface ParsedSheet {
   name: string;
@@ -63,6 +71,12 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
   const [content, setContent] = useState("");
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  /** Object URL for video/audio playback (revoked on unmount/tab change). */
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [presenting, setPresenting] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  /** The surface viewport we expand when the user hits "Fullscreen". */
+  const surfaceRef = useRef<HTMLElement | null>(null);
   /** Real workbook data when the file is an .xlsx/.xls — parsed client-side
    *  with SheetJS so the user sees the actual rows, not the lossy CSV
    *  conversion. Saving still goes back as CSV; the backend re-encodes. */
@@ -79,6 +93,24 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
     [document, stored, editableContent],
   );
 
+  // Native Fullscreen API: expand just the surface viewport so media,
+  // images, PDFs and decks fill the screen. We mirror the browser's own
+  // state (Escape / system UI also toggle it) via the fullscreenchange event.
+  useEffect(() => {
+    const onChange = () =>
+      setIsFullscreen(window.document.fullscreenElement === surfaceRef.current);
+    window.document.addEventListener("fullscreenchange", onChange);
+    return () =>
+      window.document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    const el = surfaceRef.current;
+    if (!el) return;
+    if (window.document.fullscreenElement) void window.document.exitFullscreen();
+    else void el.requestFullscreen?.();
+  }, []);
+
   useEffect(() => {
     let revoked: string | null = null;
     if (!tab.refId || !currentOrganization) {
@@ -88,7 +120,8 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
       setContent("");
       setImageUrl(null);
       setPdfUrl(null);
-      setDocxUrl(null);
+      setMediaUrl(null);
+      setPresenting(false);
       return;
     }
 
@@ -99,6 +132,8 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
     setEditableContent(null);
     setImageUrl(null);
     setPdfUrl(null);
+    setMediaUrl(null);
+    setPresenting(false);
     setContent("");
     setWorkbook(null);
     setActiveSheetIndex(0);
@@ -118,13 +153,9 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
       };
     }
 
-    void listFiles({
-      organizationId: currentOrganization.id,
-      workspaceId: currentWorkspace?.id,
-    })
-      .then(async (all) => {
+    void fetchFile(tab.refId)
+      .then(async (file) => {
         if (!live) return;
-        const file = all.find((f) => f.id === tab.refId) ?? null;
         setStored(file);
         if (!file) return;
 
@@ -152,6 +183,25 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
             appendRunLog({
               level: "error",
               text: `Couldn't load PDF ${file.filename}: ${(err as Error).message}`,
+              source: "files",
+            });
+          }
+          return;
+        }
+
+        if (
+          file.mimeType.startsWith("video/") ||
+          file.mimeType.startsWith("audio/") ||
+          MEDIA_RE.test(file.filename)
+        ) {
+          try {
+            const url = await fetchFileBlobUrl(file.id);
+            revoked = url;
+            if (live) setMediaUrl(url);
+          } catch (err) {
+            appendRunLog({
+              level: "error",
+              text: `Couldn't load media ${file.filename}: ${(err as Error).message}`,
               source: "files",
             });
           }
@@ -251,6 +301,15 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
           }
         }
       })
+      .catch((err) => {
+        if (!live) return;
+        setStored(null);
+        appendRunLog({
+          level: "error",
+          text: `Couldn't open file: ${(err as Error).message}`,
+          source: "files",
+        });
+      })
       .finally(() => live && setLoading(false));
 
     return () => {
@@ -319,14 +378,35 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
     if (document?.id) {
       setSaving("saving");
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
+      const docId = document.id;
+      // Name the document after its first line of text, the way most
+      // word processors title an untitled file. We keep tracking the
+      // first line until the user renames the doc to something that no
+      // longer matches a default/untitled placeholder.
+      const derivedTitle = deriveTitleFromContent(next);
+      const currentTitle = document.title ?? "";
+      const titleIsAuto =
+        !currentTitle.trim() ||
+        /^untitled/i.test(currentTitle) ||
+        currentTitle === deriveTitleFromContent(content);
+      const nextTitle =
+        derivedTitle && titleIsAuto && derivedTitle !== currentTitle
+          ? derivedTitle
+          : undefined;
       saveTimer.current = window.setTimeout(() => {
-        void updateDocument(document.id, {
+        void updateDocument(docId, {
           content: next,
+          ...(nextTitle ? { title: nextTitle } : {}),
           changeSummary: "Autosaved from Explorer",
         })
           .then((saved) => {
             setDocument(saved);
             setSaving("saved");
+            if (nextTitle) {
+              updateTab(tab.id, { title: saved.title });
+              // Refresh the sidebar/explorer so the new name shows there too.
+              window.dispatchEvent(new CustomEvent("stack62:files-changed"));
+            }
           })
           .catch((err) => {
             setSaving("error");
@@ -462,6 +542,18 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
 
   const displayName = document?.title ?? stored?.filename ?? tab.title;
 
+  // Open / play the media (or PDF) in a new browser tab. Reuses the blob
+  // we've already loaded so playback starts instantly; falls back to the
+  // download URL if the blob isn't ready yet.
+  const openMedia = useCallback(() => {
+    const url = mediaUrl ?? imageUrl ?? pdfUrl;
+    if (url) {
+      window.open(url, "_blank", "noopener,noreferrer");
+    } else if (stored?.id) {
+      window.open(fileDownloadUrl(stored.id), "_blank", "noopener,noreferrer");
+    }
+  }, [mediaUrl, imageUrl, pdfUrl, stored?.id]);
+
   if (!tab.refId) return <EmptyFileState inputRef={inputRef} onUpload={onUpload} draft={fileDrafts[tab.id]} />;
 
   return (
@@ -476,11 +568,18 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
           setZoom={setZoom}
           onDelete={removeFile}
           onOpenGoogle={openGoogle}
+          isFullscreen={isFullscreen}
+          onToggleFullscreen={toggleFullscreen}
+          onPresent={() => setPresenting(true)}
+          onOpenMedia={openMedia}
         />
       )}
 
       <div className="flex min-h-0 flex-1">
-        <main className={`min-w-0 flex-1 overflow-auto ${surface === "sheet" ? "" : "bg-[#111827]"}`}>
+        <main
+          ref={surfaceRef}
+          className={`min-w-0 flex-1 overflow-auto ${surface === "sheet" ? "" : "bg-[#111827]"}`}
+        >
           {loading ? (
             <div className="grid h-full place-items-center text-app-faint">
               <Loader2 className="h-5 w-5 animate-spin" />
@@ -488,7 +587,11 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
           ) : !stored && !document ? (
             <EmptyMessage text="Item not available." />
           ) : surface === "image" && imageUrl ? (
-            <ImageSurface filename={stored.filename} url={imageUrl} />
+            <ImageSurface filename={stored.filename} url={imageUrl} zoom={zoom} />
+          ) : surface === "video" && mediaUrl ? (
+            <VideoSurface filename={stored.filename} url={mediaUrl} />
+          ) : surface === "audio" && mediaUrl ? (
+            <AudioSurface filename={stored.filename} url={mediaUrl} />
           ) : surface === "pdf" && pdfUrl ? (
             <PdfSurface filename={stored.filename} url={pdfUrl} />
           ) : surface === "sheet" ? (
@@ -510,6 +613,16 @@ export function FileEditor({ tab }: { tab: EditorTab }) {
           )}
         </main>
       </div>
+
+      {presenting && (surface === "slides" || surface === "pdf") && (
+        <PresentOverlay
+          surface={surface}
+          content={content}
+          url={pdfUrl}
+          filename={displayName}
+          onClose={() => setPresenting(false)}
+        />
+      )}
     </div>
   );
 }
@@ -523,6 +636,10 @@ function FileWorkbenchHeader({
   setZoom,
   onDelete,
   onOpenGoogle,
+  isFullscreen,
+  onToggleFullscreen,
+  onPresent,
+  onOpenMedia,
 }: {
   file: StoredFile | null;
   title: string;
@@ -532,6 +649,10 @@ function FileWorkbenchHeader({
   setZoom: (zoom: number) => void;
   onDelete: () => void;
   onOpenGoogle: () => void;
+  isFullscreen: boolean;
+  onToggleFullscreen: () => void;
+  onPresent: () => void;
+  onOpenMedia: () => void;
 }) {
   const Icon =
     surface === "sheet"
@@ -540,7 +661,67 @@ function FileWorkbenchHeader({
         ? Presentation
         : surface === "image"
           ? ImageIcon
-          : FileText;
+          : surface === "video"
+            ? Film
+            : surface === "audio"
+              ? Music
+              : FileText;
+  const canFullscreen = ["image", "video", "audio", "pdf", "slides"].includes(
+    surface,
+  );
+  const canPresent = surface === "slides" || surface === "pdf";
+  const isMedia = ["image", "video", "audio", "pdf"].includes(surface);
+  const canGoogle = ["document", "sheet", "slides", "text"].includes(surface);
+
+  // Every discrete action a user can take on the open file, collapsed into a
+  // single dropdown instead of a row of toolbar buttons.
+  const actions: FileAction[] = [];
+  if (isMedia) {
+    actions.push({
+      label:
+        surface === "video" || surface === "audio"
+          ? "Open / play in new tab"
+          : "Open in new tab",
+      icon: surface === "image" || surface === "pdf" ? ExternalLink : Play,
+      onSelect: onOpenMedia,
+    });
+  }
+  if (canPresent) {
+    actions.push({ label: "Present", icon: Play, onSelect: onPresent });
+  }
+  if (canFullscreen) {
+    actions.push({
+      label: isFullscreen ? "Exit fullscreen" : "Fullscreen",
+      icon: isFullscreen ? Minimize2 : Maximize2,
+      onSelect: onToggleFullscreen,
+    });
+  }
+  if (canGoogle) {
+    actions.push({
+      label: "Open in Google",
+      icon: ExternalLink,
+      onSelect: onOpenGoogle,
+    });
+  }
+  actions.push({
+    label: "Print",
+    icon: Printer,
+    onSelect: () => window.print(),
+  });
+  if (file?.id) {
+    actions.push({
+      label: "Download",
+      icon: Download,
+      href: fileDownloadUrl(file.id),
+    });
+    actions.push({
+      label: "Delete",
+      icon: Trash2,
+      onSelect: onDelete,
+      danger: true,
+      separatorAbove: true,
+    });
+  }
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-app bg-app px-4">
@@ -558,75 +739,119 @@ function FileWorkbenchHeader({
       </div>
 
       <div className="ml-auto flex items-center gap-1">
-        <ToolbarButton title="Bold" icon={Bold} />
-        <ToolbarButton title="Italic" icon={Italic} />
-        <ToolbarButton title="Text" icon={Type} />
-        <ToolbarButton title="Print" icon={Printer} onClick={() => window.print()} />
-        {["document", "sheet", "slides", "text"].includes(surface) && (
-          <button
-            type="button"
-            onClick={onOpenGoogle}
-            title="Open in Google"
-            className="ml-1 inline-flex h-8 items-center gap-1 rounded border border-app bg-app-surface px-2 text-xs text-app-muted hover:border-cyan-700 hover:text-cyan-100"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-            Google
-          </button>
+        {surface === "image" && (
+          <>
+            <label className="text-[11px] text-app-faint">Zoom</label>
+            <input
+              type="range"
+              min={25}
+              max={300}
+              value={zoom}
+              onChange={(event) => setZoom(Number(event.target.value))}
+              className="w-24 accent-cyan-400"
+            />
+            <span className="w-9 text-right text-[11px] text-app-subtle">{zoom}%</span>
+          </>
         )}
-        <label className="ml-2 text-[11px] text-app-faint">Zoom</label>
-        <input
-          type="range"
-          min={70}
-          max={120}
-          value={zoom}
-          onChange={(event) => setZoom(Number(event.target.value))}
-          className="w-24 accent-cyan-400"
-        />
-        <span className="w-9 text-right text-[11px] text-app-subtle">{zoom}%</span>
-        {file?.id && (
-          <button
-            type="button"
-            onClick={onDelete}
-            title="Delete"
-            className="ml-2 grid h-8 w-8 place-items-center rounded border border-rose-900/60 bg-rose-950/20 text-rose-300 hover:border-rose-700 hover:text-rose-100"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
-        )}
-        {file?.id && (
-          <a
-            href={fileDownloadUrl(file.id)}
-            target="_blank"
-            rel="noreferrer"
-            className="ml-2 grid h-8 w-8 place-items-center rounded border border-app bg-app-surface text-app-muted hover:border-app-strong hover:text-white"
-            title="Download"
-          >
-            <Download className="h-4 w-4" />
-          </a>
-        )}
+        <FileActionsMenu actions={actions} />
       </div>
     </header>
   );
 }
 
-function ToolbarButton({
-  title,
-  icon: Icon,
-  onClick,
-}: {
-  title: string;
+interface FileAction {
+  label: string;
   icon: typeof Save;
-  onClick?: () => void;
-}) {
+  onSelect?: () => void;
+  /** When set, the item is an anchor (e.g. Download) instead of a button. */
+  href?: string;
+  danger?: boolean;
+  separatorAbove?: boolean;
+}
+
+/**
+ * Single "Actions" dropdown for the file workbench. Replaces the old row of
+ * toolbar buttons so the header stays clean and the available actions read as
+ * a list. Closes on outside-click or after an item is chosen.
+ */
+function FileActionsMenu({ actions }: { actions: FileAction[] }) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (event: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", handler);
+    return () => window.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  if (actions.length === 0) return null;
+
   return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      className="grid h-8 w-8 place-items-center rounded text-app-subtle hover:bg-app-elevated hover:text-white"
-    >
-      <Icon className="h-4 w-4" />
-    </button>
+    <div ref={wrapperRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title="Actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="ml-1 inline-flex h-8 items-center gap-1 rounded border border-app bg-app-surface px-2 text-xs text-app-muted hover:border-app-strong hover:text-white"
+      >
+        <MoreVertical className="h-4 w-4" />
+        Actions
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full z-40 mt-1 w-52 overflow-hidden rounded-lg border border-app bg-app-elevated shadow-xl"
+        >
+          {actions.map((action, idx) => {
+            const ItemIcon = action.icon;
+            const cls = `flex w-full items-center gap-2 px-3 py-2 text-left text-sm ${
+              action.separatorAbove && idx > 0 ? "border-t border-app" : ""
+            } ${
+              action.danger
+                ? "text-rose-300 hover:bg-rose-950/30"
+                : "text-app hover:bg-app-hover"
+            }`;
+            if (action.href) {
+              return (
+                <a
+                  key={action.label}
+                  href={action.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={() => setOpen(false)}
+                  className={cls}
+                >
+                  <ItemIcon className="h-3.5 w-3.5" />
+                  {action.label}
+                </a>
+              );
+            }
+            return (
+              <button
+                key={action.label}
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  action.onSelect?.();
+                }}
+                className={cls}
+              >
+                <ItemIcon className="h-3.5 w-3.5" />
+                {action.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -763,10 +988,250 @@ function PdfSurface({ filename, url }: { filename: string; url: string }) {
   );
 }
 
-function ImageSurface({ filename, url }: { filename: string; url: string }) {
+function ImageSurface({
+  filename,
+  url,
+  zoom,
+}: {
+  filename: string;
+  url: string;
+  zoom: number;
+}) {
+  // The header's zoom slider drives the picture size. At 100% it fills the
+  // viewport width; above that the container scrolls so the user can pan
+  // around a zoomed-in image, like any image viewer.
+  return (
+    <div className="h-full w-full overflow-auto p-6">
+      <div className="flex min-h-full min-w-full items-center justify-center">
+        <img
+          src={url}
+          alt={filename}
+          style={{ width: `${zoom}%` }}
+          className="shadow-2xl"
+        />
+      </div>
+    </div>
+  );
+}
+
+function VideoSurface({ filename, url }: { filename: string; url: string }) {
+  return (
+    <div className="grid h-full place-items-center bg-black p-4">
+      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+      <video
+        src={url}
+        controls
+        autoPlay
+        playsInline
+        className="max-h-full max-w-full rounded shadow-2xl"
+        title={filename}
+      >
+        Your browser can&apos;t play this video.{" "}
+        <a href={url} download={filename} className="underline">
+          Download
+        </a>{" "}
+        it instead.
+      </video>
+    </div>
+  );
+}
+
+function AudioSurface({ filename, url }: { filename: string; url: string }) {
   return (
     <div className="grid h-full place-items-center p-8">
-      <img src={url} alt={filename} className="max-h-full max-w-full object-contain shadow-2xl" />
+      <div className="w-full max-w-xl rounded-2xl border border-app bg-app-surface p-8 text-center shadow-xl">
+        <div className="mx-auto mb-5 grid h-20 w-20 place-items-center rounded-full bg-cyan-500/15 text-cyan-300">
+          <Music className="h-9 w-9" />
+        </div>
+        <div className="mb-5 truncate text-sm font-medium text-app" title={filename}>
+          {filename}
+        </div>
+        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+        <audio src={url} controls autoPlay className="w-full">
+          Your browser can&apos;t play this audio file.
+        </audio>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Fullscreen slideshow for decks and PDFs. Slides come from the same
+ * `parseSlides` the SlidesEditor uses; PDF pages render one-at-a-time via
+ * pdf.js sized to fit the screen. Arrow keys / Space / click-zones advance,
+ * Escape exits. We also request the browser Fullscreen API for a true
+ * edge-to-edge present, and mirror its teardown on unmount.
+ */
+function PresentOverlay({
+  surface,
+  content,
+  url,
+  filename,
+  onClose,
+}: {
+  surface: "slides" | "pdf";
+  content: string;
+  url: string | null;
+  filename: string;
+  onClose: () => void;
+}) {
+  const slides = useMemo(
+    () => (surface === "slides" ? parseSlides(content) : []),
+    [surface, content],
+  );
+  const [index, setIndex] = useState(0);
+  const [pageCount, setPageCount] = useState(0);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const docRef = useRef<{ getPage: (n: number) => Promise<unknown>; numPages: number; destroy: () => void } | null>(null);
+
+  const total = surface === "slides" ? Math.max(1, slides.length) : Math.max(1, pageCount);
+  const next = useCallback(() => setIndex((i) => Math.min(total - 1, i + 1)), [total]);
+  const prev = useCallback(() => setIndex((i) => Math.max(0, i - 1)), []);
+
+  // Browser fullscreen + keyboard navigation.
+  useEffect(() => {
+    void rootRef.current?.requestFullscreen?.().catch(() => {});
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") {
+        e.preventDefault();
+        next();
+      } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
+        e.preventDefault();
+        prev();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      if (window.document.fullscreenElement) void window.document.exitFullscreen().catch(() => {});
+    };
+  }, [next, prev, onClose]);
+
+  // PDF: load the document once.
+  useEffect(() => {
+    if (surface !== "pdf" || !url) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const pdfjs = await import("pdfjs-dist");
+        const workerUrl = (await import(
+          "pdfjs-dist/build/pdf.worker.mjs?url"
+        )) as { default: string };
+        pdfjs.GlobalWorkerOptions.workerSrc = workerUrl.default;
+        const doc = await pdfjs.getDocument({ url }).promise;
+        if (cancelled) {
+          doc.destroy();
+          return;
+        }
+        docRef.current = doc as unknown as typeof docRef.current;
+        setPageCount(doc.numPages);
+      } catch {
+        /* ignore — overlay just shows an empty stage */
+      }
+    })();
+    return () => {
+      cancelled = true;
+      docRef.current?.destroy();
+      docRef.current = null;
+    };
+  }, [surface, url]);
+
+  // PDF: render the current page to fit the viewport.
+  useEffect(() => {
+    if (surface !== "pdf") return;
+    const doc = docRef.current;
+    const canvas = canvasRef.current;
+    if (!doc || !canvas) return;
+    let cancelled = false;
+    void (async () => {
+      const page = (await doc.getPage(index + 1)) as {
+        getViewport: (o: { scale: number }) => { width: number; height: number };
+        render: (o: unknown) => { promise: Promise<void> };
+      };
+      if (cancelled) return;
+      const base = page.getViewport({ scale: 1 });
+      const scale = Math.max(
+        0.2,
+        Math.min(window.innerWidth / base.width, (window.innerHeight - 96) / base.height),
+      );
+      const viewport = page.getViewport({ scale });
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [surface, index, pageCount]);
+
+  return (
+    <div ref={rootRef} className="fixed inset-0 z-[120] flex flex-col bg-black text-white">
+      <div className="flex items-center gap-3 px-5 py-2 text-xs text-white/60">
+        <span className="truncate">{filename}</span>
+        <span className="ml-auto tabular-nums">
+          {index + 1} / {total}
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
+          title="Exit (Esc)"
+          className="grid h-7 w-7 place-items-center rounded hover:bg-white/10"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="relative flex min-h-0 flex-1 items-center justify-center px-12 py-6">
+        {surface === "slides" ? (
+          <div className="mx-auto max-w-5xl">
+            <h1 className="mb-8 text-5xl font-bold leading-tight">
+              {slides[index]?.title}
+            </h1>
+            <div className="whitespace-pre-wrap text-2xl leading-relaxed text-white/85">
+              {slides[index]?.body}
+            </div>
+          </div>
+        ) : (
+          <canvas ref={canvasRef} className="max-h-full max-w-full bg-white shadow-2xl" />
+        )}
+
+        {/* Click zones for next/prev. */}
+        <button
+          type="button"
+          onClick={prev}
+          aria-label="Previous"
+          className="absolute inset-y-0 left-0 w-1/4 cursor-w-resize focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={next}
+          aria-label="Next"
+          className="absolute inset-y-0 right-0 w-1/4 cursor-e-resize focus:outline-none"
+        />
+      </div>
+
+      <div className="flex items-center justify-center gap-4 pb-5">
+        <button
+          type="button"
+          onClick={prev}
+          disabled={index === 0}
+          className="grid h-10 w-10 place-items-center rounded-full bg-white/10 hover:bg-white/20 disabled:opacity-30"
+        >
+          <ChevronLeft className="h-5 w-5" />
+        </button>
+        <button
+          type="button"
+          onClick={next}
+          disabled={index >= total - 1}
+          className="grid h-10 w-10 place-items-center rounded-full bg-white/10 hover:bg-white/20 disabled:opacity-30"
+        >
+          <ChevronRight className="h-5 w-5" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -854,6 +1319,8 @@ function getSurfaceKind(file: StoredFile | null, doc: EditableFileContent | null
   const lower = file.filename.toLowerCase();
   if (file.mimeType.startsWith("image/")) return "image";
   if (file.mimeType === "application/pdf" || lower.endsWith(".pdf")) return "pdf";
+  if (file.mimeType.startsWith("video/") || /\.(mp4|webm|mov|m4v|ogv|mkv)$/i.test(lower)) return "video";
+  if (file.mimeType.startsWith("audio/") || /\.(mp3|wav|ogg|oga|m4a|aac|flac)$/i.test(lower)) return "audio";
   if (doc?.format === "xlsx" || /\.(xlsx|xls|csv|tsv)$/i.test(lower)) return "sheet";
   if (doc?.format === "pptx" || lower.endsWith(".pptx")) return "slides";
   if (doc?.format === "docx" || /\.(docx|rtf)$/i.test(lower)) return "document";
@@ -944,4 +1411,39 @@ function parseSlides(text: string): SlideDraft[] {
 
 function serializeSlides(slides: SlideDraft[]) {
   return slides.map((slide) => `${slide.title}\n${slide.body}`.trim()).join("\n\n--- slide ---\n\n");
+}
+
+/**
+ * Derive a document title from the first non-empty line of its content.
+ * The content may be HTML (TipTap output) or plain text; either way we
+ * pull the first visible line, collapse whitespace, and cap the length so
+ * the tab/sidebar stay readable. Returns "" when there's nothing usable
+ * yet (so the caller can leave the existing title alone).
+ */
+function deriveTitleFromContent(raw: string): string {
+  if (!raw) return "";
+  let text = raw;
+  if (/<[a-z][\s\S]*>/i.test(raw)) {
+    // Turn block boundaries into newlines before stripping tags so the
+    // "first line" matches the first paragraph/heading, not the whole doc.
+    text = raw
+      .replace(/<\/(p|div|h[1-6]|li|tr|blockquote)>/gi, "\n")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<[^>]+>/g, "");
+    // Decode the handful of entities our serializer emits.
+    text = text
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'");
+  }
+  const firstLine = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  if (!firstLine) return "";
+  const collapsed = firstLine.replace(/\s+/g, " ").trim();
+  return collapsed.length > 80 ? `${collapsed.slice(0, 80).trim()}…` : collapsed;
 }

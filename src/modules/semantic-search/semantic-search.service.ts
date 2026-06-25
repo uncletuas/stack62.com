@@ -159,7 +159,12 @@ export class SemanticSearchService implements OnModuleInit {
         score: number;
       }>;
 
-      return await this.filterByFolderAccess(rows, actorUserId, opts.folderId, limit);
+      return await this.filterByFolderAccess(
+        rows,
+        actorUserId,
+        opts.folderId,
+        limit,
+      );
     }
 
     // Fallback path: load all chunks for the org and cosine-score in JS.
@@ -181,7 +186,12 @@ export class SemanticSearchService implements OnModuleInit {
       .sort((a, b) => b.score - a.score)
       .slice(0, limit * 3);
 
-    return await this.filterByFolderAccess(scored, actorUserId, opts.folderId, limit);
+    return await this.filterByFolderAccess(
+      scored,
+      actorUserId,
+      opts.folderId,
+      limit,
+    );
   }
 
   // ── Bootstrap ─────────────────────────────────────────────────────────
@@ -258,7 +268,10 @@ export class SemanticSearchService implements OnModuleInit {
 
 /** Greedy chunker: split on paragraph boundaries up to ~`approxTokens` words. */
 function chunkText(text: string, approxTokens: number): string[] {
-  const paragraphs = text.split(/\n{2,}|\r\n\r\n/g).map((p) => p.trim()).filter(Boolean);
+  const paragraphs = text
+    .split(/\n{2,}|\r\n\r\n/g)
+    .map((p) => p.trim())
+    .filter(Boolean);
   const chunks: string[] = [];
   let current = '';
   let currentLen = 0;

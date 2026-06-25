@@ -18,6 +18,7 @@ export type ActivityKey =
   | "templates"
   | "tools"
   | "teams"
+  | "browser"
   | "settings";
 
 export type EditorKind =
@@ -38,8 +39,10 @@ export type EditorKind =
   | "job"
   | "templates"
   | "tools"
+  | "email-inbox"
   | "teams"
   | "files-explorer"
+  | "browser"
   | "room"
   | "streaming-doc"
   | "meeting-bot"

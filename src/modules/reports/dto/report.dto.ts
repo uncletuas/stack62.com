@@ -1,4 +1,10 @@
-import { IsObject, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import {
+  IsObject,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+} from 'class-validator';
 
 export class ListReportsDto {
   @IsOptional()

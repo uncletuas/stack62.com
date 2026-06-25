@@ -1,6 +1,7 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { resolvePostgres, resolveRedis } from './config/connection-urls';
 import { validateEnv } from './config/env.schema';
@@ -12,6 +13,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 @Module({
   imports: [
     AccessControlModule,
+    EventEmitterModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true,
       cache: true,

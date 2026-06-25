@@ -163,9 +163,11 @@ describe('CoworkerRuntimeService', () => {
         }),
       } as never,
       {
-        generate: jest.fn().mockImplementation(
-          () => new Promise((resolve) => setTimeout(resolve, 20)),
-        ),
+        generate: jest
+          .fn()
+          .mockImplementation(
+            () => new Promise((resolve) => setTimeout(resolve, 20)),
+          ),
       } as never,
       {
         deploy: jest.fn(),

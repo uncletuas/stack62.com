@@ -66,7 +66,8 @@ Coworker can see what's in front of you.
 - **Google Workspace** — Gmail / Calendar / Drive / Docs. Enables
   the `calendar.list_events` and `calendar.create_event` Coworker
   tools.
-- **Slack** — bridges your team channels to Stack62 rooms.
+- **WhatsApp** — link a device so the Coworker can read and reply to
+  customer messages from the chat area.
 - **Resend** — outbound email. Required for the password-reset and
   email-verification flows.
 

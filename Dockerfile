@@ -27,6 +27,11 @@ ENV PORT=3000
 COPY package*.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
+# In-app web browser: install Chromium + its system libraries so Playwright
+# can launch a headless browser at runtime. Adds ~300MB to the image and the
+# service needs >=512MB RAM. Set BROWSER_ENABLED=false to skip using it.
+RUN npx playwright install --with-deps chromium
+
 # Compiled JS + migrations + the few static configs we need at runtime.
 COPY --from=builder /usr/src/app/dist ./dist
 

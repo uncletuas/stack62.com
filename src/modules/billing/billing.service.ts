@@ -141,7 +141,10 @@ export class BillingService implements OnModuleInit {
     if (input.targetTier === 'enterprise') {
       // Enterprise is sales-led — return a contact link instead of a
       // Checkout URL. The frontend handles this branch.
-      return { checkoutUrl: 'mailto:sales@stack62.com', status: 'contact_sales' };
+      return {
+        checkoutUrl: 'mailto:sales@stack62.com',
+        status: 'contact_sales',
+      };
     }
 
     // TODO(stripe): replace this dev-only path with a real Stripe
@@ -181,8 +184,7 @@ export class BillingService implements OnModuleInit {
     sub.status = 'active';
     sub.currentPeriodStart = new Date();
     sub.currentPeriodEnd = new Date(
-      Date.now() +
-        (interval === 'yearly' ? 365 : 30) * 24 * 60 * 60 * 1000,
+      Date.now() + (interval === 'yearly' ? 365 : 30) * 24 * 60 * 60 * 1000,
     );
     sub.cancelAtPeriodEnd = false;
     await this.subscriptionsRepo.save(sub);
@@ -288,6 +290,12 @@ export class BillingService implements OnModuleInit {
         where: { tier: seed.tier },
       });
       if (existing) {
+        // Once an operator edits a plan from the admin console we stop
+        // overwriting it from SEED_PLANS, so their price/limit changes survive
+        // the next deploy. Untouched plans still track the seed catalog.
+        if (existing.customizedAt) {
+          continue;
+        }
         // Update the catalog every boot so changes here propagate without
         // a manual migration. Stripe price IDs are preserved when set by
         // the operator.

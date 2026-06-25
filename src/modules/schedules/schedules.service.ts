@@ -115,18 +115,21 @@ export class SchedulesService {
     schedule.kind = payload.kind ?? schedule.kind;
     schedule.status = payload.status ?? schedule.status;
     schedule.startsAt = payload.startsAt ?? schedule.startsAt;
-    schedule.endsAt =
-      Object.prototype.hasOwnProperty.call(payload, 'endsAt')
-        ? (payload.endsAt ?? null)
-        : schedule.endsAt;
-    schedule.recurrenceRule =
-      Object.prototype.hasOwnProperty.call(payload, 'recurrenceRule')
-        ? (payload.recurrenceRule ?? null)
-        : schedule.recurrenceRule;
-    schedule.metadata =
-      Object.prototype.hasOwnProperty.call(payload, 'metadata')
-        ? (payload.metadata ?? null)
-        : schedule.metadata;
+    schedule.endsAt = Object.prototype.hasOwnProperty.call(payload, 'endsAt')
+      ? (payload.endsAt ?? null)
+      : schedule.endsAt;
+    schedule.recurrenceRule = Object.prototype.hasOwnProperty.call(
+      payload,
+      'recurrenceRule',
+    )
+      ? (payload.recurrenceRule ?? null)
+      : schedule.recurrenceRule;
+    schedule.metadata = Object.prototype.hasOwnProperty.call(
+      payload,
+      'metadata',
+    )
+      ? (payload.metadata ?? null)
+      : schedule.metadata;
 
     const updatedSchedule = await this.schedulesRepository.save(schedule);
 

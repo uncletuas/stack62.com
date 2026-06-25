@@ -174,3 +174,96 @@ export async function apiRequest<T = unknown>(
 
   return data as T;
 }
+
+// ── In-app web browser ─────────────────────────────────────────────
+
+export interface BrowserPageState {
+  url: string;
+  title: string;
+}
+
+export interface BrowserSearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+export interface BrowserPageContent {
+  url: string;
+  title: string;
+  text: string;
+  links: Array<{ text: string; url: string }>;
+}
+
+export type BrowserActionInput =
+  | { type: 'click'; x: number; y: number }
+  | { type: 'type'; text: string }
+  | { type: 'key'; key: string }
+  | { type: 'scroll'; deltaY: number }
+  | { type: 'back' }
+  | { type: 'forward' }
+  | { type: 'reload' };
+
+function browserScope() {
+  return {
+    organizationId: getStoredOrganizationId() ?? '',
+    workspaceId: getStoredWorkspaceId() ?? undefined,
+  };
+}
+
+export function browserNavigate(url: string) {
+  return apiRequest<BrowserPageState>('/browser/navigate', {
+    method: 'POST',
+    body: { ...browserScope(), url },
+  });
+}
+
+export function browserSearch(query: string, engine?: string) {
+  return apiRequest<{ results: BrowserSearchResult[]; state: BrowserPageState }>(
+    '/browser/search',
+    { method: 'POST', body: { ...browserScope(), query, engine } },
+  );
+}
+
+export function browserAction(action: BrowserActionInput) {
+  return apiRequest<BrowserPageState>('/browser/action', {
+    method: 'POST',
+    body: { ...browserScope(), ...action },
+  });
+}
+
+export function browserContent() {
+  return apiRequest<BrowserPageContent>('/browser/content', {
+    method: 'GET',
+    query: browserScope(),
+  });
+}
+
+/**
+ * Fetch the current screenshot of the workspace browser session as a Blob.
+ * We fetch (with the auth header) rather than pointing an <img src> at the
+ * endpoint, because an <img> can't carry the Bearer token. Callers turn the
+ * blob into an object URL for display and revoke the previous one.
+ */
+export async function browserScreenshot(signal?: AbortSignal): Promise<Blob> {
+  const scope = browserScope();
+  const headers = new Headers();
+  const token = getStoredToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const response = await fetch(
+    buildUrl('/browser/screenshot', {
+      organizationId: scope.organizationId,
+      workspaceId: scope.workspaceId,
+    }),
+    { headers, signal },
+  );
+  if (!response.ok) {
+    const data = await parseResponse(response).catch(() => null);
+    throw new ApiError(
+      extractErrorMessage(data, `HTTP ${response.status}`),
+      response.status,
+      data,
+    );
+  }
+  return response.blob();
+}

@@ -81,7 +81,8 @@ export class CoworkerChatService {
     return rows.map((row) => ({
       conversationId: row.conversationId,
       messageCount: Number(row.count),
-      lastAt: row.lastAt instanceof Date ? row.lastAt.toISOString() : row.lastAt,
+      lastAt:
+        row.lastAt instanceof Date ? row.lastAt.toISOString() : row.lastAt,
       title: this.deriveTitle(row.conversationId, row.firstUserMessage),
     }));
   }
@@ -164,7 +165,9 @@ export class CoworkerChatService {
       })
     )
       .reverse()
-      .filter((message) => message.role === 'user' || message.role === 'assistant')
+      .filter(
+        (message) => message.role === 'user' || message.role === 'assistant',
+      )
       .map((message) => ({
         role: message.role as 'user' | 'assistant',
         content: message.content,

@@ -18,7 +18,7 @@ body:
         - Documents
         - Billing
         - Auth / Permissions
-        - Integrations (Slack, WhatsApp, etc.)
+        - Integrations (WhatsApp, Google, etc.)
         - Meeting Bot
         - Frontend UI
         - Deployment / Infra

@@ -10,6 +10,7 @@ import { AccessControlService } from '../../shared/access-control/access-control
 import { ActivityService } from '../activity/activity.service';
 import { UsersService } from '../users/users.service';
 import { AcceptInviteDto } from './dto/accept-invite.dto';
+import { BulkInviteMembersDto } from './dto/bulk-invite-members.dto';
 import { CreateMembershipDto } from './dto/create-membership.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
 import { ListMembershipsDto } from './dto/list-memberships.dto';
@@ -139,6 +140,98 @@ export class MembershipsService {
     };
   }
 
+  /**
+   * Invite many teammates in one shot. Each email is processed
+   * independently and reported back so the UI can show exactly which
+   * ones went out, which were already members, and which failed.
+   */
+  async bulkInvite(payload: BulkInviteMembersDto, actorUserId: string) {
+    await this.accessControlService.assertResolvedAccess(actorUserId, {
+      resource: 'membership',
+      action: 'manage_memberships',
+      organizationId: payload.organizationId,
+      workspaceId: payload.workspaceId,
+    });
+
+    // De-dupe + normalise so "A@x.com" and "a@x.com " collapse.
+    const emails = Array.from(
+      new Set(
+        payload.emails.map((e) => e.trim().toLowerCase()).filter(Boolean),
+      ),
+    );
+
+    const results: Array<{
+      email: string;
+      status: 'invited' | 'added' | 'failed';
+      message?: string;
+    }> = [];
+
+    for (const email of emails) {
+      try {
+        const outcome = await this.inviteMember(
+          {
+            organizationId: payload.organizationId,
+            workspaceId: payload.workspaceId,
+            email,
+            role: payload.role,
+          },
+          actorUserId,
+        );
+        results.push({
+          email,
+          // membership set => existing user added directly; invite => emailed link.
+          status: outcome.membership ? 'added' : 'invited',
+        });
+      } catch (err) {
+        results.push({
+          email,
+          status: 'failed',
+          message: err instanceof Error ? err.message : 'Invite failed.',
+        });
+      }
+    }
+
+    const invited = results.filter((r) => r.status === 'invited').length;
+    const added = results.filter((r) => r.status === 'added').length;
+    const failed = results.filter((r) => r.status === 'failed').length;
+
+    return {
+      results,
+      summary: { invited, added, failed, total: emails.length },
+    };
+  }
+
+  /** Cancel a still-pending invite so it can no longer be accepted. */
+  async revokeInvite(inviteId: string, actorUserId: string) {
+    const invite = await this.invitesRepository.findOne({
+      where: { id: inviteId },
+    });
+    if (!invite) throw new NotFoundException('Invite not found.');
+
+    await this.accessControlService.assertResolvedAccess(actorUserId, {
+      resource: 'membership',
+      action: 'manage_memberships',
+      organizationId: invite.organizationId,
+      workspaceId: invite.workspaceId ?? undefined,
+    });
+
+    invite.status = 'revoked';
+    await this.invitesRepository.save(invite);
+
+    await this.activityService.log({
+      organizationId: invite.organizationId,
+      workspaceId: invite.workspaceId,
+      actorUserId,
+      action: 'membership.invite_revoke',
+      targetType: 'org_invite',
+      targetId: invite.id,
+      origin: 'user',
+      metadata: { email: invite.email },
+    });
+
+    return { id: invite.id, status: invite.status };
+  }
+
   async acceptInvite(payload: AcceptInviteDto, actorUserId: string) {
     const invite = await this.invitesRepository.findOne({
       where: { token: payload.token, status: 'pending' },
@@ -263,15 +356,9 @@ export class MembershipsService {
     if (memberships.length === 0) return [];
     const userIds = Array.from(new Set(memberships.map((m) => m.userId)));
     const users = await Promise.all(
-      userIds.map((id) =>
-        this.usersService
-          .findById(id)
-          .catch(() => null),
-      ),
+      userIds.map((id) => this.usersService.findById(id).catch(() => null)),
     );
-    const byId = new Map(
-      users.filter((u) => u != null).map((u) => [u!.id, u!]),
-    );
+    const byId = new Map(users.filter((u) => u != null).map((u) => [u.id, u]));
     return memberships.map((m) => {
       const u = byId.get(m.userId);
       return {

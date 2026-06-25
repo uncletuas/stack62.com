@@ -126,7 +126,10 @@ export class AccountVerificationController {
       to: user.email,
       subject: 'Reset your Stack62 password',
       text: `Hi ${user.firstName},\n\nReset your password by visiting:\n${appUrl}/reset-password?token=${token}\n\nThe link expires in 1 hour. If you didn't request this, you can safely ignore this email.`,
-      html: resetHtml(user.firstName, `${appUrl}/reset-password?token=${token}`),
+      html: resetHtml(
+        user.firstName,
+        `${appUrl}/reset-password?token=${token}`,
+      ),
     });
 
     await this.activity.log({
@@ -218,16 +221,12 @@ export class AccountVerificationController {
 
   @Public()
   @Post('reset-password')
-  async resetPassword(
-    @Body() body: { token: string; password: string },
-  ) {
+  async resetPassword(@Body() body: { token: string; password: string }) {
     if (!body.token || !body.password) {
       throw new BadRequestException('Token and password required.');
     }
     if (body.password.length < 8) {
-      throw new BadRequestException(
-        'Password must be at least 8 characters.',
-      );
+      throw new BadRequestException('Password must be at least 8 characters.');
     }
     const user = await this.usersRepo.findOne({
       where: { passwordResetToken: body.token },

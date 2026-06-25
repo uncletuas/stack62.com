@@ -71,13 +71,19 @@ export class ReportsService {
         workspaceId: filters.workspaceId,
       },
     );
-    if (filters.systemId) qb.andWhere('report.systemId = :systemId', { systemId: filters.systemId });
-    if (filters.status) qb.andWhere('report.status = :status', { status: filters.status });
+    if (filters.systemId)
+      qb.andWhere('report.systemId = :systemId', {
+        systemId: filters.systemId,
+      });
+    if (filters.status)
+      qb.andWhere('report.status = :status', { status: filters.status });
     return qb.orderBy('report.createdAt', 'DESC').take(200).getMany();
   }
 
   async findOne(reportId: string, actorUserId: string) {
-    const report = await this.reportsRepository.findOne({ where: { id: reportId } });
+    const report = await this.reportsRepository.findOne({
+      where: { id: reportId },
+    });
     if (!report) throw new NotFoundException('Report not found.');
     await this.accessControlService.assertResolvedAccess(actorUserId, {
       resource: 'report',
@@ -121,7 +127,11 @@ export class ReportsService {
     return report;
   }
 
-  async update(reportId: string, payload: UpdateReportDto, actorUserId: string) {
+  async update(
+    reportId: string,
+    payload: UpdateReportDto,
+    actorUserId: string,
+  ) {
     const report = await this.findOne(reportId, actorUserId);
     await this.accessControlService.assertResolvedAccess(actorUserId, {
       resource: 'report',
@@ -200,23 +210,39 @@ export class ReportsService {
     };
     const tasks =
       payload.sourceType === 'tasks' || payload.sourceType === 'mixed'
-        ? await this.tasksRepository.find({ where, take: 500, order: { updatedAt: 'DESC' } })
+        ? await this.tasksRepository.find({
+            where,
+            take: 500,
+            order: { updatedAt: 'DESC' },
+          })
         : [];
     const records =
       payload.sourceType === 'records' || payload.sourceType === 'mixed'
-        ? await this.recordsRepository.find({ where, take: 500, order: { updatedAt: 'DESC' } })
+        ? await this.recordsRepository.find({
+            where,
+            take: 500,
+            order: { updatedAt: 'DESC' },
+          })
         : [];
     const activity =
       payload.sourceType === 'activity' || payload.sourceType === 'mixed'
-        ? await this.activityRepository.find({ where, take: 500, order: { createdAt: 'DESC' } })
+        ? await this.activityRepository.find({
+            where,
+            take: 500,
+            order: { createdAt: 'DESC' },
+          })
         : [];
     return {
       counts: {
         tasks: tasks.length,
         records: records.length,
         activity: activity.length,
-        completedTasks: tasks.filter((t) => ['done', 'completed'].includes(t.status)).length,
-        openTasks: tasks.filter((t) => !['done', 'completed', 'cancelled'].includes(t.status)).length,
+        completedTasks: tasks.filter((t) =>
+          ['done', 'completed'].includes(t.status),
+        ).length,
+        openTasks: tasks.filter(
+          (t) => !['done', 'completed', 'cancelled'].includes(t.status),
+        ).length,
       },
       tasks: tasks.slice(0, 50),
       records: records.slice(0, 50),

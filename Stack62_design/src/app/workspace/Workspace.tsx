@@ -5,6 +5,7 @@ import { CoworkerRail } from "./CoworkerRail";
 import { EditorSurface } from "./editors";
 import { SettingsDialog } from "./editors/SettingsEditor";
 import { EmailComposer } from "./EmailComposer";
+import { EmailConnectDialog } from "./EmailConnectDialog";
 import { Sidebar } from "./Sidebar";
 import { StatusBar } from "./StatusBar";
 import { TabBar } from "./TabBar";
@@ -75,9 +76,21 @@ function useDashboardPoll(intervalMs = 30_000) {
   return dashboard;
 }
 
+/** Open the Email inbox tab when something dispatches `stack62:open-email-inbox`. */
+function useEmailInboxOpener() {
+  const { navigate } = useWorkspace();
+  useEffect(() => {
+    const handler = () => navigate({ kind: "email-inbox", title: "Email" });
+    window.addEventListener("stack62:open-email-inbox", handler);
+    return () =>
+      window.removeEventListener("stack62:open-email-inbox", handler);
+  }, [navigate]);
+}
+
 function Inner() {
   useGlobalShortcuts();
   useDocumentFocusMode();
+  useEmailInboxOpener();
   const composer = useEmailComposer();
   const dashboard = useDashboardPoll();
   const pendingDecisions =
@@ -105,7 +118,9 @@ function Inner() {
         initialTo={composer.initial.to}
         initialSubject={composer.initial.subject}
         initialBody={composer.initial.body}
+        initialAttachmentFileIds={composer.initial.attachmentFileIds}
       />
+      <EmailConnectDialog />
       <SettingsDialog />
       <AppDialogHost />
     </div>
@@ -114,18 +129,25 @@ function Inner() {
 
 function useEmailComposer() {
   const [open, setOpen] = useState(false);
-  const [initial, setInitial] = useState({ to: "", subject: "", body: "" });
+  const [initial, setInitial] = useState<{
+    to: string;
+    subject: string;
+    body: string;
+    attachmentFileIds: string[];
+  }>({ to: "", subject: "", body: "", attachmentFileIds: [] });
   useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{
         to?: string;
         subject?: string;
         body?: string;
+        attachmentFileIds?: string[];
       }>).detail ?? {};
       setInitial({
         to: detail.to ?? "",
         subject: detail.subject ?? "",
         body: detail.body ?? "",
+        attachmentFileIds: detail.attachmentFileIds ?? [],
       });
       setOpen(true);
     };

@@ -17,11 +17,15 @@ import { MeetingBotModule } from '../meeting-bot/meeting-bot.module';
 import { SchedulesModule } from '../schedules/schedules.module';
 import { RunnerModule } from '../runner/runner.module';
 import { SemanticSearchModule } from '../semantic-search/semantic-search.module';
+import { OrgIntelligenceModule } from '../org-intelligence/org-intelligence.module';
 import { SystemsModule } from '../systems/systems.module';
+import { BrowserModule } from '../browser/browser.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { WorkflowsModule } from '../workflows/workflows.module';
 import { WorkspaceStateModule } from '../workspace-state/workspace-state.module';
 import { AnthropicClient } from './anthropic.client';
+import { OpenAiAdapter } from './llm/openai.adapter';
+import { LlmService } from './llm/llm.service';
 import { ToolCallLogEntity } from './entities/tool-call-log.entity';
 import { EngineController } from './engine.controller';
 import { EngineRuntimeService } from './engine-runtime.service';
@@ -44,9 +48,12 @@ import { PlanTools } from './tools/plan.tools';
 import { RunnerTools } from './tools/runner.tools';
 import { SchedulesTools } from './tools/schedules.tools';
 import { SystemTools } from './tools/system.tools';
+import { WebBrowsingTools } from './tools/web-browsing.tools';
 import { ToolRegistry } from './tools/registry';
 import { WorkspaceTools } from './tools/workspace.tools';
 import { CoworkerRuntimeService } from './coworker-runtime.service';
+import { WhatsAppResponderService } from './whatsapp-responder.service';
+import { EmailResponderService } from './email-responder.service';
 
 @Module({
   imports: [
@@ -64,6 +71,7 @@ import { CoworkerRuntimeService } from './coworker-runtime.service';
     FileSharingModule,
     RoomsModule,
     SemanticSearchModule,
+    OrgIntelligenceModule,
     IntegrationsModule,
     RunnerModule,
     AiModule,
@@ -71,11 +79,14 @@ import { CoworkerRuntimeService } from './coworker-runtime.service';
     AuditModule,
     OrganizationsModule,
     WorkspaceStateModule,
+    BrowserModule,
     forwardRef(() => CoworkerModule),
   ],
   controllers: [EngineController],
   providers: [
     AnthropicClient,
+    OpenAiAdapter,
+    LlmService,
     OllamaClient,
     IntentClassifierService,
     WorkspaceTools,
@@ -95,10 +106,13 @@ import { CoworkerRuntimeService } from './coworker-runtime.service';
     MeetingsTools,
     OfficeTools,
     SchedulesTools,
+    WebBrowsingTools,
     EngineRuntimeService,
     ToolRegistry,
     CoworkerRuntimeService,
     EngineService,
+    WhatsAppResponderService,
+    EmailResponderService,
   ],
   exports: [
     EngineService,
@@ -106,6 +120,8 @@ import { CoworkerRuntimeService } from './coworker-runtime.service';
     ToolRegistry,
     CoworkerRuntimeService,
     IntentClassifierService,
+    LlmService,
+    OllamaClient,
   ],
 })
 export class EngineModule {}

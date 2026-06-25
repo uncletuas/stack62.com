@@ -1,0 +1,4 @@
+# Never commit secrets, keys, or local launch state.
+.env.aws
+.state
+*.pem

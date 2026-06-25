@@ -27,7 +27,9 @@ export class AddCoworkerMemories1810000000001 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_coworker_memories_scope"`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "IDX_coworker_memories_scope"`,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS "coworker_memories"`);
   }
 }

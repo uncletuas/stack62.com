@@ -34,4 +34,10 @@ export class SendEmailDto {
   @IsOptional()
   @IsObject()
   metadata?: Record<string, unknown>;
+
+  /** Stored file ids to attach to the email. */
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  attachmentFileIds?: string[];
 }

@@ -6,7 +6,9 @@ describe('RecordsService product collections', () => {
   const organizationId = '447d8d35-53ca-4aba-b1a2-385d699bfeee';
   const workspaceId = '912943f5-1589-4635-8250-f6c62d0dd248';
 
-  function repo<T extends { id?: string }>(seed: T[] = []) {
+  function repo<
+    T extends { id?: string } = Record<string, unknown> & { id?: string },
+  >(seed: T[] = []) {
     const rows = [...seed];
     return {
       create: jest.fn((value) => value),
@@ -15,12 +17,13 @@ describe('RecordsService product collections', () => {
         rows.push(row);
         return row;
       }),
-      findOne: jest.fn(async ({ where }: { where: Partial<T> }) =>
-        rows.find((row) =>
-          Object.entries(where).every(
-            ([key, value]) => row[key as keyof T] === value,
-          ),
-        ) ?? null,
+      findOne: jest.fn(
+        async ({ where }: { where: Partial<T> }) =>
+          rows.find((row) =>
+            Object.entries(where).every(
+              ([key, value]) => row[key as keyof T] === value,
+            ),
+          ) ?? null,
       ),
       find: jest.fn(async ({ where }: { where?: Partial<T> } = {}) =>
         where

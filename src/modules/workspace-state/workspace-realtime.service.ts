@@ -9,6 +9,7 @@ import {
   type onStoreDocumentPayload,
 } from '@hocuspocus/server';
 import * as Y from 'yjs';
+import { WebSocketServer } from 'ws';
 import type { Server as HttpServer } from 'node:http';
 import { WorkspaceStateService } from './workspace-state.service';
 
@@ -51,6 +52,7 @@ import { WorkspaceStateService } from './workspace-state.service';
 export class WorkspaceRealtimeService implements OnModuleDestroy {
   private readonly logger = new Logger(WorkspaceRealtimeService.name);
   private server: Hocuspocus | null = null;
+  private wss: WebSocketServer | null = null;
 
   constructor(
     private readonly state: WorkspaceStateService,
@@ -104,10 +106,7 @@ export class WorkspaceRealtimeService implements OnModuleDestroy {
         const ctx = data.context as { userId?: string };
         if (!ctx?.userId) throw new Error('Connection has no userId.');
         try {
-          const { bytes } = await this.state.readBinaryState(
-            docId,
-            ctx.userId,
-          );
+          const { bytes } = await this.state.readBinaryState(docId, ctx.userId);
           const ydoc = new Y.Doc();
           if (bytes && bytes.length > 0) {
             Y.applyUpdate(ydoc, new Uint8Array(bytes));
@@ -141,29 +140,44 @@ export class WorkspaceRealtimeService implements OnModuleDestroy {
       },
     });
 
-    // Hocuspocus listens via its own listen() under the hood. We
-    // hook into the existing HTTP server's `upgrade` event so the
-    // websocket handshake happens on the same port + origin as the
-    // REST API. Path-scoped to `/v1/realtime/workspace` so the rest
-    // of Stack62 (e.g. future MCP websockets) can claim other paths.
+    // Hocuspocus's `handleConnection` expects an *already upgraded*
+    // `ws` WebSocket — not the raw TCP socket the HTTP `upgrade` event
+    // hands us. Passing the raw socket skips the handshake entirely:
+    // the browser never receives a 101 Switching Protocols (so the
+    // editor sits on "connecting") and Hocuspocus crashes the process
+    // when it tries to drive a net.Socket as if it were a WebSocket.
+    //
+    // Run the handshake ourselves with a `noServer` WebSocketServer,
+    // then forward the upgraded socket to Hocuspocus. We still hook the
+    // existing HTTP server's `upgrade` event so the websocket lives on
+    // the same port + origin as the REST API, path-scoped to
+    // `/v1/realtime/workspace` so other paths stay free.
+    this.wss = new WebSocketServer({ noServer: true });
+
     httpServer.on('upgrade', (request, socket, head) => {
       if (!request.url) return;
       // Match exactly /v1/realtime/workspace plus optional trailing slash.
       const url = new URL(request.url, 'http://placeholder');
       if (
-        url.pathname === '/v1/realtime/workspace' ||
-        url.pathname === '/v1/realtime/workspace/'
+        url.pathname !== '/v1/realtime/workspace' &&
+        url.pathname !== '/v1/realtime/workspace/'
       ) {
-        this.server?.handleConnection(socket, request, {});
+        // Not ours — leave the socket for any other upgrade handler.
+        return;
       }
+      this.wss?.handleUpgrade(request, socket, head, (ws) => {
+        this.server?.handleConnection(ws, request, {});
+      });
     });
 
-    this.logger.log(
-      'Hocuspocus attached at /v1/realtime/workspace',
-    );
+    this.logger.log('Hocuspocus attached at /v1/realtime/workspace');
   }
 
   async onModuleDestroy(): Promise<void> {
+    if (this.wss) {
+      this.wss.close();
+      this.wss = null;
+    }
     if (this.server) {
       await this.server.destroy().catch(() => undefined);
       this.server = null;

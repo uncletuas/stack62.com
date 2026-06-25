@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AccessControlModule } from '../../shared/access-control/access-control.module';
 import { ActivityModule } from '../activity/activity.module';
+import { AiModule } from '../ai/ai.module';
 import { WorkspaceActionLogEntity } from './entities/workspace-action-log.entity';
 import { WorkspaceDocEntity } from './entities/workspace-doc.entity';
 import { WorkspaceExportService } from './workspace-export.service';
@@ -17,6 +18,7 @@ import { WorkspaceStateService } from './workspace-state.service';
     TypeOrmModule.forFeature([WorkspaceDocEntity, WorkspaceActionLogEntity]),
     AccessControlModule,
     ActivityModule,
+    AiModule,
     // JwtModule registered locally with the same secret as Auth so
     // WorkspaceRealtimeService can verify provider tokens without
     // pulling AuthModule (which would create a forward-ref chain).

@@ -17,7 +17,10 @@ export class DataTools {
         'List business systems in the workspace. Returns id, name, status, and module count for each.',
         {
           properties: {
-            status: { type: 'string', description: 'Optional status filter (e.g. "active").' },
+            status: {
+              type: 'string',
+              description: 'Optional status filter (e.g. "active").',
+            },
           },
         },
         async (input, ctx) => {
@@ -25,7 +28,8 @@ export class DataTools {
             {
               organizationId: ctx.organizationId,
               workspaceId: ctx.workspaceId ?? undefined,
-              status: typeof input.status === 'string' ? input.status : undefined,
+              status:
+                typeof input.status === 'string' ? input.status : undefined,
             },
             ctx.actorUserId,
           );
@@ -52,7 +56,9 @@ export class DataTools {
           required: ['systemId'],
         },
         async (input) => {
-          const detail = await this.systemsService.findOne(String(input.systemId));
+          const detail = await this.systemsService.findOne(
+            String(input.systemId),
+          );
           return {
             output: {
               id: detail.id,
@@ -144,9 +150,17 @@ export class DataTools {
             moduleDefinitionId: { type: 'string' },
             entityDefinitionId: { type: 'string' },
             status: { type: 'string', description: 'Defaults to "active".' },
-            data: { type: 'object', description: 'Field values keyed by field key.' },
+            data: {
+              type: 'object',
+              description: 'Field values keyed by field key.',
+            },
           },
-          required: ['systemId', 'moduleDefinitionId', 'entityDefinitionId', 'data'],
+          required: [
+            'systemId',
+            'moduleDefinitionId',
+            'entityDefinitionId',
+            'data',
+          ],
         },
         async (input, ctx) => {
           if (!ctx.workspaceId)

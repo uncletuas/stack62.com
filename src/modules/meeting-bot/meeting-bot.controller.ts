@@ -11,7 +11,14 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtService } from '@nestjs/jwt';
-import { ArrayMaxSize, IsArray, IsOptional, IsString, IsUrl, IsUUID } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsOptional,
+  IsString,
+  IsUrl,
+  IsUUID,
+} from 'class-validator';
 import { Public } from '../../shared/decorators/public.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtUser } from '../auth/interfaces/jwt-user.interface';
@@ -128,7 +135,8 @@ export class MeetingBotController {
   async workerStatus(
     @Param('id') sessionId: string,
     @Headers('authorization') auth: string,
-    @Body() body: { status: MeetingBotSessionEntity['status']; errorMessage?: string },
+    @Body()
+    body: { status: MeetingBotSessionEntity['status']; errorMessage?: string },
   ) {
     this.verifyWorkerToken(auth, sessionId);
     if (!body.status) throw new BadRequestException('status required.');

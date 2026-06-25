@@ -19,7 +19,7 @@ export class MeetingsTools {
     return [
       tool(
         'meetings.attend',
-        'Send the Coworker bot to attend a Google Meet on the user\'s behalf. The bot joins, captures Meet\'s live captions, and at the end of the call generates a summary + decisions + action items. Only Google Meet URLs (https://meet.google.com/...) are supported.',
+        "Send the Coworker bot to attend a Google Meet on the user's behalf. The bot joins, captures Meet's live captions, and at the end of the call generates a summary + decisions + action items. Only Google Meet URLs (https://meet.google.com/...) are supported.",
         {
           properties: {
             meetingUrl: {
@@ -48,10 +48,8 @@ export class MeetingsTools {
             organizationId: ctx.organizationId,
             workspaceId: ctx.workspaceId,
             meetingUrl: String(input.meetingUrl),
-            title:
-              typeof input.title === 'string' ? input.title : undefined,
-            roomId:
-              typeof input.roomId === 'string' ? input.roomId : undefined,
+            title: typeof input.title === 'string' ? input.title : undefined,
+            roomId: typeof input.roomId === 'string' ? input.roomId : undefined,
             requestedByUserId: ctx.actorUserId,
           });
           return {
@@ -60,8 +58,7 @@ export class MeetingsTools {
               status: session.status,
               meetingUrl: session.meetingUrl,
             },
-            summary:
-              `Bot scheduled to join. You'll see "${session.title || 'the meeting'}" in your meetings list shortly.`,
+            summary: `Bot scheduled to join. You'll see "${session.title || 'the meeting'}" in your meetings list shortly.`,
           };
         },
         { actionLevel: 3, sensitive: true },
@@ -100,11 +97,13 @@ export class MeetingsTools {
           properties: {
             sessionId: {
               type: 'string',
-              description: 'Active meeting session id (status must be in_meeting). Get it from meetings.list_mine.',
+              description:
+                'Active meeting session id (status must be in_meeting). Get it from meetings.list_mine.',
             },
             text: {
               type: 'string',
-              description: 'What the bot should say. Conversational, concise. Under 800 chars.',
+              description:
+                'What the bot should say. Conversational, concise. Under 800 chars.',
             },
           },
           required: ['sessionId', 'text'],
@@ -136,7 +135,8 @@ export class MeetingsTools {
             },
             includeTranscript: {
               type: 'boolean',
-              description: 'When true (default), include the per-line transcript along with the summary.',
+              description:
+                'When true (default), include the per-line transcript along with the summary.',
             },
           },
           required: ['sessionId'],
