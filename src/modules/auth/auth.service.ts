@@ -1,6 +1,8 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
+import * as crypto from 'crypto';
 import { MembershipsService } from '../memberships/memberships.service';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { UsersService } from '../users/users.service';
@@ -19,6 +21,7 @@ export class AuthService {
     private readonly membershipsService: MembershipsService,
     private readonly jwtService: JwtService,
     private readonly activityService: ActivityService,
+    private readonly configService: ConfigService,
   ) {}
 
   async register(payload: RegisterDto): Promise<AuthResponseDto> {
@@ -151,6 +154,69 @@ export class AuthService {
       origin: 'user',
       metadata: { email: user.email },
     });
+
+    return this.buildAuthResponse(user);
+  }
+
+  /**
+   * Single sign-on from loopital.com. Validates the short-lived SSO token with
+   * loopital's IdP, then finds-or-creates a Stack62 user keyed by the loopital
+   * email and issues Stack62's own session — so one loopital account signs into
+   * Stack62. See loopital.com docs/SSO_INTEGRATION.md.
+   */
+  async loopitalSso(token: string): Promise<AuthResponseDto> {
+    const base = this.configService.get<string>(
+      'LOOPITAL_API_BASE',
+      'https://www.loopital.com/api',
+    );
+    let loopitalUser: { id: string; name?: string; email: string } | undefined;
+    try {
+      const res = await fetch(`${base.replace(/\/$/, '')}/sso/exchange`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, product: 'stack62' }),
+      });
+      if (!res.ok) throw new Error('exchange failed');
+      const data = (await res.json()) as {
+        user?: { id: string; name?: string; email: string };
+      };
+      loopitalUser = data.user;
+    } catch {
+      throw new UnauthorizedException('Could not verify your loopital sign-in.');
+    }
+    if (!loopitalUser?.email) {
+      throw new UnauthorizedException('loopital sign-in returned no account.');
+    }
+
+    const email = loopitalUser.email.toLowerCase();
+    let user = await this.usersService.findByEmail(email);
+    if (!user) {
+      const [firstName, ...rest] = (loopitalUser.name ?? '').trim().split(/\s+/);
+      user = await this.usersService.create({
+        email,
+        passwordHash: await argon2.hash(crypto.randomBytes(32).toString('hex')),
+        firstName: firstName || 'Stack62',
+        lastName: rest.join(' ') || 'User',
+      });
+      await this.activityService.log({
+        actorUserId: user.id,
+        action: 'auth.register',
+        targetType: 'user',
+        targetId: user.id,
+        origin: 'user',
+        metadata: { email: user.email, provider: 'loopital' },
+      });
+      await this.bootstrapPersonalOrg(user.id, user.firstName);
+    } else {
+      await this.activityService.log({
+        actorUserId: user.id,
+        action: 'auth.login',
+        targetType: 'user',
+        targetId: user.id,
+        origin: 'user',
+        metadata: { email: user.email, provider: 'loopital' },
+      });
+    }
 
     return this.buildAuthResponse(user);
   }

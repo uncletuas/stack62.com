@@ -15,6 +15,7 @@ import { GoogleOAuthService } from './google-oauth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { GoogleStartDto } from './dto/google-start.dto';
+import { LoopitalSsoDto } from './dto/loopital-sso.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -35,6 +36,17 @@ export class AuthController {
   @Post('login')
   login(@Body() payload: LoginDto) {
     return this.authService.login(payload);
+  }
+
+  /**
+   * Single sign-on from loopital.com. The frontend /sso page posts the
+   * short-lived loopital SSO token here; we validate it with loopital's IdP and
+   * return a Stack62 session so one loopital account signs in.
+   */
+  @Public()
+  @Post('loopital/sso')
+  loopitalSso(@Body() payload: LoopitalSsoDto) {
+    return this.authService.loopitalSso(payload.token);
   }
 
   /**

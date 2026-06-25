@@ -3,6 +3,7 @@ import { OAuthCallbackScreen } from "./components/OAuthCallbackScreen";
 import { AppGate } from "./public/AppGate";
 import { InviteAccept } from "./public/InviteAccept";
 import { LandingPage } from "./public/LandingPage";
+import { LoopitalSso } from "./public/LoopitalSso";
 import { PricingPage } from "./public/PricingPage";
 import { SignIn } from "./public/SignIn";
 import {
@@ -69,6 +70,10 @@ export const router = createBrowserRouter([
   {
     path: "/oauth/callback/:provider",
     Component: OAuthCallbackScreen,
+  },
+  {
+    path: "/sso",
+    Component: LoopitalSso,
   },
   {
     path: "/app/*",
